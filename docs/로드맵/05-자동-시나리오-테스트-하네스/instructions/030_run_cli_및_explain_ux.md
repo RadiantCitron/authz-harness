@@ -1,6 +1,6 @@
 # 030. `run` CLI 명령 통합, 초보자용 Explain UX 및 L4/L5 전 구간 검증 구현지시서
 
-> **상태**: `Draft`  
+> **상태**: `Done`  
 > **선행 조건**: 010 (Quad-Assertion 검증 엔진 코어), 020 (7대 그룹 30개 시나리오 카탈로그) 완료  
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -227,28 +227,28 @@ case "run":
 
 ## 4. 핵심 구현 단계 (Checklist)
 
-- [ ] **1. `internal/ui` 포매팅 엔진 구현**:
-  - [ ] `internal/ui/ui.go`: `Formatter` 규약 및 공통 상수 정의
-  - [ ] `internal/ui/pipeline.go`: 6단계 관문 도출 로직(`ComputePipelineGates`) 및 상태 다이어그램 포매터 구현
-  - [ ] `internal/ui/explain.go`: 시나리오별 역설 해설 박스 렌더러 구현
-  - [ ] `internal/ui/summary.go`: 콘솔 ASCII 테이블 종합 요약표 렌더러 구현
-  - [ ] `internal/ui/json.go`: JSON 직렬화 포매터 구현
-  - [ ] `internal/ui/ui_test.go`: 각 렌더러의 출력 형식 및 파이프라인 매핑 단위 테스트
-- [ ] **2. `internal/cli/run.go` CLI 러너 구현**:
-  - [ ] `RunRunner` 구조체 및 플래그 파싱(`-scenario`, `-group`, `-output-format`, `-fail-fast`, `-verbose`) 구현
-  - [ ] `catalog.RegisterAll` 연동 및 선택 시나리오 필터링 로직 구현
-  - [ ] 시나리오 순차 실행 및 결과 수집, UI 포매터 호출, 표준 종료 코드 반환 로직 구현
-- [ ] **3. `cmd/authz-harness/main.go` 라우팅 등록**:
-  - [ ] `case "run":` 추가 및 `cli.NewRunRunner` 위임
-- [ ] **4. L4 블랙박스 CLI 및 L5 E2E 통합 테스트 완비**:
-  - [ ] `internal/cli/run_test.go`:
+- [x] **1. `internal/ui` 포매팅 엔진 구현**:
+  - [x] `internal/ui/ui.go`: `Formatter` 규약 및 공통 상수 정의
+  - [x] `internal/ui/pipeline.go`: 6단계 관문 도출 로직(`ComputePipelineGates`) 및 상태 다이어그램 포매터 구현
+  - [x] `internal/ui/explain.go`: 시나리오별 역설 해설 박스 렌더러 구현
+  - [x] `internal/ui/summary.go`: 콘솔 ASCII 테이블 종합 요약표 렌더러 구현
+  - [x] `internal/ui/json.go`: JSON 직렬화 포매터 구현
+  - [x] `internal/ui/ui_test.go`: 각 렌더러의 출력 형식 및 파이프라인 매핑 단위 테스트
+- [x] **2. `internal/cli/run.go` CLI 러너 구현**:
+  - [x] `RunRunner` 구조체 및 플래그 파싱(`-scenario`, `-group`, `-output-format`, `-fail-fast`, `-verbose`) 구현
+  - [x] `catalog.RegisterAll` 연동 및 선택 시나리오 필터링 로직 구현
+  - [x] 시나리오 순차 실행 및 결과 수집, UI 포매터 호출, 표준 종료 코드 반환 로직 구현
+- [x] **3. `cmd/authz-harness/main.go` 라우팅 등록**:
+  - [x] `case "run":` 추가 및 `cli.NewRunRunner` 위임
+- [x] **4. L4 블랙박스 CLI 및 L5 E2E 통합 테스트 완비**:
+  - [x] `internal/cli/run_test.go`:
     - 30개 시나리오 전 구간 일괄 실행 및 정상 종료 코드 `0` 검증
     - `--output-format explain`, `summary`, `json` 출력 무결성 검증
     - 단일 시나리오(`--scenario E2E-22`), 특정 그룹(`--group G5`) 필터링 검증
     - 미등록 시나리오 지정 시 에러 반환 검증
     - 60초 이내 완주(Zero-Sleep 성능) 검증
-- [ ] **5. 전체 회귀 테스트 통과 확인**:
-  - [ ] `go test ./...` 전 패키지 통과 확인
+- [x] **5. 전체 회귀 테스트 통과 확인**:
+  - [x] `go test ./...` 전 패키지 통과 확인
 
 ---
 

@@ -116,6 +116,10 @@ func main() {
 			}
 			exitCode := subRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "run":
+			runRunner := cli.NewRunRunner(os.Stdout, os.Stderr, "")
+			exitCode := runRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
 			os.Exit(int(domain.ExitBadInput))
