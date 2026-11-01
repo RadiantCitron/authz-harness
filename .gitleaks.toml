@@ -1,0 +1,23 @@
+# gitleaks 설정: authz-harness 커밋/푸시 전 시크릿 탐지
+title = "authz-harness gitleaks"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-private-key-header"
+description = "Private key header in plain text"
+regex = '''-----BEGIN (RSA|EC|DSA|OPENSSH|PRIVATE) KEY-----'''
+keywords = ["BEGIN", "PRIVATE KEY"]
+
+[[rules]]
+id = "bearer-raw-token"
+description = "Suspicious raw bearer token string"
+regex = '''Bearer\s+[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_=]*'''
+keywords = ["Bearer"]
+
+# 시험 코드 내 목업(Mock) 키 허용 목록
+[[allowlists]]
+description = "테스트 코드 내 목업 토큰/키 허용"
+targetRules = ["generic-api-key", "bearer-raw-token"]
+paths = ['''.*_test\.go$''', '''^tests/.*''']

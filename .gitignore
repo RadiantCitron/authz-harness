@@ -1,0 +1,56 @@
+# authz-harness — .gitignore
+# Go 기반 권한 검증 및 테스트 하네스: 비밀값·빌드 산출물·테스트 캐시·OS/IDE 잡파일을 제외한다.
+
+# 1. 비밀값·환경변수·개인정보 (Zero Leakage — 절대 커밋 금지)
+.env
+.env.*
+!.env.example
+*.env
+.envrc
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_rsa.*
+**/secrets.json
+**/credentials.json
+
+# 2. Go 빌드 산출물 및 바이너리
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# 3. 하네스 런타임 및 로컬 파일시스템 격리 산출물 (테스트 부작용 증거 격리)
+workspace/
+.workspace/
+*.workspace/
+audit.jsonl
+*.audit.jsonl
+tmp/
+
+# 4. 방어적 Python 격리 규칙 (Python 침투 원천 차단)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 5. OS 및 IDE 부속물
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
