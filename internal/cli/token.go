@@ -10,15 +10,17 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 )
 
-// TokenRunner 는 `token` 하위 명령어(issue, inspect, verify) 실행을 주관하는 러너다.
+// TokenRunner 는 `token` 하위 명령어(issue, inspect, verify, exchange) 실행을 주관하는 러너다.
 type TokenRunner struct {
 	issuer     *token.Service
 	verifier   *token.Verifier
+	exchange   exchange.Service
 	out        io.Writer
 	errOut     io.Writer
 	privPath   string
@@ -53,10 +55,13 @@ func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditP
 	clients := token.NewInMemoryClientRegistry()
 	issuer := token.NewService(keyMgr, clients, auditWriter, clock)
 	verifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clock)
+	validator := exchange.NewDownscopeValidator()
+	exchangeSvc := exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, clock)
 
 	return &TokenRunner{
 		issuer:     issuer,
 		verifier:   verifier,
+		exchange:   exchangeSvc,
 		out:        out,
 		errOut:     errOut,
 		privPath:   privPath,
@@ -83,6 +88,8 @@ func (r *TokenRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		return r.runInspect(ctx, subArgs)
 	case "verify":
 		return r.runVerify(ctx, subArgs)
+	case "exchange":
+		return r.runExchange(ctx, subArgs)
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown token command '%s'\n", sub)
 		r.printUsage()
@@ -257,9 +264,96 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 	return domain.ExitSuccess
 }
 
+func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.ExitCode {
+	fs := flag.NewFlagSet("token exchange", flag.ContinueOnError)
+	fs.SetOutput(r.errOut)
+
+	parentToken := fs.String("parent-token", "", "위임 주체(부모)의 유효한 Access Token 문자열 (필수)")
+	childSub := fs.String("child-sub", "", "자식 토큰 주체 Subject (필수, 예: worker-01)")
+	scope := fs.String("scope", "", "축소 위임할 스코프 (필수, 예: file:read:docs/plan.txt)")
+	clientID := fs.String("client-id", "", "클라이언트 ID (필수: client-orchestrator, client-subagent 등)")
+	clientSecret := fs.String("client-secret", "", "클라이언트 시크릿 (필수)")
+	aud := fs.String("aud", "", "수신 대상 Audience (기본: 부모 토큰 aud 상속)")
+	ttl := fs.Duration("ttl", 30*time.Minute, "자식 토큰 유효 기간 (기본 30m)")
+	clockOffsetStr := fs.String("clock-offset", "", "가상 시계 오프셋 (예: +2h, -10m)")
+
+	if err := fs.Parse(args); err != nil {
+		return domain.ExitBadInput
+	}
+
+	if *parentToken == "" || *childSub == "" || *scope == "" || *clientID == "" || *clientSecret == "" {
+		fmt.Fprintf(r.errOut, "Error: --parent-token, --child-sub, --scope, --client-id, and --client-secret are required\n")
+		return domain.ExitBadInput
+	}
+
+	// 가상 시계 지원
+	exchangeService := r.exchange
+	if *clockOffsetStr != "" {
+		d, err := time.ParseDuration(*clockOffsetStr)
+		if err != nil {
+			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset duration format: %v\n", err)
+			return domain.ExitBadInput
+		}
+		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
+		st, _ := keys.NewFileStore(r.privPath, r.pubPath)
+		auditWriter, _ := audit.NewJSONLWriter(r.auditPath)
+		keyMgr, _ := keys.NewManager(st, auditWriter, keys.WithClock(offsetClock))
+		replayLedger, _ := token.NewFileReplayLedger(r.replayPath, offsetClock)
+		clients := token.NewInMemoryClientRegistry()
+		issuer := token.NewService(keyMgr, clients, auditWriter, offsetClock)
+		verifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, offsetClock)
+		validator := exchange.NewDownscopeValidator()
+		exchangeService = exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, offsetClock)
+	}
+
+	req := exchange.ExchangeRequest{
+		ClientID:     *clientID,
+		ClientSecret: *clientSecret,
+		ParentToken:  *parentToken,
+		ChildSubject: *childSub,
+		Scope:        *scope,
+		Audience:     *aud,
+		TTL:          *ttl,
+	}
+
+	auditCtx := domain.AuditContext{
+		TraceID: fmt.Sprintf("exchange-%d", time.Now().UnixNano()),
+		Actor:   *clientID,
+	}
+
+	res, err := exchangeService.Exchange(ctx, req, auditCtx)
+	if err != nil {
+		reason := extractReason(err)
+		fmt.Fprintf(r.out, "FAIL: [EXCHANGE_DENIED] %s\n", reason)
+		fmt.Fprintf(r.errOut, "Detail: %v\n", err)
+		return domain.ExitTokenInvalid
+	}
+
+	// CLI 표준 위임 성공 뷰 출력
+	fmt.Fprintln(r.out, "┌─────────────────────────────────────────────────────────────┐")
+	fmt.Fprintln(r.out, "│ RFC 8693 Token Exchange & Downscoping Pipeline [SUCCESS]    │")
+	fmt.Fprintln(r.out, "├─────────────────────────────────────────────────────────────┤")
+	fmt.Fprintf(r.out, "│ Parent JTI:    %s\n", res.ParentJTI)
+	fmt.Fprintf(r.out, "│ Child Subject: %s\n", res.Claims.Subject)
+	fmt.Fprintf(r.out, "│ Granted Scope: %s\n", res.Claims.Scope)
+	fmt.Fprintf(r.out, "│ Delegation:    Depth %d (Parent -> %s)\n", res.DelegationDepth, res.Claims.Subject)
+	fmt.Fprintf(r.out, "│ Expires At:    %s\n", time.Unix(res.Claims.ExpiresAt, 0).UTC().Format(time.RFC3339))
+	fmt.Fprintln(r.out, "├─────────────────────────────────────────────────────────────┤")
+	fmt.Fprintln(r.out, "│ Delegated Child Token Issued:                               │")
+	fmt.Fprintf(r.out, "│ %s\n", res.TokenString)
+	fmt.Fprintln(r.out, "└─────────────────────────────────────────────────────────────┘")
+
+	return domain.ExitSuccess
+}
+
 func extractReason(err error) string {
 	str := err.Error()
 	for _, r := range []domain.Reason{
+		domain.ReasonDelegationScopeEmpty,
+		domain.ReasonDelegationScopeExceeded,
+		domain.ReasonDelegationTTLExceeded,
+		domain.ReasonDelegationDepthExceeded,
+		domain.ReasonDelegationSelfLoop,
 		domain.ReasonTokenInvalidType,
 		domain.ReasonTokenAlgNotAllowed,
 		domain.ReasonTokenKeyRetired,
@@ -271,6 +365,10 @@ func extractReason(err error) string {
 		domain.ReasonTokenSubjectMismatch,
 		domain.ReasonTokenReplayDetected,
 		domain.ReasonTokenMalformed,
+		domain.ReasonAuthnInvalidSecret,
+		domain.ReasonAuthnUnknownClient,
+		domain.ReasonAuthnClientSuspended,
+		domain.ReasonNoActiveGrant,
 	} {
 		if strings.Contains(str, string(r)) {
 			return string(r)
@@ -285,4 +383,5 @@ func (r *TokenRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "  issue    RFC 9068 Bearer Access Token 발급")
 	fmt.Fprintln(r.errOut, "  inspect  서명 검증 없이 토큰 헤더 및 페이로드 덤프")
 	fmt.Fprintln(r.errOut, "  verify   Gate 1 암호학적 무결성 및 클레임 검증")
+	fmt.Fprintln(r.errOut, "  exchange RFC 8693 Token Exchange 축소 위임 토큰 발급")
 }

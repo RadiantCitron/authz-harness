@@ -92,4 +92,19 @@ const (
 
 	// ReasonTokenInvalidSignature 는 토큰의 암호학적 디지털 서명이 일치하지 않음을 나타낸다.
 	ReasonTokenInvalidSignature Reason = "TOKEN_INVALID_SIGNATURE"
+
+	// ReasonDelegationScopeExceeded 는 자식 토큰의 스코프가 부모 토큰의 스코프 부분집합을 초과함을 나타낸다.
+	ReasonDelegationScopeExceeded Reason = "DELEGATION_SCOPE_EXCEEDED"
+
+	// ReasonDelegationTTLExceeded 는 자식 토큰의 만료시각이 부모 토큰 잔여 유효시간(exp)을 초과함을 나타낸다.
+	ReasonDelegationTTLExceeded Reason = "DELEGATION_TTL_EXCEEDED"
+
+	// ReasonDelegationDepthExceeded 는 위임 체인 허용 최대 깊이를 초과함을 나타낸다.
+	ReasonDelegationDepthExceeded Reason = "DELEGATION_DEPTH_EXCEEDED"
+
+	// ReasonDelegationSelfLoop 는 부모 주체와 자식 주체가 동일하거나 act 계보에 이미 존재하는 순환 위임임을 나타낸다.
+	ReasonDelegationSelfLoop Reason = "DELEGATION_SELF_LOOP"
+
+	// ReasonDelegationScopeEmpty 는 위임 요청 시 요청 스코프가 비어있음을 나타낸다.
+	ReasonDelegationScopeEmpty Reason = "DELEGATION_SCOPE_EMPTY"
 )

@@ -18,13 +18,15 @@ import (
 
 // IssueRequest 는 RFC 9068 Access Token 발급 요청 파라미터다.
 type IssueRequest struct {
-	ClientID     string
-	ClientSecret string
-	Subject      string
-	Scope        string
-	Audience     string
-	TTL          time.Duration
-	Epoch        domain.Epoch
+	ClientID        string
+	ClientSecret    string
+	Subject         string
+	Scope           string
+	Audience        string
+	TTL             time.Duration
+	Epoch           domain.Epoch
+	Actor           *domain.ActorClaim
+	DelegationDepth int
 }
 
 // IssueOptions 는 결함 주입(Fault Injection) 등을 위한 발급 옵션이다.
@@ -125,16 +127,18 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	}
 
 	claims := domain.TokenClaims{
-		Issuer:    "authz-harness",
-		Subject:   req.Subject,
-		Audience:  aud,
-		ClientID:  req.ClientID,
-		ExpiresAt: now.Add(ttl).Unix(),
-		IssuedAt:  now.Unix(),
-		NotBefore: now.Unix(),
-		JWTID:     jti,
-		Scope:     req.Scope,
-		Epoch:     epoch,
+		Issuer:          "authz-harness",
+		Subject:         req.Subject,
+		Audience:        aud,
+		ClientID:        req.ClientID,
+		ExpiresAt:       now.Add(ttl).Unix(),
+		IssuedAt:        now.Unix(),
+		NotBefore:       now.Unix(),
+		JWTID:           jti,
+		Scope:           req.Scope,
+		Epoch:           epoch,
+		Actor:           req.Actor,
+		DelegationDepth: req.DelegationDepth,
 	}
 
 	if err := claims.Validate(); err != nil {

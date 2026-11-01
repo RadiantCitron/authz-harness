@@ -42,18 +42,27 @@ func (c *OffsetClock) Now() time.Time {
 	return c.Base.Now().Add(c.Offset)
 }
 
+// ActorClaim 은 RFC 8693 Token Exchange §4.1 에 따른 위임 주체(Actor) 계보 클레임이다.
+type ActorClaim struct {
+	Subject string      `json:"sub"`
+	JWTID   string      `json:"jti,omitempty"`
+	Actor   *ActorClaim `json:"act,omitempty"`
+}
+
 // TokenClaims 는 RFC 9068 표준 Bearer Access Token 클레임 세트다.
 type TokenClaims struct {
-	Issuer    string `json:"iss"`
-	Subject   string `json:"sub"`
-	Audience  string `json:"aud"`
-	ClientID  string `json:"client_id"`
-	ExpiresAt int64  `json:"exp"`
-	IssuedAt  int64  `json:"iat"`
-	NotBefore int64  `json:"nbf"`
-	JWTID     string `json:"jti"`
-	Scope     string `json:"scope"`
-	Epoch     Epoch  `json:"epoch"`
+	Issuer          string      `json:"iss"`
+	Subject         string      `json:"sub"`
+	Audience        string      `json:"aud"`
+	ClientID        string      `json:"client_id"`
+	ExpiresAt       int64       `json:"exp"`
+	IssuedAt        int64       `json:"iat"`
+	NotBefore       int64       `json:"nbf"`
+	JWTID           string      `json:"jti"`
+	Scope           string      `json:"scope"`
+	Epoch           Epoch       `json:"epoch"`
+	Actor           *ActorClaim `json:"act,omitempty"`
+	DelegationDepth int         `json:"delegation_depth,omitempty"`
 }
 
 // Validate 는 필수 클레임 및 기본 유효성을 검증한다.

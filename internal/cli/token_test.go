@@ -155,3 +155,96 @@ func TestCLI_FaultInjection(t *testing.T) {
 		t.Fatalf("expected TOKEN_INVALID_SIGNATURE, got: %s", out.String())
 	}
 }
+
+func TestCLI_TokenExchange(t *testing.T) {
+	runner, out, errOut, _, _ := setupCLITestRig(t)
+
+	// 1. 부모 토큰 발급 (orchestrator: scope 2개)
+	issueArgs := []string{
+		"issue",
+		"--client-id", "client-orchestrator",
+		"--client-secret", "orchestrator-secret-key-01",
+		"--sub", "orchestrator-main",
+		"--scope", "file:read:docs/plan.txt file:write:docs/out.txt",
+		"--aud", "authz-service",
+		"--ttl", "1h",
+	}
+	exitCode := runner.Run(context.Background(), issueArgs)
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("parent issue failed: %d, err: %s", exitCode, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	parentToken := lines[len(lines)-1]
+	out.Reset()
+	errOut.Reset()
+
+	// 2. 정상 Token Exchange 축소 위임 (worker-01: scope 1개, 30분)
+	exchangeArgs := []string{
+		"exchange",
+		"--client-id", "client-subagent",
+		"--client-secret", "subagent-secret-key-02",
+		"--parent-token", parentToken,
+		"--child-sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt",
+		"--ttl", "30m",
+	}
+	exitCode = runner.Run(context.Background(), exchangeArgs)
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("exchange expected exit 0, got %d, err: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "RFC 8693 Token Exchange & Downscoping Pipeline [SUCCESS]") {
+		t.Fatalf("expected success banner, got: %s", out.String())
+	}
+	if !strings.Contains(out.String(), "Delegation:    Depth 1 (Parent -> worker-01)") {
+		t.Fatalf("expected Depth 1 in output: %s", out.String())
+	}
+
+	// 자식 토큰 파싱
+	exchangeOutLines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	childToken := exchangeOutLines[len(exchangeOutLines)-2]
+	childToken = strings.TrimPrefix(childToken, "│ ")
+	out.Reset()
+	errOut.Reset()
+
+	// 3. 자식 토큰 inspect 확인 (act claim 포함 여부)
+	inspectArgs := []string{
+		"inspect",
+		"--token", childToken,
+	}
+	exitCode = runner.Run(context.Background(), inspectArgs)
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("inspect child token failed: %d, err: %s", exitCode, errOut.String())
+	}
+	var inspectData map[string]interface{}
+	if err := json.Unmarshal(out.Bytes(), &inspectData); err != nil {
+		t.Fatalf("inspect output not valid json: %v", err)
+	}
+	claimsMap := inspectData["claims"].(map[string]interface{})
+	if claimsMap["sub"] != "worker-01" {
+		t.Errorf("expected sub worker-01, got %v", claimsMap["sub"])
+	}
+	actMap, ok := claimsMap["act"].(map[string]interface{})
+	if !ok || actMap["sub"] != "orchestrator-main" {
+		t.Errorf("expected act.sub orchestrator-main, got %v", actMap)
+	}
+	out.Reset()
+	errOut.Reset()
+
+	// 4. 초과 권한 위임 거부 테스트 (DELEGATION_SCOPE_EXCEEDED)
+	exceedArgs := []string{
+		"exchange",
+		"--client-id", "client-subagent",
+		"--client-secret", "subagent-secret-key-02",
+		"--parent-token", parentToken,
+		"--child-sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt file:write:docs/unauthorized.txt",
+		"--ttl", "30m",
+	}
+	exitCode = runner.Run(context.Background(), exceedArgs)
+	if exitCode != domain.ExitTokenInvalid {
+		t.Fatalf("expected exit 11 for scope exceeded, got %d", exitCode)
+	}
+	if !strings.Contains(out.String(), "DELEGATION_SCOPE_EXCEEDED") {
+		t.Fatalf("expected DELEGATION_SCOPE_EXCEEDED in output, got: %s", out.String())
+	}
+}
