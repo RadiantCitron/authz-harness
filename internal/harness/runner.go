@@ -1,0 +1,202 @@
+package harness
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"authz-harness/internal/domain"
+)
+
+// ScenarioResult 는 단일 시나리오의 종합 실행 결과다.
+type ScenarioResult struct {
+	Metadata  ScenarioMetadata `json:"metadata"`
+	Passed    bool             `json:"passed"`
+	Duration  time.Duration    `json:"duration"`
+	Assertion AssertionResult  `json:"assertion"`
+	Error     string           `json:"error,omitempty"`
+}
+
+// Runner 는 시나리오들을 등록하고 독립 샌드박스에서 실행하는 오케스트레이터다.
+type Runner interface {
+	// Register 는 카탈로그에 시나리오를 등록한다.
+	Register(s Scenario) error
+
+	// Get 은 ID로 시나리오를 조회한다.
+	Get(id string) (Scenario, bool)
+
+	// List 는 등록된 모든 시나리오 메타데이터 목록을 반환한다.
+	List() []ScenarioMetadata
+
+	// RunScenario 는 단일 시나리오를 격리 샌드박스에서 실행하고 Quad-Assertion을 수행한다.
+	RunScenario(ctx context.Context, id string) (ScenarioResult, error)
+
+	// RunAll 은 등록된 모든 시나리오를 순차 실행하고 결과를 수집한다.
+	RunAll(ctx context.Context) ([]ScenarioResult, error)
+}
+
+// DefaultRunner 는 Runner 인터페이스의 표준 구현체다.
+type DefaultRunner struct {
+	mu        sync.RWMutex
+	scenarios map[string]Scenario
+	order     []string
+	evaluator Evaluator
+	baseDir   string
+}
+
+// RunnerOption 은 Runner 생성 옵션이다.
+type RunnerOption func(*DefaultRunner)
+
+// WithEvaluator 는 커스텀 Evaluator 를 주입하는 옵션이다.
+func WithEvaluator(eval Evaluator) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.evaluator = eval
+	}
+}
+
+// WithBaseDir 은 샌드박스 생성 시 사용할 기본 디렉터리를 지정하는 옵션이다.
+func WithBaseDir(dir string) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.baseDir = dir
+	}
+}
+
+// NewDefaultRunner 는 DefaultRunner 인스턴스를 생성한다.
+func NewDefaultRunner(opts ...RunnerOption) *DefaultRunner {
+	r := &DefaultRunner{
+		scenarios: make(map[string]Scenario),
+		order:     make([]string, 0),
+		evaluator: NewDefaultEvaluator(),
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// Register 는 시나리오를 러너에 등록한다.
+func (r *DefaultRunner) Register(s Scenario) error {
+	if s == nil {
+		return fmt.Errorf("harness runner: scenario is nil")
+	}
+	meta := s.Metadata()
+	if meta.ID == "" {
+		return fmt.Errorf("harness runner: scenario ID cannot be empty")
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if _, exists := r.scenarios[meta.ID]; exists {
+		return fmt.Errorf("harness runner: scenario %q already registered", meta.ID)
+	}
+
+	r.scenarios[meta.ID] = s
+	r.order = append(r.order, meta.ID)
+	return nil
+}
+
+// Get 은 ID로 등록된 시나리오를 조회한다.
+func (r *DefaultRunner) Get(id string) (Scenario, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.scenarios[id]
+	return s, ok
+}
+
+// List 는 등록된 모든 시나리오 메타데이터 목록을 등록 순서대로 반환한다.
+func (r *DefaultRunner) List() []ScenarioMetadata {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	list := make([]ScenarioMetadata, 0, len(r.order))
+	for _, id := range r.order {
+		list = append(list, r.scenarios[id].Metadata())
+	}
+	return list
+}
+
+// RunScenario 는 단일 시나리오를 격리 샌드박스에서 실행하고 Quad-Assertion을 수행한다.
+func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioResult, error) {
+	r.mu.RLock()
+	s, ok := r.scenarios[id]
+	r.mu.RUnlock()
+
+	if !ok {
+		return ScenarioResult{}, fmt.Errorf("harness runner: scenario %q not found", id)
+	}
+
+	meta := s.Metadata()
+	startTime := time.Now()
+
+	// 1. 시나리오별 격리 Ephemeral Sandbox 생성
+	env, err := NewSandboxEnvironment(SandboxConfig{
+		BaseDir: r.baseDir,
+	})
+	if err != nil {
+		return ScenarioResult{
+			Metadata: meta,
+			Passed:   false,
+			Duration: time.Since(startTime),
+			Error:    fmt.Sprintf("failed to create sandbox environment: %v", err),
+		}, err
+	}
+	defer func() {
+		_ = env.Cleanup()
+	}()
+
+	// 2. Setup 단계 실행
+	if err := s.Setup(ctx, env); err != nil {
+		duration := time.Since(startTime)
+		return ScenarioResult{
+			Metadata: meta,
+			Passed:   false,
+			Duration: duration,
+			Error:    fmt.Sprintf("setup failed: %v", err),
+		}, err
+	}
+
+	// 3. Execute 단계 실행 (종료 코드 수거)
+	actualExitCode, execErr := s.Execute(ctx, env)
+	var execErrMsg string
+	if execErr != nil {
+		execErrMsg = execErr.Error()
+	}
+
+	// 4. Quad-Assertion 불변식 판정
+	assertionRes := r.evaluator.Evaluate(env, actualExitCode, meta.Expected)
+	duration := time.Since(startTime)
+
+	overallPassed := assertionRes.Passed && (execErr == nil || actualExitCode != domain.ExitSuccess)
+
+	return ScenarioResult{
+		Metadata:  meta,
+		Passed:    overallPassed,
+		Duration:  duration,
+		Assertion: assertionRes,
+		Error:     execErrMsg,
+	}, nil
+}
+
+// RunAll 은 등록된 모든 시나리오를 순차 실행하고 결과를 수집한다.
+func (r *DefaultRunner) RunAll(ctx context.Context) ([]ScenarioResult, error) {
+	r.mu.RLock()
+	ids := make([]string, len(r.order))
+	copy(ids, r.order)
+	r.mu.RUnlock()
+
+	results := make([]ScenarioResult, 0, len(ids))
+	for _, id := range ids {
+		select {
+		case <-ctx.Done():
+			return results, ctx.Err()
+		default:
+		}
+
+		res, _ := r.RunScenario(ctx, id)
+		results = append(results, res)
+	}
+
+	return results, nil
+}

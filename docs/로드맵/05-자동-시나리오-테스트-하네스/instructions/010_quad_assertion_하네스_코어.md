@@ -1,6 +1,6 @@
 # 010. Quad-Assertion 검증 엔진 및 시나리오 하네스 코어 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: Phase 4 (오케스트레이터 및 서브프로세스 격리) 완료
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -319,10 +319,10 @@ flowchart TD
 
 ## 7. 완료 조건 및 체크리스트
 
-- [ ] `internal/harness/sandbox.go`: Zone A/B/C 구조의 Ephemeral Sandbox 생성 및 안전 클린업 구현
-- [ ] `internal/harness/assertion.go`: Quad-Assertion 4중 불변식(Exit Code + File 0-mutation + Audit Reason + Hash Chain) 검증 엔진 구현
-- [ ] `internal/harness/scenario.go`: `ScenarioMetadata` 및 `Scenario` 인터페이스 명세 구현
-- [ ] `internal/harness/runner.go`: 시나리오 등록, 단일 및 일괄 실행 러너 구현
-- [ ] `internal/harness/harness_test.go`: 10대 인수 테스트(AT-01 ~ AT-10) 100% 통과
-- [ ] `go test -race ./internal/harness/...` 실행 시 Data Race 0건
-- [ ] [05-자동-시나리오-테스트-하네스 대시보드](../README.md) 상태 갱신
+- [x] `internal/harness/sandbox.go`: Zone A/B/C 구조의 Ephemeral Sandbox 생성 및 안전 클린업 구현
+- [x] `internal/harness/assertion.go`: Quad-Assertion 4중 불변식(Exit Code + File 0-mutation + Audit Reason + Hash Chain) 검증 엔진 구현
+- [x] `internal/harness/scenario.go`: `ScenarioMetadata` 및 `Scenario` 인터페이스 명세 구현
+- [x] `internal/harness/runner.go`: 시나리오 등록, 단일 및 일괄 실행 러너 구현
+- [x] `internal/harness/harness_test.go`: 10대 인수 테스트(AT-01 ~ AT-10) 100% 통과
+- [x] `go test -race ./internal/harness/...` 실행 시 Data Race 0건
+- [x] [05-자동-시나리오-테스트-하네스 대시보드](../README.md) 상태 갱신
