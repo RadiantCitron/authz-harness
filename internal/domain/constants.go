@@ -48,6 +48,15 @@ const (
 	// ReasonPathViolation 은 지정된 리소스 경로가 허용된 샌드박스/격리 영역을 벗어남을 나타낸다.
 	ReasonPathViolation Reason = "PATH_VIOLATION"
 
+	// ReasonPathTraversal 은 ../ 또는 절대 경로 순회 시도를 나타낸다.
+	ReasonPathTraversal Reason = "PATH_TRAVERSAL"
+
+	// ReasonSymlinkEscape 는 심볼릭 링크를 통한 샌드박스 외부 접근 시도를 나타낸다.
+	ReasonSymlinkEscape Reason = "SYMLINK_ESCAPE"
+
+	// ReasonInvalidPath 는 널 바이트 등 경로 문자열 결함을 나타낸다.
+	ReasonInvalidPath Reason = "INVALID_PATH"
+
 	// ReasonInvalidToken 은 토큰이 만료되었거나 서명이 유효하지 않음을 나타낸다.
 	ReasonInvalidToken Reason = "INVALID_TOKEN"
 

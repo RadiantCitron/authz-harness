@@ -1,6 +1,6 @@
 # 010. Workspace File Jail 격리 모듈 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: Phase 2 (OAuth 2.1 토큰 및 축소위임 엔진) 완료
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
