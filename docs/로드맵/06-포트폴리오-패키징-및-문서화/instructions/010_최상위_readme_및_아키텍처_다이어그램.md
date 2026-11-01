@@ -1,6 +1,6 @@
 # 010. 리포지토리 최상위 README.md 및 아키텍처 다이어그램 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: Phase 5 (30대 E2E 시나리오 자동 하네스 및 Explain UX) 완료
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
