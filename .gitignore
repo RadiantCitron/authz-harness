@@ -33,6 +33,8 @@ workspace/
 *.workspace/
 audit.jsonl
 *.audit.jsonl
+.authz-state/
+*.authz-state/
 tmp/
 
 # 4. 방어적 Python 격리 규칙 (Python 침투 원천 차단)

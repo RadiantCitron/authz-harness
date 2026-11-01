@@ -50,4 +50,13 @@ const (
 
 	// ReasonInvalidToken 은 토큰이 만료되었거나 서명이 유효하지 않음을 나타낸다.
 	ReasonInvalidToken Reason = "INVALID_TOKEN"
+
+	// ReasonTokenKeyRetired 는 서명에 사용된 키가 폐기(retired)되어 검증 거부됨을 나타낸다.
+	ReasonTokenKeyRetired Reason = "TOKEN_KEY_RETIRED"
+
+	// ReasonTokenKeyNotFound 는 토큰 kid에 일치하는 공개키가 JWKS에 존재하지 않음을 나타낸다.
+	ReasonTokenKeyNotFound Reason = "TOKEN_KEY_NOT_FOUND"
+
+	// ReasonTokenInvalidSignature 는 토큰의 암호학적 디지털 서명이 일치하지 않음을 나타낸다.
+	ReasonTokenInvalidSignature Reason = "TOKEN_INVALID_SIGNATURE"
 )

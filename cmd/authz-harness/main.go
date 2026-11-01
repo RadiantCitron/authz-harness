@@ -20,12 +20,16 @@ func main() {
 		showVersion bool
 		auditPath   string
 		statePath   string
+		privKeyPath string
+		pubJWKSPath string
 		verbose     bool
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "프로그램 버전 출력")
 	flag.StringVar(&auditPath, "audit-file", "audit.jsonl", "감사 로그 저장 파일 경로")
 	flag.StringVar(&statePath, "state-file", ".authz-state/public/grants_state.json", "Zone B 상태 파일 경로")
+	flag.StringVar(&privKeyPath, "priv-key-file", ".authz-state/private/signing_keys.priv.json", "Zone A 비밀 서명 키 저장소 경로")
+	flag.StringVar(&pubJWKSPath, "pub-jwks-file", ".authz-state/public/jwks.pub.json", "Zone B 공개 검증 키(JWKS) 경로")
 	flag.BoolVar(&verbose, "verbose", false, "운영 디버그 로그 활성화 (stderr)")
 	flag.Parse()
 
@@ -67,6 +71,14 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := pdpRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
+		case "keys":
+			keysRunner, err := cli.NewKeysRunner(os.Stdout, os.Stderr, privKeyPath, pubJWKSPath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize keys runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := keysRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
