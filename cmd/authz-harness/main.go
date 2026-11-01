@@ -100,6 +100,22 @@ func main() {
 			}
 			exitCode := pepRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "orchestrate":
+			orchRunner, err := cli.NewOrchestrateRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize orchestrate runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := orchRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
+		case "subagent":
+			subRunner, err := cli.NewSubagentRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize subagent runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := subRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
 			os.Exit(int(domain.ExitBadInput))

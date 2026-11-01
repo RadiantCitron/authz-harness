@@ -8,12 +8,14 @@ import (
 	"strings"
 
 	"authz-harness/internal/authz/pep"
+	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 )
 
 // SubagentWorker 는 stdin JSON 프레임을 수신하여 PEP 게이트웨이를 경유해 작업을 집행하는 서브에이전트 워커다.
 type SubagentWorker struct {
-	gateway pep.Gateway
+	gateway    pep.Gateway
+	stateStore state.Store
 }
 
 // NewWorker 는 PEP 게이트웨이를 주입받아 SubagentWorker 인스턴스를 생성한다.
@@ -24,6 +26,11 @@ func NewWorker(gateway pep.Gateway) (*SubagentWorker, error) {
 	return &SubagentWorker{
 		gateway: gateway,
 	}, nil
+}
+
+// SetStateStore 는 TOCTOU 결함 주입을 위해 상태 저장소를 주입한다.
+func (w *SubagentWorker) SetStateStore(store state.Store) {
+	w.stateStore = store
 }
 
 // Execute 는 파싱된 요청을 바탕으로 PEP 게이트웨이를 호출하고 응답과 Exit Code를 반환한다.
@@ -64,7 +71,18 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		return resp, resp.ExitCode
 	}
 
-	// 2. PEP Gateway 요청 조립
+	// 2. TOCTOU 결함 주입 처리 (--inject-revoke-before-io)
+	// I/O 집행 전(PDP 검증 전/직전)에 모든 Grant를 Revoke 상태로 변경하여 레이스 컨디션을 시뮬레이션한다.
+	if req.InjectRevokeBeforeIO && w.stateStore != nil {
+		_ = w.stateStore.Update(func(st *state.GrantsState) error {
+			for i := range st.Grants {
+				st.Grants[i].Status = domain.GrantStatusRevoked
+			}
+			return nil
+		})
+	}
+
+	// 3. PEP Gateway 요청 조립
 	pepReq := pep.Request{
 		Token:    req.Token,
 		Action:   normAction,
@@ -73,7 +91,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		TraceID:  req.TraceID,
 	}
 
-	// 3. PEP 5단계 관문 집행
+	// 4. PEP 5단계 관문 집행
 	pepRes, err := w.gateway.Execute(ctx, pepReq)
 	if err != nil {
 		resp.ExitCode = int(domain.ExitInternalError)

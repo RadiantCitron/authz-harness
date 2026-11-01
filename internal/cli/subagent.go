@@ -1,0 +1,166 @@
+package cli
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+
+	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/keys"
+	"authz-harness/internal/authn/token"
+	"authz-harness/internal/authz/pdp"
+	"authz-harness/internal/authz/pep"
+	"authz-harness/internal/authz/pip"
+	"authz-harness/internal/authz/state"
+	"authz-harness/internal/domain"
+	"authz-harness/internal/jail"
+	"authz-harness/internal/subagent"
+)
+
+// SubagentRunner 는 자식 서브에이전트 프로세스 진입점을 담당하는 CLI 러너다.
+type SubagentRunner struct {
+	stdout       io.Writer
+	stderr       io.Writer
+	stdin        io.Reader
+	workspaceDir string
+	statePath    string
+	pubJWKSPath  string
+	replayPath   string
+	auditPath    string
+}
+
+// NewSubagentRunner 는 자식 서브에이전트 실행을 위한 SubagentRunner 인스턴스를 생성한다.
+func NewSubagentRunner(
+	stdout, stderr io.Writer,
+	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
+) (*SubagentRunner, error) {
+	return &SubagentRunner{
+		stdout:       stdout,
+		stderr:       stderr,
+		stdin:        os.Stdin,
+		workspaceDir: workspaceDir,
+		statePath:    statePath,
+		pubJWKSPath:  pubJWKSPath,
+		replayPath:   replayPath,
+		auditPath:    auditPath,
+	}, nil
+}
+
+// SetStdin 은 테스트 시 stdin 스트림을 재정의할 수 있도록 지원한다.
+func (r *SubagentRunner) SetStdin(in io.Reader) {
+	r.stdin = in
+}
+
+// Run 은 subagent 서브커맨드 인자를 파싱하고 작업을 실행한다.
+// 문법: authz-harness subagent worker [flags]
+func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	if len(args) == 0 {
+		fmt.Fprintln(r.stderr, "Error: subagent subcommand required (e.g. 'worker')")
+		return domain.ExitBadInput
+	}
+
+	subcmd := args[0]
+	if subcmd != "worker" {
+		fmt.Fprintf(r.stderr, "Error: unknown subagent subcommand: %s\n", subcmd)
+		return domain.ExitBadInput
+	}
+
+	fs := flag.NewFlagSet("subagent worker", flag.ContinueOnError)
+	fs.SetOutput(r.stderr)
+
+	var (
+		workspaceFlag string
+		stateFlag     string
+		pubJWKSFlag   string
+		replayFlag    string
+		auditFlag     string
+	)
+
+	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
+	fs.StringVar(&stateFlag, "state-file", r.statePath, "Zone B 상태 파일 경로")
+	fs.StringVar(&pubJWKSFlag, "pub-jwks-file", r.pubJWKSPath, "Zone B 공개 검증 키(JWKS) 경로")
+	fs.StringVar(&replayFlag, "replay-file", r.replayPath, "Zone B Replay 방지 원장 경로")
+	fs.StringVar(&auditFlag, "audit-file", r.auditPath, "감사 로그 저장 파일 경로")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		return domain.ExitBadInput
+	}
+
+	// 1. 디렉터리 및 컴포넌트 초기화
+	if err := os.MkdirAll(workspaceFlag, 0755); err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to prepare workspace dir: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	workspaceJail, err := jail.New(workspaceFlag)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init workspace jail: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	stateStore, err := state.NewFileStore(stateFlag)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init state store: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	auditWriter, err := audit.NewJSONLWriter(auditFlag)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init audit writer: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer auditWriter.Close()
+
+	pipSvc := pip.NewService(stateStore)
+	pdpSvc := pdp.NewService(pipSvc, auditWriter)
+
+	keyStore, err := keys.NewFileStore("", pubJWKSFlag)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init keys store: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	keyMgr, err := keys.NewManager(keyStore, auditWriter)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init keys manager: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	clock := domain.RealClock{}
+	replayLedger, err := token.NewFileReplayLedger(replayFlag, clock)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init replay ledger: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clock)
+
+	gw, err := pep.NewGateway(pep.Config{
+		Verifier:    tokenVerifier,
+		PDP:         pdpSvc,
+		Jail:        workspaceJail,
+		AuditWriter: auditWriter,
+	})
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init pep gateway: %v\n", err)
+		return domain.ExitInternalError
+	}
+
+	worker, err := subagent.NewWorker(gw)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: failed to init subagent worker: %v\n", err)
+		return domain.ExitInternalError
+	}
+	worker.SetStateStore(stateStore)
+
+	// 2. stdin 스트림에서 JSON 프레임 읽어 실행 및 stdout 출력
+	stdinReader := r.stdin
+	if stdinReader == nil {
+		stdinReader = os.Stdin
+	}
+
+	exitCode := worker.ExecuteStream(ctx, stdinReader, r.stdout)
+	return domain.ExitCode(exitCode)
+}
