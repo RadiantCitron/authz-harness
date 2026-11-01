@@ -1,6 +1,6 @@
 # 010. 원자적 Grant/Epoch 상태 저장소 구축 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: Phase 0 (기반 골격 및 삼분 배선) 완료
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -104,7 +104,7 @@ type Store interface {
 
 ## 6. 완료 조건 (Definition of Done)
 
-- [ ] 산출물 파일 6종 작성 완료
-- [ ] `go test -race -v ./internal/domain/... ./internal/authz/state/...` 100% 통과
-- [ ] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
-- [ ] 대시보드([README.md](../README.md)) 010 상태를 `Done`으로 갱신 후 커밋
+- [x] 산출물 파일 6종 작성 완료
+- [x] `go test -race -v ./internal/domain/... ./internal/authz/state/...` 100% 통과
+- [x] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
+- [x] 대시보드([README.md](../README.md)) 010 상태를 `Done`으로 갱신 후 커밋
