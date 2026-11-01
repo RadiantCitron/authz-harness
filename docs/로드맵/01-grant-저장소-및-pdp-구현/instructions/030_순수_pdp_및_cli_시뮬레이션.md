@@ -1,6 +1,6 @@
 # 030. 순수 결정 엔진 PDP 및 CLI 시뮬레이션 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: 020 (PAP 정책 관리 및 PIP 실시간 상태 공급 구현) 완료 (`c1e4961`)
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -310,13 +310,13 @@ authz-harness pdp explain --sub worker-01 --action file:read --resource docs/pla
 
 ## 8. 완료 조건 (Definition of Done)
 
-- [ ] `internal/authz/pip/service.go`에 `RevokedGrants` 수집 지원 반영
-- [ ] `internal/authz/pdp/service.go` (순수 평가 함수 `Evaluate` 및 `Service` 구현체) 작성 완료
-- [ ] `internal/authz/pdp/pdp_test.go` 작성 완료:
-  - [ ] 순수 L1 결정표 Table-Driven 테스트 100% 통과
-  - [ ] `os`, `path/filepath`, `internal/jail` 미사용 정적 의존성 검증 통과
-- [ ] `internal/cli/pdp.go` 및 `internal/cli/pdp_test.go` 작성 완료 (`decide`, `explain`)
-- [ ] `cmd/authz-harness/main.go`에 `pdp` 서브커맨드 배선 완료
-- [ ] `go test -race -v ./internal/authz/pdp/... ./internal/authz/pip/... ./internal/cli/...` 100% 통과
-- [ ] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
-- [ ] 대시보드([README.md](../README.md)) 030 상태 및 실행 기록 갱신
+- [x] `internal/authz/pip/service.go`에 `RevokedGrants` 수집 지원 반영
+- [x] `internal/authz/pdp/service.go` (순수 평가 함수 `Evaluate` 및 `Service` 구현체) 작성 완료
+- [x] `internal/authz/pdp/pdp_test.go` 작성 완료:
+  - [x] 순수 L1 결정표 Table-Driven 테스트 100% 통과
+  - [x] `os`, `path/filepath`, `internal/jail` 미사용 정적 의존성 검증 통과
+- [x] `internal/cli/pdp.go` 및 `internal/cli/pdp_test.go` 작성 완료 (`decide`, `explain`)
+- [x] `cmd/authz-harness/main.go`에 `pdp` 서브커맨드 배선 완료
+- [x] `go test -race -v ./internal/authz/pdp/... ./internal/authz/pip/... ./internal/cli/...` 100% 통과
+- [x] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
+- [x] 대시보드([README.md](../README.md)) 030 상태 및 실행 기록 갱신

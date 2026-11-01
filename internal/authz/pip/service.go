@@ -12,10 +12,11 @@ import (
 
 // SubjectSnapshot 은 PDP 인가 결정을 위해 PIP가 제공하는 주체별 권한 상태 스냅샷이다.
 type SubjectSnapshot struct {
-	Subject      string         `json:"subject"`
-	CurrentEpoch domain.Epoch   `json:"current_epoch"`
-	ActiveGrants []domain.Grant `json:"active_grants"`
-	Timestamp    time.Time      `json:"timestamp"`
+	Subject       string         `json:"subject"`
+	CurrentEpoch  domain.Epoch   `json:"current_epoch"`
+	ActiveGrants  []domain.Grant `json:"active_grants"`
+	RevokedGrants []domain.Grant `json:"revoked_grants,omitempty"`
+	Timestamp     time.Time      `json:"timestamp"`
 }
 
 // Service 는 정책 정보점(PIP)의 읽기 전용 조회 규약이다.
@@ -56,18 +57,24 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 
 	epoch := st.Epochs.Get(cleanSub)
 	activeGrants := make([]domain.Grant, 0)
+	revokedGrants := make([]domain.Grant, 0)
 
 	for _, g := range st.Grants {
-		if g.Subject == cleanSub && g.IsActive() {
-			activeGrants = append(activeGrants, g)
+		if g.Subject == cleanSub {
+			if g.IsActive() {
+				activeGrants = append(activeGrants, g)
+			} else if g.Status == domain.GrantStatusRevoked {
+				revokedGrants = append(revokedGrants, g)
+			}
 		}
 	}
 
 	return &SubjectSnapshot{
-		Subject:      cleanSub,
-		CurrentEpoch: epoch,
-		ActiveGrants: activeGrants,
-		Timestamp:    time.Now().UTC(),
+		Subject:       cleanSub,
+		CurrentEpoch:  epoch,
+		ActiveGrants:  activeGrants,
+		RevokedGrants: revokedGrants,
+		Timestamp:     time.Now().UTC(),
 	}, nil
 }
 

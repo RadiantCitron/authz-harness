@@ -92,8 +92,14 @@ func TestPIP_GetSubjectSnapshot(t *testing.T) {
 	expectedIDs := map[string]bool{"grant-1": true, "grant-3": true}
 	for _, g := range snapshot.ActiveGrants {
 		if !expectedIDs[g.ID] {
-			t.Errorf("unexpected grant id: %s", g.ID)
+			t.Errorf("unexpected active grant id: %s", g.ID)
 		}
+	}
+	if len(snapshot.RevokedGrants) != 1 {
+		t.Fatalf("expected 1 revoked grant, got %d", len(snapshot.RevokedGrants))
+	}
+	if snapshot.RevokedGrants[0].ID != "grant-2" {
+		t.Errorf("expected revoked grant id grant-2, got %s", snapshot.RevokedGrants[0].ID)
 	}
 
 	// 2. 미등록 주체 스냅샷 검증: Epoch는 기본값 1, ActiveGrants는 빈 슬라이스

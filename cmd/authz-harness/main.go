@@ -60,6 +60,14 @@ func main() {
 			}
 			exitCode := grantRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "pdp":
+			pdpRunner, err := cli.NewPDPRunner(os.Stdout, os.Stderr, statePath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize pdp runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := pdpRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
 			os.Exit(int(domain.ExitBadInput))
