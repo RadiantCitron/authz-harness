@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/domain"
@@ -176,10 +177,25 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 				if exp.Audit.ExpectedAction != "" && ev.Action != exp.Audit.ExpectedAction {
 					continue
 				}
+				evDecision := ev.Decision
+				if evDecision == "" {
+					if !ev.Success {
+						evDecision = "deny"
+					} else if ev.Success && ev.Decision == "" && ev.Reason == string(domain.ReasonAuthorized) {
+						evDecision = "allow"
+					}
+				}
+				evReason := ev.Reason
+				if evReason == "" && ev.Metadata != nil {
+					if r, ok := ev.Metadata["reason"].(string); ok {
+						evReason = r
+					}
+				}
+
 				// Decision 또는 Reason 이 기록된 이벤트
-				if ev.Decision != "" || ev.Reason != "" {
-					matchedDecision = ev.Decision
-					matchedReason = domain.Reason(ev.Reason)
+				if evDecision != "" || evReason != "" {
+					matchedDecision = evDecision
+					matchedReason = domain.Reason(evReason)
 					found = true
 					break
 				}
@@ -189,9 +205,24 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			if !found {
 				for i := len(events) - 1; i >= 0; i-- {
 					ev := events[i]
-					if ev.Decision != "" || ev.Reason != "" {
-						matchedDecision = ev.Decision
-						matchedReason = domain.Reason(ev.Reason)
+					evDecision := ev.Decision
+					if evDecision == "" {
+						if !ev.Success {
+							evDecision = "deny"
+						} else if ev.Success && ev.Decision == "" && ev.Reason == string(domain.ReasonAuthorized) {
+							evDecision = "allow"
+						}
+					}
+					evReason := ev.Reason
+					if evReason == "" && ev.Metadata != nil {
+						if r, ok := ev.Metadata["reason"].(string); ok {
+							evReason = r
+						}
+					}
+
+					if evDecision != "" || evReason != "" {
+						matchedDecision = evDecision
+						matchedReason = domain.Reason(evReason)
 						found = true
 						break
 					}
@@ -201,7 +232,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			res.AuditActualDecision = matchedDecision
 			res.AuditActualReason = matchedReason
 
-			if exp.Audit.ExpectedDecision != "" && matchedDecision != exp.Audit.ExpectedDecision {
+			if exp.Audit.ExpectedDecision != "" && !strings.EqualFold(matchedDecision, exp.Audit.ExpectedDecision) {
 				res.AuditPassed = false
 				res.Passed = false
 				res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit decision mismatch: expected %q, got %q", exp.Audit.ExpectedDecision, matchedDecision))

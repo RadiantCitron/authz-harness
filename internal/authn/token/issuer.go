@@ -88,6 +88,40 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	// 1. 클라이언트 인증
 	clientInfo, err := s.clients.AuthenticateClient(req.ClientID, req.ClientSecret)
 	if err != nil {
+		if s.auditWriter != nil {
+			var reason domain.Reason = domain.ReasonInvalidToken
+			switch {
+			case errors.Is(err, ErrUnknownClient):
+				reason = domain.ReasonAuthnUnknownClient
+			case errors.Is(err, ErrInvalidSecret):
+				reason = domain.ReasonAuthnInvalidSecret
+			case errors.Is(err, ErrClientSuspended):
+				reason = domain.ReasonAuthnClientSuspended
+			}
+			traceID := auditCtx.TraceID
+			if traceID == "" {
+				traceID = fmt.Sprintf("trace-%d", s.clock.Now().UnixNano())
+			}
+			actor := auditCtx.Actor
+			if actor == "" {
+				actor = req.ClientID
+			}
+			_ = s.auditWriter.Log(audit.Event{
+				Timestamp: s.clock.Now().UTC(),
+				TraceID:   traceID,
+				Step:      "020-issue-authn",
+				Actor:     actor,
+				Action:    "token.issue.deny",
+				Decision:  "deny",
+				Reason:    string(reason),
+				Success:   false,
+				Metadata: map[string]interface{}{
+					"client_id": req.ClientID,
+					"error":     err.Error(),
+					"reason":    string(reason),
+				},
+			})
+		}
 		return nil, fmt.Errorf("client authentication failed: %w", err)
 	}
 
