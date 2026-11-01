@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/cli"
+	"authz-harness/internal/domain"
 )
 
 const Version = "0.1.0"
@@ -17,11 +19,13 @@ func main() {
 	var (
 		showVersion bool
 		auditPath   string
+		statePath   string
 		verbose     bool
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "프로그램 버전 출력")
 	flag.StringVar(&auditPath, "audit-file", "audit.jsonl", "감사 로그 저장 파일 경로")
+	flag.StringVar(&statePath, "state-file", ".authz-state/public/grants_state.json", "Zone B 상태 파일 경로")
 	flag.BoolVar(&verbose, "verbose", false, "운영 디버그 로그 활성화 (stderr)")
 	flag.Parse()
 
@@ -38,20 +42,38 @@ func main() {
 
 	if showVersion {
 		formatter.PrintBanner(Version)
-		os.Exit(0)
+		os.Exit(int(domain.ExitSuccess))
 	}
 
-	logger.Debug("authz-harness starting", "version", Version, "audit_file", auditPath)
+	logger.Debug("authz-harness starting", "version", Version, "audit_file", auditPath, "state_file", statePath)
 
-	// 3. 감사 로그 (Audit Writer) 초기화 및 시동 확인
+	// 서브커맨드 라우팅 확인
+	args := flag.Args()
+	if len(args) > 0 {
+		subcmd := args[0]
+		switch subcmd {
+		case "grant":
+			grantRunner, err := cli.NewGrantRunner(os.Stdout, os.Stderr, statePath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize grant runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := grantRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
+		default:
+			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
+			os.Exit(int(domain.ExitBadInput))
+		}
+	}
+
+	// 3. 서브커맨드 미지정 시 기본 시동 스모크 및 안내
 	auditWriter, err := audit.NewJSONLWriter(auditPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to initialize audit writer: %v\n", err)
-		os.Exit(1)
+		os.Exit(int(domain.ExitInternalError))
 	}
 	defer auditWriter.Close()
 
-	// 스모크 테스트용 초기 감사 이벤트 1건 기록
 	initEvent := audit.Event{
 		Timestamp: time.Now().UTC(),
 		TraceID:   fmt.Sprintf("boot-%d", time.Now().UnixNano()),
@@ -65,10 +87,11 @@ func main() {
 	}
 	if err := auditWriter.Log(initEvent); err != nil {
 		logger.Error("failed to record startup audit event", "error", err)
-		os.Exit(1)
+		os.Exit(int(domain.ExitAuditFailure))
 	}
 
 	formatter.PrintBanner(Version)
 	fmt.Println("CLI 및 감사/운영로그 3중 배선 골격이 정상 작동 중입니다.")
 	fmt.Printf("감사 로그 저장 위치: %s\n", auditPath)
+	fmt.Printf("상태 파일 저장 위치: %s\n", statePath)
 }

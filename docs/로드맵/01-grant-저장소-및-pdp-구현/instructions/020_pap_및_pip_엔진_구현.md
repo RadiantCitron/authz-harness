@@ -1,6 +1,6 @@
 # 020. PAP 정책 관리 및 PIP 실시간 상태 공급 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: 010 (원자적 Grant/Epoch 상태 저장소 구축) 완료 (`e40e257`)
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -240,11 +240,11 @@ authz-harness grant list [--sub <subject>] [--status <active|revoked>]
 
 ## 8. 완료 조건 (Definition of Done)
 
-- [ ] `internal/authz/pap/service.go` 및 구현체 작성 완료
-- [ ] `internal/authz/pap/pap_test.go` 단위 테스트 작성 및 통과
-- [ ] `internal/authz/pip/service.go` 및 구현체 작성 완료
-- [ ] `internal/authz/pip/pip_test.go` 단위 테스트 작성 및 통과
-- [ ] `cmd/authz-harness/main.go`에 `grant` 서브커맨드(`create`, `revoke`, `bump-epoch`, `list`) 라우팅 완성
-- [ ] `go test -race -v ./internal/authz/pap/... ./internal/authz/pip/...` 100% 통과
-- [ ] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
-- [ ] 대시보드([README.md](../README.md)) 020 구현지시서 링크 등록 및 실행 기록 갱신
+- [x] `internal/authz/pap/service.go` 및 구현체 작성 완료
+- [x] `internal/authz/pap/pap_test.go` 단위 테스트 작성 및 통과
+- [x] `internal/authz/pip/service.go` 및 구현체 작성 완료
+- [x] `internal/authz/pip/pip_test.go` 단위 테스트 작성 및 통과
+- [x] `cmd/authz-harness/main.go`에 `grant` 서브커맨드(`create`, `revoke`, `bump-epoch`, `list`) 라우팅 완성
+- [x] `go test -race -v ./internal/authz/pap/... ./internal/authz/pip/...` 100% 통과
+- [x] Pre-commit 보안 스캔(`public_safety_scan.py`, `gitleaks`) 통과
+- [x] 대시보드([README.md](../README.md)) 020 구현지시서 링크 등록 및 실행 기록 갱신
