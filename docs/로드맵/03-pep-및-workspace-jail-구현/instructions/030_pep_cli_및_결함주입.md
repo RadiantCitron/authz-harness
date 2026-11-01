@@ -1,6 +1,6 @@
 # 030. PEP CLI 명령 및 결함 주입/E2E 검증 구현지시서
 
-> **상태**: `Draft`  
+> **상태**: `Done`  
 > **선행 조건**: Phase 3 Step 020 (PEP 코어 게이트웨이 구현) 완료  
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md)
 
@@ -193,19 +193,19 @@ Reason: PATH_TRAVERSAL_DETECTED: path escapes workspace root
 
 ## 6. 구현 체크리스트 및 완료 조건
 
-- [ ] `internal/cli/pep.go` 구현:
-  - [ ] `PEPRunner` 구조체 및 생성자 `NewPEPRunner`
-  - [ ] `runRead(ctx, args)` 및 `runWrite(ctx, args)` 구현
-  - [ ] 5단계 파이프라인 ASCII 박스 뷰 포매터 구현
-  - [ ] JSON 포맷 지원 (`--output-format json`)
-  - [ ] Fail-Closed `--inject-audit-failure` 스위치 연동
-- [ ] `cmd/authz-harness/main.go` 연동:
-  - [ ] `workspace` 전역 플래그 추가 (기본값: `./workspace`)
-  - [ ] `case "pep":` 라우팅 추가
-- [ ] `internal/cli/pep_test.go` 작성:
-  - [ ] 10대 인수 테스트 시나리오(AC-01 ~ AC-10) 전체 작성 및 100% 통과
-- [ ] 불변식 검증:
-  - [ ] 거부(`11`, `12`, `13`, `14`, `15`) 시 파일 부작용 0바이트 검증
-  - [ ] Fail-Closed 감사 실패 시 쓰기 중단 검증
-  - [ ] `audit.jsonl`에 원시 Bearer 토큰 문자열 유출 0건 확인
-- [ ] `scripts/public_safety_scan.py --tree` Zero Leakage 검증 통과
+- [x] `internal/cli/pep.go` 구현:
+  - [x] `PEPRunner` 구조체 및 생성자 `NewPEPRunner`
+  - [x] `runRead(ctx, args)` 및 `runWrite(ctx, args)` 구현
+  - [x] 5단계 파이프라인 ASCII 박스 뷰 포매터 구현
+  - [x] JSON 포맷 지원 (`--output-format json`)
+  - [x] Fail-Closed `--inject-audit-failure` 스위치 연동
+- [x] `cmd/authz-harness/main.go` 연동:
+  - [x] `workspace` 전역 플래그 추가 (기본값: `workspace`)
+  - [x] `case "pep":` 라우팅 추가
+- [x] `internal/cli/pep_test.go` 작성:
+  - [x] 10대 인수 테스트 시나리오(AC-01 ~ AC-10) 전체 작성 및 100% 통과
+- [x] 불변식 검증:
+  - [x] 거부(`11`, `12`, `13`, `14`, `15`) 시 파일 부작용 0바이트 검증
+  - [x] Fail-Closed 감사 실패 시 쓰기 중단 검증
+  - [x] `audit.jsonl`에 원시 Bearer 토큰 문자열 유출 0건 확인
+- [x] `scripts/public_safety_scan.py --tree` Zero Leakage 검증 통과

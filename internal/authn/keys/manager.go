@@ -59,6 +59,7 @@ func WithClock(c Clock) ManagerOption {
 
 // NewManager 는 주어진 저장소와 감사 로거를 바탕으로 Manager를 초기화한다.
 // 키 링이 존재하지 않으면 첫 번째 active 키를 자동으로 생성하여 초기화한다.
+// 단, 공개 검증 전용(Zone B only) 환경에서는 키 생성을 건너뛴다.
 func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Manager, error) {
 	if store == nil {
 		return nil, errors.New("keys manager: store must not be nil")
@@ -81,6 +82,13 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 	}
 
 	if privState == nil || len(privState.Keys) == 0 {
+		// 공개 키만 있고 비밀 키가 없는 검증 전용 모드(Zone B only)인지 확인
+		pub, pubErr := m.store.LoadPublic()
+		if pubErr == nil && pub != nil && len(pub.Keys) > 0 {
+			// 이미 공개 키가 존재하므로 private 키 자동 생성을 건너뛴다.
+			return m, nil
+		}
+
 		// 최초 활성 키 자동 부트스트랩
 		now := m.clock.Now()
 		kid := fmt.Sprintf("key-%s-01", now.Format("20060102150405"))
@@ -97,6 +105,9 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 		}
 
 		if err := m.store.Save(newState); err != nil {
+			if pubErr == nil {
+				return m, nil
+			}
 			return nil, fmt.Errorf("keys manager: failed to save initial state: %w", err)
 		}
 

@@ -22,8 +22,9 @@ func main() {
 		statePath   string
 		privKeyPath string
 		pubJWKSPath string
-		replayPath  string
-		verbose     bool
+		replayPath   string
+		workspaceDir string
+		verbose      bool
 	)
 
 	flag.BoolVar(&showVersion, "version", false, "프로그램 버전 출력")
@@ -32,6 +33,7 @@ func main() {
 	flag.StringVar(&privKeyPath, "priv-key-file", ".authz-state/private/signing_keys.priv.json", "Zone A 비밀 서명 키 저장소 경로")
 	flag.StringVar(&pubJWKSPath, "pub-jwks-file", ".authz-state/public/jwks.pub.json", "Zone B 공개 검증 키(JWKS) 경로")
 	flag.StringVar(&replayPath, "replay-file", ".authz-state/public/replay_ledger.json", "Zone B Replay 방지 원장 경로")
+	flag.StringVar(&workspaceDir, "workspace", "workspace", "격리된 Workspace 디렉터리 경로")
 	flag.BoolVar(&verbose, "verbose", false, "운영 디버그 로그 활성화 (stderr)")
 	flag.Parse()
 
@@ -89,6 +91,14 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := tokenRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
+		case "pep":
+			pepRunner, err := cli.NewPEPRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize pep runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := pepRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)

@@ -60,14 +60,17 @@ type FileStore struct {
 }
 
 // NewFileStore 는 지정된 Zone A 및 Zone B 경로를 관리하는 FileStore 인스턴스를 생성한다.
+// 검증 전용(Zone B only)인 경우 privPath는 빈 문자열("")일 수 있다.
 func NewFileStore(privPath, pubPath string) (*FileStore, error) {
-	if privPath == "" || pubPath == "" {
-		return nil, errors.New("keys store: privPath and pubPath must not be empty")
+	if pubPath == "" {
+		return nil, errors.New("keys store: pubPath must not be empty")
 	}
 
-	privDir := filepath.Dir(privPath)
-	if err := os.MkdirAll(privDir, 0700); err != nil {
-		return nil, fmt.Errorf("keys store: failed to create private dir %s: %w", privDir, err)
+	if privPath != "" {
+		privDir := filepath.Dir(privPath)
+		if err := os.MkdirAll(privDir, 0700); err != nil {
+			return nil, fmt.Errorf("keys store: failed to create private dir %s: %w", privDir, err)
+		}
 	}
 
 	pubDir := filepath.Dir(pubPath)
@@ -75,10 +78,15 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 		return nil, fmt.Errorf("keys store: failed to create public dir %s: %w", pubDir, err)
 	}
 
+	lockPath := pubPath + ".lock"
+	if privPath != "" {
+		lockPath = privPath + ".lock"
+	}
+
 	return &FileStore{
 		privPath: privPath,
 		pubPath:  pubPath,
-		lockPath: privPath + ".lock",
+		lockPath: lockPath,
 	}, nil
 }
 
