@@ -1,0 +1,5 @@
+# Instructions directory for 02-oauth21-토큰-및-축소위임-구현
+# Steps:
+# 010_jwk_키링_및_수명주기_관리.md
+# 020_rfc9068_토큰_발급_및_검증.md
+# 030_rfc8693_축소위임_엔진.md
