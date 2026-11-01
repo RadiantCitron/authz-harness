@@ -1,11 +1,18 @@
 # 로드맵 전체 색인 (Roadmap Index)
 
-> **규칙**: 전체 로드맵의 진행 상태는 각 로드맵의 `README.md` 대시보드 표를 단일 원천으로 관리합니다.
+> **규칙**: 전체 로드맵의 진행 상태는 각 로드맵의 `README.md` 대시보드 표를 단일 원천(SSOT)으로 관리합니다.
+> - **마스터 설계 청사진**: [MASTER_ROADMAP.md](MASTER_ROADMAP.md)
+> - **엔터프라이즈 아키텍처 심층 검토 보고서**: [ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md](ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md)
+> - **작업 흐름 및 로드맵 거버넌스 정책**: [ROADMAP_정책.md](ROADMAP_정책.md)
+
+---
+
+## 단위 로드맵 색인
 
 | 번호 | 로드맵 명 | 상태 | 핵심 목표 |
 |:---:|---|:---:|---|
-| **00** | [00-개발환경-및-기반골격-구축](00-개발환경-및-기반골격-구축/README.md) | `Draft` | Go 1.27 개발환경 구축, Zero Leakage 보안 가드레일, 프로젝트 헌장 및 삼분 배선 골격 수립 |
-| **01** | `01-grant-저장소-및-pdp-구현` | `Draft` | 권한 부여/회수(Grant/Revoke) 생명주기 및 중앙 PDP 정책 엔진 구현 |
+| **00** | [00-개발환경-및-기반골격-구축](00-개발환경-및-기반골격-구축/README.md) | `Done` | Go 1.27 개발환경 구축, Zero Leakage 보안 가드레일, 프로젝트 헌장 및 삼분 배선 골격 수립 |
+| **01** | [01-grant-저장소-및-pdp-구현](01-grant-저장소-및-pdp-구현/README.md) | `Draft` | 권한 부여/회수(Grant/Revoke) 생명주기 및 중앙 PDP 정책 엔진 구현 |
 | **02** | `02-oauth21-토큰-및-축소위임-구현` | `Draft` | OAuth 2.1 Access Token 서명/검증 및 팀장→서브에이전트 축소 위임(Downscoping) |
 | **03** | `03-pep-및-workspace-jail-구현` | `Draft` | 정책 집행점(PEP) 및 파일시스템 격리(Workspace Jail) 강제 |
 | **04** | `04-오케스트레이터-및-서브프로세스-격리` | `Draft` | OS 서브프로세스 생성(Spawn), 토큰 격리 전달 및 종료 코드 수거 |
