@@ -51,6 +51,39 @@ const (
 	// ReasonInvalidToken 은 토큰이 만료되었거나 서명이 유효하지 않음을 나타낸다.
 	ReasonInvalidToken Reason = "INVALID_TOKEN"
 
+	// ReasonAuthnUnknownClient 는 등록되지 않은 client_id로 인증을 시도했음을 나타낸다.
+	ReasonAuthnUnknownClient Reason = "AUTHN_UNKNOWN_CLIENT"
+
+	// ReasonAuthnInvalidSecret 은 클라이언트 secret이 일치하지 않음을 나타낸다.
+	ReasonAuthnInvalidSecret Reason = "AUTHN_INVALID_SECRET"
+
+	// ReasonAuthnClientSuspended 는 정지 또는 비활성화된 클라이언트임을 나타낸다.
+	ReasonAuthnClientSuspended Reason = "AUTHN_CLIENT_SUSPENDED"
+
+	// ReasonTokenInvalidType 은 토큰 헤더의 typ이 at+jwt가 아님을 나타낸다.
+	ReasonTokenInvalidType Reason = "TOKEN_INVALID_TYPE"
+
+	// ReasonTokenAlgNotAllowed 는 허용되지 않은 서명 알고리즘(alg: none 또는 EdDSA 외)임을 나타낸다.
+	ReasonTokenAlgNotAllowed Reason = "TOKEN_ALG_NOT_ALLOWED"
+
+	// ReasonTokenExpired 는 토큰의 exp(만료 시각)가 경과했음을 나타낸다.
+	ReasonTokenExpired Reason = "TOKEN_EXPIRED"
+
+	// ReasonTokenNotYetValid 는 토큰의 nbf(유효 시작 시각)에 도달하지 않았음을 나타낸다.
+	ReasonTokenNotYetValid Reason = "TOKEN_NOT_YET_VALID"
+
+	// ReasonTokenInvalidIssAud 는 iss 또는 aud 클레임이 기대값과 일치하지 않음을 나타낸다.
+	ReasonTokenInvalidIssAud Reason = "TOKEN_INVALID_ISS_AUD"
+
+	// ReasonTokenSubjectMismatch 는 sub 클레임이 기대값과 일치하지 않음을 나타낸다.
+	ReasonTokenSubjectMismatch Reason = "TOKEN_SUBJECT_MISMATCH"
+
+	// ReasonTokenReplayDetected 는 이미 소비된 jti를 재사용한 공격임을 나타낸다.
+	ReasonTokenReplayDetected Reason = "TOKEN_REPLAY_DETECTED"
+
+	// ReasonTokenMalformed 는 JWT 구조가 3단 점 분리 형태가 아니거나 JSON 역직렬화에 실패했음을 나타낸다.
+	ReasonTokenMalformed Reason = "TOKEN_MALFORMED"
+
 	// ReasonTokenKeyRetired 는 서명에 사용된 키가 폐기(retired)되어 검증 거부됨을 나타낸다.
 	ReasonTokenKeyRetired Reason = "TOKEN_KEY_RETIRED"
 
