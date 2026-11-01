@@ -116,4 +116,10 @@ const (
 
 	// ReasonDelegationScopeEmpty 는 위임 요청 시 요청 스코프가 비어있음을 나타낸다.
 	ReasonDelegationScopeEmpty Reason = "DELEGATION_SCOPE_EMPTY"
+
+	// ReasonInvalidArguments 는 요청 인자(Action, Resource 등)가 비어있거나 유효하지 않음을 나타낸다.
+	ReasonInvalidArguments Reason = "INVALID_ARGUMENTS"
+
+	// ReasonAuditLogFailed 는 감사 기록(audit.Writer) 실패로 인해 안전 거부되었음을 나타낸다.
+	ReasonAuditLogFailed Reason = "AUDIT_LOG_FAILED"
 )
