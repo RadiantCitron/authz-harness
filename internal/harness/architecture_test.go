@@ -163,4 +163,46 @@ func TestArchitectureGuardrails(t *testing.T) {
 			t.Fatalf("violation of AP-01: found %d strings.Contains(err.Error(), ...) occurrences:\n%s", len(violations), strings.Join(violations, "\n"))
 		}
 	})
+
+	// TC-060-04: PEP Gateway.Execute 의 단일 출구(Single-Entry Single-Exit) 보장 검증
+	t.Run("TC-060-04: PEP Gateway.Execute 함수의 단일 출구(SESE 1 return) 정적 구조 검증", func(t *testing.T) {
+		pepFile := filepath.Join(root, "internal", "authz", "pep", "gateway.go")
+		fset := token.NewFileSet()
+		fileNode, err := parser.ParseFile(fset, pepFile, nil, 0)
+		if err != nil {
+			t.Fatalf("failed to parse gateway.go: %v", err)
+		}
+
+		var executeFn *ast.FuncDecl
+		for _, decl := range fileNode.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			if fn.Name.Name == "Execute" && fn.Recv != nil && len(fn.Recv.List) > 0 {
+				executeFn = fn
+				break
+			}
+		}
+
+		if executeFn == nil {
+			t.Fatal("failed to find (g *gateway) Execute declaration in gateway.go")
+		}
+
+		var returnStmts []*ast.ReturnStmt
+		ast.Inspect(executeFn.Body, func(n ast.Node) bool {
+			// 중첩 함수 리터럴(익명 함수)의 return은 제외
+			if fnLit, ok := n.(*ast.FuncLit); ok {
+				return fnLit == nil // 익명 함수 내부 탐색 방지
+			}
+			if ret, ok := n.(*ast.ReturnStmt); ok {
+				returnStmts = append(returnStmts, ret)
+			}
+			return true
+		})
+
+		if len(returnStmts) != 1 {
+			t.Fatalf("violation of SESE: (g *gateway) Execute must have exactly 1 return statement (finalize 단일 출구), found %d", len(returnStmts))
+		}
+	})
 }
