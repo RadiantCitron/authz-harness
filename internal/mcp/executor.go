@@ -56,37 +56,18 @@ func (e *SubprocessExecutor) ExecuteTool(ctx context.Context, req *ToolCallReque
 			}
 			return &ToolExecutionResult{
 				Content: []ToolContent{
-					{Type: "text", Text: msg},
+					{Type: "text", Text: sanitizeMessage(msg)},
 				},
 				IsError: false,
 			}, nil
 		}
 
-		// 자식 프로세스 거부 응답 (ExitCode != 0)
-		errMsg := resp.Error
-		if errMsg == "" {
-			errMsg = fmt.Sprintf("tool execution failed with exit code %d (reason: %s)", spawnRes.ExitCode, resp.Reason)
-		}
-		return &ToolExecutionResult{
-			Content: []ToolContent{
-				{Type: "text", Text: errMsg},
-			},
-			IsError: true,
-		}, nil
+		// 자식 프로세스 거부 응답 (ExitCode != 0): 오류 매핑 표를 통해 안전하게 정제
+		return MapSubprocessError(spawnRes.ExitCode, resp.Reason, resp.Error), nil
 	}
 
 	// 2. Response 프레임 파싱 실패 시 stderr 또는 raw 에러 반환
-	errMsg := spawnRes.StderrRaw
-	if errMsg == "" {
-		errMsg = fmt.Sprintf("subprocess failed with exit code %d without structured response", spawnRes.ExitCode)
-	}
-
-	return &ToolExecutionResult{
-		Content: []ToolContent{
-			{Type: "text", Text: errMsg},
-		},
-		IsError: true,
-	}, nil
+	return MapSubprocessError(spawnRes.ExitCode, "", spawnRes.StderrRaw), nil
 }
 
 func generateTraceID() string {

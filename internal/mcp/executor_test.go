@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"authz-harness/internal/domain"
@@ -93,7 +94,10 @@ func TestSubprocessExecutor_Denied(t *testing.T) {
 	if !res.IsError {
 		t.Errorf("expected IsError=true, got false")
 	}
-	if len(res.Content) != 1 || res.Content[0].Text != "token insufficient scope" {
+	if len(res.Content) != 1 || !strings.Contains(res.Content[0].Text, "token insufficient scope") {
 		t.Errorf("unexpected content: %+v", res.Content)
+	}
+	if !strings.Contains(res.Content[0].Text, "TOKEN_INSUFFICIENT_SCOPE") {
+		t.Errorf("expected TOKEN_INSUFFICIENT_SCOPE in text, got: %v", res.Content[0].Text)
 	}
 }
