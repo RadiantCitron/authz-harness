@@ -241,4 +241,37 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+
+	// TC-090-01: MCP 패키지의 파일/OS/PDP/PIP/Jail/Keys 의존성 0% 검증
+	t.Run("TC-090-01: MCP 어댑터 패키지의 파일/OS/PDP/PIP/Jail/Keys 의존성 0% 검증", func(t *testing.T) {
+		mcpDir := filepath.Join(root, "internal", "mcp")
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, mcpDir, func(fi fs.FileInfo) bool {
+			return !strings.HasSuffix(fi.Name(), "_test.go")
+		}, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("failed to parse mcp dir: %v", err)
+		}
+
+		prohibited := map[string]bool{
+			`"os"`:                                 true,
+			`"io/fs"`:                              true,
+			`"path/filepath"`:                      true,
+			`"authz-harness/internal/authz/pdp"`:   true,
+			`"authz-harness/internal/authz/pip"`:   true,
+			`"authz-harness/internal/jail"`:        true,
+			`"authz-harness/internal/authn/keys"`:   true,
+		}
+
+		for _, pkg := range pkgs {
+			for fname, file := range pkg.Files {
+				for _, imp := range file.Imports {
+					val := imp.Path.Value
+					if prohibited[val] {
+						t.Errorf("violation of TC-090-01 in %s: internal/mcp must not import %s", fname, val)
+					}
+				}
+			}
+		}
+	})
 }
