@@ -26,6 +26,7 @@ type AppConfig struct {
 	ReplayPath   string
 	AuditPath    string
 	WorkspaceDir string
+	VerifyOnly   bool // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
 	Clock        domain.Clock
 	Logger       *slog.Logger
 }
@@ -36,12 +37,12 @@ type AppStack struct {
 	AuditWriter   audit.Writer
 	KeyStore      keys.Store
 	KeyManager    keys.KeyManager
-	TokenIssuer   token.TokenIssuer
+	TokenIssuer   token.TokenIssuer // VerifyOnly 모드에서는 nil
 	TokenVerifier token.TokenVerifier
-	ClientReg     *token.InMemoryClientRegistry
+	ClientReg     *token.InMemoryClientRegistry // VerifyOnly 모드에서는 nil
 	ReplayLedger  token.ReplayLedger
 	StateStore    state.Store
-	PAP           pap.Service
+	PAP           pap.Service // VerifyOnly 모드에서는 nil
 	PIP           pip.Service
 	PDP           pdp.Service
 	Jail          jail.Jail
@@ -50,7 +51,7 @@ type AppStack struct {
 
 // Close 는 AppStack 내부의 리소스(AuditWriter 파일 디스크립터 등)를 안전하게 정리한다.
 func (s *AppStack) Close() error {
-	if s.AuditWriter != nil {
+	if s != nil && s.AuditWriter != nil {
 		return s.AuditWriter.Close()
 	}
 	return nil
@@ -65,11 +66,14 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	// 1. 디렉터리 준비
 	pathsToEnsure := []string{
 		cfg.StatePath,
-		cfg.PrivKeyPath,
 		cfg.PubJWKSPath,
 		cfg.ReplayPath,
 		cfg.AuditPath,
 	}
+	if !cfg.VerifyOnly && cfg.PrivKeyPath != "" {
+		pathsToEnsure = append(pathsToEnsure, cfg.PrivKeyPath)
+	}
+
 	for _, p := range pathsToEnsure {
 		if p != "" {
 			dir := filepath.Dir(p)
@@ -91,7 +95,12 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	}
 
 	// 3. 키 스토어 및 키 매니저 초기화
-	keyStore, err := keys.NewFileStore(cfg.PrivKeyPath, cfg.PubJWKSPath)
+	privPath := cfg.PrivKeyPath
+	if cfg.VerifyOnly {
+		privPath = "" // Zone A 접근 차단
+	}
+
+	keyStore, err := keys.NewFileStore(privPath, cfg.PubJWKSPath)
 	if err != nil {
 		_ = auditWriter.Close()
 		return nil, fmt.Errorf("app builder: key store: %w", err)
@@ -103,22 +112,28 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		return nil, fmt.Errorf("app builder: key manager: %w", err)
 	}
 
-	// 서명 키 초기 확인 및 자동 회전
-	activeKey, err := keyMgr.GetActiveSigningKey()
-	if err != nil || activeKey == nil {
-		if _, err := keyMgr.RotateKey(domain.AuditContext{
-			TraceID: "builder-init-rotation",
-			Actor:   "system",
-			Reason:  "initial active key setup via app builder",
-		}); err != nil {
-			_ = auditWriter.Close()
-			return nil, fmt.Errorf("app builder: initial key rotation: %w", err)
+	// 서명 키 초기 확인 및 자동 회전 (VerifyOnly 모드가 아닐 때만)
+	if !cfg.VerifyOnly {
+		activeKey, err := keyMgr.GetActiveSigningKey()
+		if err != nil || activeKey == nil {
+			if _, err := keyMgr.RotateKey(domain.AuditContext{
+				TraceID: "builder-init-rotation",
+				Actor:   "system",
+				Reason:  "initial active key setup via app builder",
+			}); err != nil {
+				_ = auditWriter.Close()
+				return nil, fmt.Errorf("app builder: initial key rotation: %w", err)
+			}
 		}
 	}
 
 	// 4. 토큰 발급기 및 검증기
-	clientReg := token.NewInMemoryClientRegistry()
-	tokenIssuer := token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock)
+	var clientReg *token.InMemoryClientRegistry
+	var tokenIssuer token.TokenIssuer
+	if !cfg.VerifyOnly {
+		clientReg = token.NewInMemoryClientRegistry()
+		tokenIssuer = token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock)
+	}
 
 	replayLedger, err := token.NewFileReplayLedger(cfg.ReplayPath, cfg.Clock)
 	if err != nil {
@@ -129,34 +144,52 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, cfg.Clock)
 
 	// 5. 인가 상태 저장소 및 PAP / PIP / PDP
-	stateStore, err := state.NewFileStore(cfg.StatePath)
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: state store: %w", err)
-	}
+	var stateStore state.Store
+	var papSvc pap.Service
+	var pipSvc pip.Service
+	var pdpSvc pdp.Service
 
-	papSvc := pap.NewService(stateStore, auditWriter, pap.WithClock(cfg.Clock))
-	pipSvc := pip.NewService(stateStore)
-	pdpSvc := pdp.NewService(pipSvc, auditWriter)
+	if cfg.StatePath != "" {
+		st, err := state.NewFileStore(cfg.StatePath)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: state store: %w", err)
+		}
+		stateStore = st
+
+		if !cfg.VerifyOnly {
+			papSvc = pap.NewService(stateStore, auditWriter, pap.WithClock(cfg.Clock))
+		}
+		pipSvc = pip.NewService(stateStore)
+		pdpSvc = pdp.NewService(pipSvc, auditWriter)
+	}
 
 	// 6. 워크스페이스 격리(Jail) 및 PEP 게이트웨이
-	workspaceJail, err := jail.New(cfg.WorkspaceDir)
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: jail: %w", err)
+	var workspaceJail jail.Jail
+	if cfg.WorkspaceDir != "" {
+		j, err := jail.New(cfg.WorkspaceDir)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: jail: %w", err)
+		}
+		workspaceJail = j
 	}
 
-	pepGateway, err := pep.NewGateway(pep.Config{
-		Verifier:    tokenVerifier,
-		PDP:         pdpSvc,
-		Jail:        workspaceJail,
-		AuditWriter: auditWriter,
-		Clock:       cfg.Clock,
-		Logger:      cfg.Logger,
-	})
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: pep gateway: %w", err)
+	var pepGateway pep.Gateway
+	if pdpSvc != nil {
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    tokenVerifier,
+			PDP:         pdpSvc,
+			Jail:        workspaceJail,
+			AuditWriter: auditWriter,
+			Clock:       cfg.Clock,
+			Logger:      cfg.Logger,
+		})
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: pep gateway: %w", err)
+		}
+		pepGateway = gw
 	}
 
 	return &AppStack{

@@ -10,20 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"authz-harness/internal/audit"
-	"authz-harness/internal/authn/keys"
-	"authz-harness/internal/authn/token"
-	"authz-harness/internal/authz/pdp"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authz/pep"
-	"authz-harness/internal/authz/pip"
-	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
-	"authz-harness/internal/jail"
 )
 
 // PEPRunner 는 `pep` 하위 명령어(read, write) 실행을 주관하는 CLI 러너다.
 type PEPRunner struct {
-	gateway      pep.Gateway
+	stack        *app.AppStack
 	out          io.Writer
 	errOut       io.Writer
 	workspaceDir string
@@ -38,58 +32,20 @@ func NewPEPRunner(
 	out, errOut io.Writer,
 	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
 ) (*PEPRunner, error) {
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to prepare workspace dir: %w", err)
-	}
-
-	workspaceJail, err := jail.New(workspaceDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init workspace jail: %w", err)
-	}
-
-	stateStore, err := state.NewFileStore(statePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init state store: %w", err)
-	}
-
-	auditWriter, err := audit.NewJSONLWriter(auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit writer: %w", err)
-	}
-
-	pipSvc := pip.NewService(stateStore)
-	pdpSvc := pdp.NewService(pipSvc, auditWriter)
-
-	keyStore, err := keys.NewFileStore("", pubJWKSPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keys store: %w", err)
-	}
-
-	keyMgr, err := keys.NewManager(keyStore, auditWriter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keys manager: %w", err)
-	}
-
-	clock := domain.RealClock{}
-	replayLedger, err := token.NewFileReplayLedger(replayPath, clock)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init replay ledger: %w", err)
-	}
-
-	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clock)
-
-	gw, err := pep.NewGateway(pep.Config{
-		Verifier:    tokenVerifier,
-		PDP:         pdpSvc,
-		Jail:        workspaceJail,
-		AuditWriter: auditWriter,
+	stack, err := app.BuildStack(app.AppConfig{
+		WorkspaceDir: workspaceDir,
+		StatePath:    statePath,
+		PubJWKSPath:  pubJWKSPath,
+		ReplayPath:   replayPath,
+		AuditPath:    auditPath,
+		VerifyOnly:   true, // PEP CLI 는 검증 전용(Zone A 개인키 미접근)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init pep gateway: %w", err)
+		return nil, fmt.Errorf("failed to build pep stack: %w", err)
 	}
 
 	return &PEPRunner{
-		gateway:      gw,
+		stack:        stack,
 		out:          out,
 		errOut:       errOut,
 		workspaceDir: workspaceDir,
@@ -98,6 +54,14 @@ func NewPEPRunner(
 		pubJWKSPath:  pubJWKSPath,
 		replayPath:   replayPath,
 	}, nil
+}
+
+// Close 는 PEPRunner 내부 스택(AuditWriter 등) 리소스를 정리한다.
+func (r *PEPRunner) Close() error {
+	if r.stack != nil {
+		return r.stack.Close()
+	}
+	return nil
 }
 
 // Run 은 주어진 인자에 따라 `read` 또는 `write` 서브커맨드를 라우팅 실행한다.
@@ -207,7 +171,7 @@ func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode 
 		TraceID:            traceID,
 	}
 
-	res, err := r.gateway.Execute(ctx, req)
+	res, err := r.stack.PEP.Execute(ctx, req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: internal error executing pep read: %v\n", err)
 		return domain.ExitInternalError
@@ -318,7 +282,7 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 		TraceID:            traceID,
 	}
 
-	res, err := r.gateway.Execute(ctx, req)
+	res, err := r.stack.PEP.Execute(ctx, req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: internal error executing pep write: %v\n", err)
 		return domain.ExitInternalError

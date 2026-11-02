@@ -7,15 +7,10 @@ import (
 	"io"
 	"os"
 
-	"authz-harness/internal/audit"
-	"authz-harness/internal/authn/keys"
-	"authz-harness/internal/authn/token"
-	"authz-harness/internal/authz/pdp"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authz/pep"
-	"authz-harness/internal/authz/pip"
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
-	"authz-harness/internal/jail"
 	"authz-harness/internal/subagent"
 )
 
@@ -88,69 +83,24 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		return domain.ExitBadInput
 	}
 
-	// 1. 디렉터리 및 컴포넌트 초기화
-	if err := os.MkdirAll(workspaceFlag, 0755); err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to prepare workspace dir: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	workspaceJail, err := jail.New(workspaceFlag)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init workspace jail: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	stateStore, err := state.NewFileStore(stateFlag)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init state store: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	auditWriter, err := audit.NewJSONLWriter(auditFlag)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init audit writer: %v\n", err)
-		return domain.ExitInternalError
-	}
-	defer auditWriter.Close()
-
-	pipSvc := pip.NewService(stateStore)
-	pdpSvc := pdp.NewService(pipSvc, auditWriter)
-
-	keyStore, err := keys.NewFileStore("", pubJWKSFlag)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init keys store: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	keyMgr, err := keys.NewManager(keyStore, auditWriter)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init keys manager: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	clock := domain.RealClock{}
-	replayLedger, err := token.NewFileReplayLedger(replayFlag, clock)
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init replay ledger: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clock)
-
-	gw, err := pep.NewGateway(pep.Config{
-		Verifier:    tokenVerifier,
-		PDP:         pdpSvc,
-		Jail:        workspaceJail,
-		AuditWriter: auditWriter,
+	// 1. 단일 합성 루트(AppStack)를 통한 검증 전용 컴포넌트 조립
+	stack, err := app.BuildStack(app.AppConfig{
+		WorkspaceDir: workspaceFlag,
+		StatePath:    stateFlag,
+		PubJWKSPath:  pubJWKSFlag,
+		ReplayPath:   replayFlag,
+		AuditPath:    auditFlag,
+		VerifyOnly:   true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
 	})
 	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init pep gateway: %v\n", err)
+		fmt.Fprintf(r.stderr, "Error: failed to build subagent stack: %v\n", err)
 		return domain.ExitInternalError
 	}
+	defer stack.Close()
 
 	// 결함 주입 데코레이터 적용: req.InjectRevokeBeforeIO 시 I/O 직전 모든 Grant 회수 시뮬레이션
-	decoratedGW := pep.WithBeforeIOHook(gw, func(ctx context.Context, req pep.Request) error {
-		return stateStore.Update(func(st *state.GrantsState) error {
+	decoratedGW := pep.WithBeforeIOHook(stack.PEP, func(ctx context.Context, req pep.Request) error {
+		return stack.StateStore.Update(func(st *state.GrantsState) error {
 			for i := range st.Grants {
 				st.Grants[i].Status = domain.GrantStatusRevoked
 			}

@@ -274,4 +274,56 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+
+	// TC-081-01: internal/authn 및 internal/authz/state 내 직접 syscall.Flock 호출 0건 검증 (storage.AtomicFileStore 일원화)
+	t.Run("TC-081-01: authn 및 authz/state 내 직접 syscall.Flock 호출 금지 (storage 일원화)", func(t *testing.T) {
+		dirsToCheck := []string{
+			filepath.Join(root, "internal", "authn"),
+			filepath.Join(root, "internal", "authz", "state"),
+		}
+
+		fset := token.NewFileSet()
+		for _, dir := range dirsToCheck {
+			err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() {
+					return nil
+				}
+				if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+					return nil
+				}
+
+				node, err := parser.ParseFile(fset, path, nil, 0)
+				if err != nil {
+					return err
+				}
+
+				ast.Inspect(node, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					pkgIdent, ok := sel.X.(*ast.Ident)
+					if !ok || pkgIdent.Name != "syscall" || sel.Sel.Name != "Flock" {
+						return true
+					}
+
+					rel, _ := filepath.Rel(root, path)
+					t.Errorf("TC-081-01 violation: direct syscall.Flock found in %s:%d (must use internal/storage)",
+						rel, fset.Position(call.Pos()).Line)
+					return true
+				})
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("failed to walk %s: %v", dir, err)
+			}
+		}
+	})
 }

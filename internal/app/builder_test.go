@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -82,5 +83,55 @@ func TestBuildStack_ValidationAndClose(t *testing.T) {
 	// Close 호출 검증
 	if err := stack.Close(); err != nil {
 		t.Errorf("Close failed: %v", err)
+	}
+}
+
+// T-03: VerifyOnly 모드 검증 (Zone A 미접근, 서명키 자동 회전 없음, Issuer/PAP nil 허용)
+func TestBuildStack_VerifyOnlyMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	pubPath := filepath.Join(tmpDir, "keys_pub.json")
+	privPath := filepath.Join(tmpDir, "should_not_exist_priv.json")
+
+	// 먼저 pubJWKS 파일만 준비
+	if err := os.WriteFile(pubPath, []byte(`{"version":1,"keys":[]}`), 0644); err != nil {
+		t.Fatalf("failed to prep pub jwks: %v", err)
+	}
+
+	cfg := app.AppConfig{
+		StatePath:    filepath.Join(tmpDir, "state.json"),
+		PrivKeyPath:  privPath,
+		PubJWKSPath:  pubPath,
+		ReplayPath:   filepath.Join(tmpDir, "replay.json"),
+		AuditPath:    filepath.Join(tmpDir, "audit.jsonl"),
+		WorkspaceDir: filepath.Join(tmpDir, "workspace"),
+		VerifyOnly:   true,
+		Clock:        mockClock{now: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)},
+	}
+
+	stack, err := app.BuildStack(cfg)
+	if err != nil {
+		t.Fatalf("BuildStack(VerifyOnly) failed: %v", err)
+	}
+	defer stack.Close()
+
+	// Zone A 파일이 생성되지 않았음을 확인
+	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
+		t.Errorf("Zone A private file should NOT be touched in VerifyOnly mode: %s", privPath)
+	}
+
+	// VerifyOnly 모드에서는 Issuer 및 PAP가 nil이어야 함
+	if stack.TokenIssuer != nil {
+		t.Error("TokenIssuer should be nil in VerifyOnly mode")
+	}
+	if stack.PAP != nil {
+		t.Error("PAP should be nil in VerifyOnly mode")
+	}
+
+	// 검증기 및 PEP는 정상이어야 함
+	if stack.TokenVerifier == nil {
+		t.Error("TokenVerifier should not be nil")
+	}
+	if stack.PEP == nil {
+		t.Error("PEP should not be nil")
 	}
 }

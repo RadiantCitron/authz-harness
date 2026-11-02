@@ -8,17 +8,15 @@ import (
 	"io"
 	"time"
 
-	"authz-harness/internal/audit"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authn/exchange"
-	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 )
 
 // TokenRunner 는 `token` 하위 명령어(issue, inspect, verify, exchange) 실행을 주관하는 러너다.
 type TokenRunner struct {
-	issuer     *token.Service
-	verifier   *token.Verifier
+	stack      *app.AppStack
 	exchange   exchange.Service
 	out        io.Writer
 	errOut     io.Writer
@@ -30,36 +28,28 @@ type TokenRunner struct {
 
 // NewTokenRunner 는 TokenRunner 를 생성한다.
 func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
-	st, err := keys.NewFileStore(privPath, pubPath)
+	stack, err := app.BuildStack(app.AppConfig{
+		PrivKeyPath: privPath,
+		PubJWKSPath: pubPath,
+		ReplayPath:  replayPath,
+		AuditPath:   auditPath,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init keys store: %w", err)
+		return nil, fmt.Errorf("failed to build token stack: %w", err)
 	}
 
-	auditWriter, err := audit.NewJSONLWriter(auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit writer: %w", err)
-	}
-
-	keyMgr, err := keys.NewManager(st, auditWriter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keys manager: %w", err)
-	}
-
-	clock := domain.RealClock{}
-	replayLedger, err := token.NewFileReplayLedger(replayPath, clock)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init replay ledger: %w", err)
-	}
-
-	clients := token.NewInMemoryClientRegistry()
-	issuer := token.NewService(keyMgr, clients, auditWriter, clock)
-	verifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clock)
 	validator := exchange.NewDownscopeValidator()
-	exchangeSvc := exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, clock)
+	exchangeSvc := exchange.NewExchangeService(
+		stack.TokenIssuer,
+		stack.TokenVerifier,
+		stack.ClientReg,
+		validator,
+		stack.AuditWriter,
+		domain.RealClock{},
+	)
 
 	return &TokenRunner{
-		issuer:     issuer,
-		verifier:   verifier,
+		stack:      stack,
 		exchange:   exchangeSvc,
 		out:        out,
 		errOut:     errOut,
@@ -68,6 +58,14 @@ func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditP
 		replayPath: replayPath,
 		auditPath:  auditPath,
 	}, nil
+}
+
+// Close 는 TokenRunner 내부 스택 리소스를 정리한다.
+func (r *TokenRunner) Close() error {
+	if r.stack != nil {
+		return r.stack.Close()
+	}
+	return nil
 }
 
 // Run 은 token 하위 명령어를 파싱하고 라우팅한다.
@@ -142,7 +140,7 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 		Actor:   *clientID,
 	}
 
-	result, err := r.issuer.IssueToken(req, opts, auditCtx)
+	result, err := r.stack.TokenIssuer.IssueToken(req, opts, auditCtx)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "FAIL: [ISSUE_DENIED] %v\n", err)
 		return domain.ExitTokenInvalid
@@ -175,7 +173,7 @@ func (r *TokenRunner) runInspect(ctx context.Context, args []string) domain.Exit
 		return domain.ExitBadInput
 	}
 
-	header, claims, err := r.verifier.InspectToken(*tokenStr)
+	header, claims, err := r.stack.TokenVerifier.InspectToken(*tokenStr)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "FAIL: [INSPECT_FAILED] %v\n", err)
 		return domain.ExitTokenInvalid
@@ -237,7 +235,7 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		Actor:   "cli-verifier",
 	}
 
-	verified, err := r.verifier.VerifyToken(*tokenStr, opts, auditCtx)
+	verified, err := r.stack.TokenVerifier.VerifyToken(*tokenStr, opts, auditCtx)
 	if err != nil {
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [GATE_1_BLOCKED] %s\n", reason)
@@ -294,15 +292,28 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 			return domain.ExitBadInput
 		}
 		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
-		st, _ := keys.NewFileStore(r.privPath, r.pubPath)
-		auditWriter, _ := audit.NewJSONLWriter(r.auditPath)
-		keyMgr, _ := keys.NewManager(st, auditWriter, keys.WithClock(offsetClock))
-		replayLedger, _ := token.NewFileReplayLedger(r.replayPath, offsetClock)
-		clients := token.NewInMemoryClientRegistry()
-		issuer := token.NewService(keyMgr, clients, auditWriter, offsetClock)
-		verifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, offsetClock)
+		offsetStack, err := app.BuildStack(app.AppConfig{
+			PrivKeyPath: r.privPath,
+			PubJWKSPath: r.pubPath,
+			ReplayPath:  r.replayPath,
+			AuditPath:   r.auditPath,
+			Clock:       offsetClock,
+		})
+		if err != nil {
+			fmt.Fprintf(r.errOut, "Error: failed to build offset stack: %v\n", err)
+			return domain.ExitInternalError
+		}
+		defer offsetStack.Close()
+
 		validator := exchange.NewDownscopeValidator()
-		exchangeService = exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, offsetClock)
+		exchangeService = exchange.NewExchangeService(
+			offsetStack.TokenIssuer,
+			offsetStack.TokenVerifier,
+			offsetStack.ClientReg,
+			validator,
+			offsetStack.AuditWriter,
+			offsetClock,
+		)
 	}
 
 	req := exchange.ExchangeRequest{
