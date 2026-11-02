@@ -124,6 +124,11 @@ func main() {
 			auditRunner := cli.NewAuditRunner(os.Stdout, os.Stderr, auditPath)
 			exitCode := auditRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "mcp":
+			// 020 단계: stdio JSON-RPC 어댑터 서버 (집행기 배선은 030에서 연결)
+			mcpRunner := cli.NewMCPRunner(os.Stdin, os.Stdout, os.Stderr, nil)
+			exitCode := mcpRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
 		default:
 			fmt.Fprintf(os.Stderr, "Error: unknown command '%s'\n", subcmd)
 			os.Exit(int(domain.ExitBadInput))
