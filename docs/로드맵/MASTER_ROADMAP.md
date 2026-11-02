@@ -3,7 +3,7 @@
 > **상위 안내**: 본 문서는 `authz-harness` 전체 아키텍처 및 Phase 0~6의 통합 청사진을 보존하는 **마스터 설계도**입니다.
 > - **로드맵 거버넌스 및 실행 절차**: [ROADMAP_정책.md](ROADMAP_정책.md)
 > - **전체 로드맵 색인 및 진행 대시보드**: [README.md](README.md)
-> - **엔터프라이즈 아키텍처 심층 검토 보고서**: [ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md](ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md)
+> - **엔터프라이즈 아키텍처 심층 검토 보고서**: [003-엔터프라이즈_인가_보강_기술보고서.md](../보고서/003-엔터프라이즈_인가_보강_기술보고서.md)
 > - **최상위 프로젝트 헌장**: [AGENTS.md](../../AGENTS.md)
 
 ---

@@ -2,8 +2,10 @@
 
 > **규칙**: 전체 로드맵의 진행 상태는 각 로드맵의 `README.md` 대시보드 표를 단일 원천(SSOT)으로 관리합니다.
 > - **마스터 설계 청사진**: [MASTER_ROADMAP.md](MASTER_ROADMAP.md)
-> - **엔터프라이즈 아키텍처 심층 검토 보고서**: [ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md](ENTERPRISE_AUTH_SUPPLEMENT_REPORT.md)
-> - **도메인 보호 및 단일 입출구 배선 감사 보고서**: [../../DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md](../../DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md)
+> - **보고서 종합 색인**: [docs/보고서/README.md](../보고서/README.md)
+> - **엔터프라이즈 아키텍처 보강 보고서**: [003-엔터프라이즈_인가_보강_기술보고서.md](../보고서/003-엔터프라이즈_인가_보강_기술보고서.md)
+> - **도메인 보호 및 배선 감사 보고서**: [001-엔터프라이즈_도메인보호_및_12대안티패턴_정밀진단보고서.md](../보고서/001-엔터프라이즈_도메인보호_및_12대안티패턴_정밀진단보고서.md)
+> - **크로스커팅 배선 현황 진단 보고서**: [002-크로스커팅_배선_현황_및_엔터프라이즈_파이프라인_진단보고서.md](../보고서/002-크로스커팅_배선_현황_및_엔터프라이즈_파이프라인_진단보고서.md)
 > - **작업 흐름 및 로드맵 거버넌스 정책**: [ROADMAP_정책.md](ROADMAP_정책.md)
 
 ---

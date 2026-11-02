@@ -1,12 +1,12 @@
 # [마스터 설계] 07-도메인보호-및-단일입출구-배선-고도화
 
-> **상위 문서**: [대시보드](README.md) | [WHY.md](WHY.md) | [PLAN.md](PLAN.md) | [상위 마스터 로드맵](../MASTER_ROADMAP.md) | [감사 보고서](../../../DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md)
+> **상위 문서**: [대시보드](README.md) | [WHY.md](WHY.md) | [PLAN.md](PLAN.md) | [상위 마스터 로드맵](../MASTER_ROADMAP.md) | [감사 보고서](../../보고서/001-엔터프라이즈_도메인보호_및_12대안티패턴_정밀진단보고서.md)
 
 ---
 
 ## 1. 개요 및 배경 (Context)
 
-본 로드맵은 00번~06번 로드맵 구현 완료 후 수행된 전수 코드 감사([DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md](../../../DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md))에서 도출된 **12대 안티패턴(AP-01 ~ AP-12)**을 구조적으로 제거하고, **순수 도메인 보호 및 의존성 역전(DIP)**과 **단일 입구 · 단일 출구(Single Entry / Single Exit, SESE) 감사·로그 배선 아키텍처**를 확립하는 마스터 설계도이다.
+본 로드맵은 00번~06번 로드맵 구현 완료 후 수행된 전수 코드 감사([DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md](../../보고서/001-엔터프라이즈_도메인보호_및_12대안티패턴_정밀진단보고서.md))에서 도출된 **12대 안티패턴(AP-01 ~ AP-12)**을 구조적으로 제거하고, **순수 도메인 보호 및 의존성 역전(DIP)**과 **단일 입구 · 단일 출구(Single Entry / Single Exit, SESE) 감사·로그 배선 아키텍처**를 확립하는 마스터 설계도이다.
 
 주문·결제 MSA 및 분산 멀티 에이전트 시스템의 엔터프라이즈 표준 패턴을 본 시뮬레이터에서 한 치의 왜곡 없이 재현하기 위해, ① 구조화된 도메인 에러(`*domain.Error`), ② 순수 PDP의 Scope·Epoch·Grant 통합 결정, ③ 단일 출구 SHA-256 해시 체인 및 `syscall.Flock` 감사 기록, ④ 비신뢰 워커의 신뢰 경계 복원(데코레이터 분리), ⑤ 공통 인프라 통합, ⑥ 동어반복(Vacuous Pass) 없는 엄격한 4중 검증 및 도메인·배선 분리 테스트를 6개 단계(`010`~`060`)에 걸쳐 완성한다.
 
