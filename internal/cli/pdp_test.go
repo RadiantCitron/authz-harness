@@ -132,3 +132,54 @@ func TestPDP_CLI_Decide_And_Explain(t *testing.T) {
 		t.Fatalf("expected ExitBadInput (14), got %d", exitCode)
 	}
 }
+
+func TestTC_020_09_ScopeFlag(t *testing.T) {
+	ctx := context.Background()
+	statePath, auditPath := setupPDPCliTest(t)
+
+	var grantOut, grantErr bytes.Buffer
+	grantRunner, err := cli.NewGrantRunner(&grantOut, &grantErr, statePath, auditPath)
+	if err != nil {
+		t.Fatalf("failed to create grant runner: %v", err)
+	}
+
+	// 1. Grant 발급: worker-01에게 file:write on a.txt
+	exitCode := grantRunner.Run(ctx, []string{"create", "--sub", "worker-01", "--action", "file:write", "--resource", "a.txt"})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("failed to create grant: %d, stderr: %s", exitCode, grantErr.String())
+	}
+
+	// 2. pdp decide with --scope file:read -> ExitAuthzDenied (12), TOKEN_INSUFFICIENT_SCOPE
+	var out1, err1 bytes.Buffer
+	pdpRunner1, _ := cli.NewPDPRunner(&out1, &err1, statePath, auditPath)
+	exitCode = pdpRunner1.Run(ctx, []string{
+		"decide",
+		"--sub", "worker-01",
+		"--action", "file:write",
+		"--resource", "a.txt",
+		"--scope", "file:read",
+	})
+	if exitCode != domain.ExitAuthzDenied {
+		t.Fatalf("expected ExitAuthzDenied (12), got %d, stderr: %s", exitCode, err1.String())
+	}
+	if !strings.Contains(out1.String(), "[DECISION: DENY]") || !strings.Contains(out1.String(), string(domain.ReasonTokenInsufficientScope)) {
+		t.Errorf("expected DENY and TOKEN_INSUFFICIENT_SCOPE, got: %s", out1.String())
+	}
+
+	// 3. pdp decide with matching --scope file:write -> ExitSuccess (0), AUTHORIZED
+	var out2, err2 bytes.Buffer
+	pdpRunner2, _ := cli.NewPDPRunner(&out2, &err2, statePath, auditPath)
+	exitCode = pdpRunner2.Run(ctx, []string{
+		"decide",
+		"--sub", "worker-01",
+		"--action", "file:write",
+		"--resource", "a.txt",
+		"--scope", "file:write:a.txt",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %d, stderr: %s", exitCode, err2.String())
+	}
+	if !strings.Contains(out2.String(), "[DECISION: ALLOW]") || !strings.Contains(out2.String(), "AUTHORIZED") {
+		t.Errorf("expected ALLOW and AUTHORIZED, got: %s", out2.String())
+	}
+}

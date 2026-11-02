@@ -307,3 +307,230 @@ func TestPDP_Service_Audit_FailClosed(t *testing.T) {
 		t.Errorf("unexpected audit event content: %+v", event)
 	}
 }
+
+func TestTC_020_Scenarios(t *testing.T) {
+	now := time.Now().UTC()
+	baseSnapshot := &pip.SubjectSnapshot{
+		Subject:      "worker-01",
+		CurrentEpoch: 1,
+		ActiveGrants: []domain.Grant{
+			{
+				ID:        "grant-write-01",
+				Subject:   "worker-01",
+				Action:    domain.ActionFileWrite,
+				Resource:  "a.txt",
+				Status:    domain.GrantStatusActive,
+				CreatedAt: now,
+			},
+			{
+				ID:        "grant-read-b",
+				Subject:   "worker-01",
+				Action:    domain.ActionFileRead,
+				Resource:  "b.txt",
+				Status:    domain.GrantStatusActive,
+				CreatedAt: now,
+			},
+		},
+		RevokedGrants: []domain.Grant{
+			{
+				ID:        "grant-read-revoked",
+				Subject:   "worker-01",
+				Action:    domain.ActionFileRead,
+				Resource:  "revoked.txt",
+				Status:    domain.GrantStatusRevoked,
+				CreatedAt: now,
+				RevokedAt: &now,
+			},
+		},
+		Timestamp: now,
+	}
+
+	// TC-020-01: Write Grant 보유 + Read 전용 토큰으로 Write 요청
+	t.Run("TC-020-01: Write Grant 보유 + Read 전용 토큰으로 Write 요청", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "a.txt",
+			Epoch:        1,
+			TokenScope:   "file:read",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, baseSnapshot)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonTokenInsufficientScope {
+			t.Fatalf("expected DENY / TOKEN_INSUFFICIENT_SCOPE, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-02: 특정 파일 Scope(a.txt) 토큰으로 타 파일(b.txt) 요청
+	t.Run("TC-020-02: 특정 파일 Scope(a.txt) 토큰으로 타 파일(b.txt) 요청", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileRead,
+			Resource:     "b.txt",
+			Epoch:        1,
+			TokenScope:   "file:read:a.txt",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, baseSnapshot)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonTokenInsufficientScope {
+			t.Fatalf("expected DENY / TOKEN_INSUFFICIENT_SCOPE, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-03: RequireScope: true 상태에서 빈 Scope("") 요청
+	t.Run("TC-020-03: RequireScope: true 상태에서 빈 Scope(\"\") 요청", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "a.txt",
+			Epoch:        1,
+			TokenScope:   "",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, baseSnapshot)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonTokenInsufficientScope {
+			t.Fatalf("expected DENY / TOKEN_INSUFFICIENT_SCOPE, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-04: 암묵적 \"admin\" Scope 문자열 우회 차단
+	t.Run("TC-020-04: 암묵적 admin Scope 문자열 우회 차단", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "a.txt",
+			Epoch:        1,
+			TokenScope:   "admin",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, baseSnapshot)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonTokenInsufficientScope {
+			t.Fatalf("expected DENY / TOKEN_INSUFFICIENT_SCOPE, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-05: 다중 Scope(\"file:read:a.txt file:write:b.txt\") 정상 매칭
+	t.Run("TC-020-05: 다중 Scope 정상 매칭", func(t *testing.T) {
+		snapWithWriteB := &pip.SubjectSnapshot{
+			Subject:      "worker-01",
+			CurrentEpoch: 1,
+			ActiveGrants: []domain.Grant{
+				{
+					ID:        "grant-write-b",
+					Subject:   "worker-01",
+					Action:    domain.ActionFileWrite,
+					Resource:  "b.txt",
+					Status:    domain.GrantStatusActive,
+					CreatedAt: now,
+				},
+			},
+		}
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "b.txt",
+			Epoch:        1,
+			TokenScope:   "file:read:a.txt file:write:b.txt",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, snapWithWriteB)
+		if dec.Decision != pdp.DecisionAllow || dec.Reason != domain.ReasonAuthorized {
+			t.Fatalf("expected ALLOW / AUTHORIZED, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-06: Epoch 불일치와 Scope 부족이 동시 발생할 때 우선순위 (킬스위치 우선)
+	t.Run("TC-020-06: Epoch 불일치와 Scope 부족 동시 발생 시 킬스위치 우선", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "a.txt",
+			Epoch:        1, // snapshot current is 2
+			TokenScope:   "file:read",
+			RequireScope: true,
+		}
+		snapEpoch2 := &pip.SubjectSnapshot{
+			Subject:      "worker-01",
+			CurrentEpoch: 2,
+			ActiveGrants: baseSnapshot.ActiveGrants,
+		}
+		dec := pdp.Evaluate(req, snapEpoch2)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonSubjectEpochRevoked {
+			t.Fatalf("expected DENY / SUBJECT_EPOCH_REVOKED, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-07: Scope는 충분하나 Grant가 Revoke된 경우
+	t.Run("TC-020-07: Scope는 충분하나 Grant가 Revoke된 경우", func(t *testing.T) {
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileRead,
+			Resource:     "revoked.txt",
+			Epoch:        1,
+			TokenScope:   "file:read:revoked.txt",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, baseSnapshot)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonGrantRevoked {
+			t.Fatalf("expected DENY / GRANT_REVOKED, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-08: Scope는 충분하나 Grant가 아예 없는 경우
+	t.Run("TC-020-08: Scope는 충분하나 Grant가 없는 경우", func(t *testing.T) {
+		emptySnap := &pip.SubjectSnapshot{
+			Subject:      "worker-01",
+			CurrentEpoch: 1,
+			ActiveGrants: nil,
+		}
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileRead,
+			Resource:     "a.txt",
+			Epoch:        1,
+			TokenScope:   "file:read",
+			RequireScope: true,
+		}
+		dec := pdp.Evaluate(req, emptySnap)
+		if dec.Decision != pdp.DecisionDeny || dec.Reason != domain.ReasonNoActiveGrant {
+			t.Fatalf("expected DENY / NO_ACTIVE_GRANT, got %s / %s", dec.Decision, dec.Reason)
+		}
+	})
+
+	// TC-020-10: EventRecorder 인메모리 도메인 이벤트 수집
+	t.Run("TC-020-10: EventRecorder 인메모리 도메인 이벤트 수집", func(t *testing.T) {
+		pipMock := &mockPIP{snapshot: baseSnapshot}
+		auditMock := &mockAudit{}
+		svc := pdp.NewService(pipMock, auditMock)
+
+		buffer := domain.NewEventBuffer()
+		ctx := domain.WithEventRecorder(context.Background(), buffer)
+
+		req := pdp.Request{
+			Subject:      "worker-01",
+			Action:       domain.ActionFileWrite,
+			Resource:     "a.txt",
+			Epoch:        1,
+			TokenScope:   "file:write",
+			RequireScope: true,
+			TraceID:      "trace-tc-020-10",
+		}
+
+		dec, err := svc.Decide(ctx, req)
+		if err != nil {
+			t.Fatalf("Decide returned unexpected error: %v", err)
+		}
+		if dec.Decision != pdp.DecisionAllow {
+			t.Fatalf("expected ALLOW, got %s", dec.Decision)
+		}
+
+		events := buffer.Events()
+		if len(events) != 1 {
+			t.Fatalf("expected 1 in-memory domain event, got %d", len(events))
+		}
+		ev := events[0]
+		if ev.TraceID != "trace-tc-020-10" || ev.Reason != domain.ReasonAuthorized || !ev.Success {
+			t.Fatalf("unexpected domain event: %+v", ev)
+		}
+	})
+}

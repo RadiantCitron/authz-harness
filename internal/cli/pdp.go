@@ -74,11 +74,12 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	fs := flag.NewFlagSet("pdp decide", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
-	var sub, act, res string
+	var sub, act, res, scope string
 	var epoch int64
 	fs.StringVar(&sub, "sub", "", "인가 대상 주체 (Subject)")
 	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write)")
 	fs.StringVar(&res, "resource", "", "요청 대상 리소스 경로")
+	fs.StringVar(&scope, "scope", "", "제시된 토큰 스코프 (선택)")
 	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
 
 	if err := fs.Parse(args); err != nil {
@@ -97,10 +98,12 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	}
 
 	req := pdp.Request{
-		Subject:  sub,
-		Action:   action,
-		Resource: res,
-		Epoch:    domain.Epoch(epoch),
+		Subject:      sub,
+		Action:       action,
+		Resource:     res,
+		Epoch:        domain.Epoch(epoch),
+		TokenScope:   scope,
+		RequireScope: scope != "",
 	}
 
 	decision, err := r.pdpSvc.Decide(ctx, req)
@@ -118,18 +121,19 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	// 거부(DENY) 시 표준 포맷 출력 및 12 종료 코드 반환
 	fmt.Fprintf(r.out, "[DECISION: DENY] Subject: %s | Action: %s | Resource: %s | Reason: %s\n",
 		req.Subject, req.Action, req.Resource, decision.Reason)
-	return domain.ExitAuthzDenied
+	return domain.ExitCodeForReason(decision.Reason)
 }
 
 func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("pdp explain", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
-	var sub, act, res string
+	var sub, act, res, scope string
 	var epoch int64
 	fs.StringVar(&sub, "sub", "", "인가 대상 주체 (Subject)")
 	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write)")
 	fs.StringVar(&res, "resource", "", "요청 대상 리소스 경로")
+	fs.StringVar(&scope, "scope", "", "제시된 토큰 스코프 (선택)")
 	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
 
 	if err := fs.Parse(args); err != nil {
@@ -148,10 +152,12 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	}
 
 	req := pdp.Request{
-		Subject:  sub,
-		Action:   action,
-		Resource: res,
-		Epoch:    domain.Epoch(epoch),
+		Subject:      sub,
+		Action:       action,
+		Resource:     res,
+		Epoch:        domain.Epoch(epoch),
+		TokenScope:   scope,
+		RequireScope: scope != "",
 	}
 
 	// PIP로부터 현재 스냅샷 조회 (설명 뷰를 위한 상세 상태)

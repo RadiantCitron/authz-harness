@@ -175,27 +175,15 @@ func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 	tokenJTI := claims.Claims.JWTID
 
 	// Stage 2: Gate 2 - Pure PDP Authorization
-	// 2-0. 토큰의 Scope 에 요청 액션/리소스가 포함되어 있는지 사전 검증 (결함 #1, E2E-22 대응)
-	if !tokenScopeAllows(claims.Claims.Scope, cleanAction, cleanResource) {
-		reason := domain.ReasonTokenInsufficientScope
-		details := fmt.Sprintf("token scope %q does not permit action %s on %s", claims.Claims.Scope, cleanAction, cleanResource)
-		g.logEvent(traceID, subject, tokenJTI, cleanResource, string(cleanAction), StageGate2AuthZ, false, reason, details)
-		return &Result{
-			Allowed:  false,
-			ExitCode: domain.ExitAuthzDenied,
-			Stage:    StageGate2AuthZ,
-			Reason:   reason,
-			Details:  details,
-			Subject:  subject,
-			TokenJTI: tokenJTI,
-		}, nil
-	}
-
 	pdpReq := pdp.Request{
-		Subject:  subject,
-		Action:   cleanAction,
-		Resource: cleanResource,
-		Epoch:    domain.Epoch(claims.Claims.Epoch),
+		Subject:      subject,
+		Action:       cleanAction,
+		Resource:     cleanResource,
+		Epoch:        domain.Epoch(claims.Claims.Epoch),
+		TokenScope:   claims.Claims.Scope,
+		RequireScope: true, // 토큰 기반 PEP 실행은 항상 Scope 검증 필수
+		Actor:        claims.Claims.Actor,
+		TraceID:      traceID,
 	}
 
 	decision, err := g.cfg.PDP.Decide(ctx, pdpReq)
@@ -337,34 +325,4 @@ func extractReasonFromTokenError(err error) domain.Reason {
 		return domain.ReasonAuthorized
 	}
 	return domain.ReasonFromError(err, domain.ReasonInvalidToken)
-}
-
-// tokenScopeAllows 는 주어진 스코프 문자열이 요청 액션/리소스를 허용하는지 판별한다.
-func tokenScopeAllows(scopeStr string, action domain.Action, resource string) bool {
-	cleanScope := strings.TrimSpace(scopeStr)
-	if cleanScope == "" {
-		return false
-	}
-	scopes := strings.Fields(cleanScope)
-	for _, sc := range scopes {
-		if sc == "*" || sc == "admin" {
-			return true
-		}
-		// "file:read", "file:write", "file:read:<path>", "file:write:<path>"
-		parts := strings.Split(sc, ":")
-		if len(parts) >= 2 {
-			actPrefix := parts[0] + ":" + parts[1]
-			if actPrefix == string(action) {
-				if len(parts) == 2 {
-					return true
-				}
-				// 3단 리소스 매칭
-				resPattern := strings.Join(parts[2:], ":")
-				if resPattern == "*" || resPattern == resource {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
