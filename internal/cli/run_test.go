@@ -93,11 +93,11 @@ func TestRunCLI_AT_CLI_04_JSONOutput(t *testing.T) {
 		t.Fatalf("failed to parse json output: %v", err)
 	}
 
-	if report.Total != 30 {
-		t.Errorf("expected 30 total scenarios in json, got %d", report.Total)
+	if report.Total != 32 {
+		t.Errorf("expected 32 total scenarios in json, got %d", report.Total)
 	}
-	if report.Passed != 30 {
-		t.Errorf("expected 30 passed scenarios, got %d", report.Passed)
+	if report.Passed != 32 {
+		t.Errorf("expected 32 passed scenarios, got %d", report.Passed)
 	}
 	if report.Failed != 0 {
 		t.Errorf("expected 0 failed scenarios, got %d", report.Failed)
@@ -197,6 +197,42 @@ func TestRunCLI_TC_020_03_InProcMode(t *testing.T) {
 	exitCode := runner.Run(context.Background(), []string{
 		"-scenario", "E2E-01",
 		"-execution-mode", "inproc",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
+		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
+
+// TC-030-01: authz-harness run --scenario E2E-31 --execution-mode subprocess 다단계 정상 위임
+func TestRunCLI_TC_030_01_MultiHopAllow(t *testing.T) {
+	tempDir := t.TempDir()
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, tempDir)
+
+	exitCode := runner.Run(context.Background(), []string{
+		"-scenario", "E2E-31",
+		"-execution-mode", "subprocess",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
+		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
+
+// TC-030-02: authz-harness run --scenario E2E-32 --execution-mode subprocess 중간 초과 위임 차단
+func TestRunCLI_TC_030_02_MultiHopScopeExceeded(t *testing.T) {
+	tempDir := t.TempDir()
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, tempDir)
+
+	exitCode := runner.Run(context.Background(), []string{
+		"-scenario", "E2E-32",
+		"-execution-mode", "subprocess",
 	})
 	if exitCode != domain.ExitSuccess {
 		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())

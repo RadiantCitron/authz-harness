@@ -7,11 +7,11 @@ import (
 	"authz-harness/internal/harness"
 )
 
-// TestCatalog_ScenarioCount30 은 카탈로그에 30개의 고유 시나리오가 등록되어 있는지 검증한다.
-func TestCatalog_ScenarioCount30(t *testing.T) {
+// TestCatalog_ScenarioCount32 는 카탈로그에 32개의 고유 시나리오가 등록되어 있는지 검증한다.
+func TestCatalog_ScenarioCount32(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 30 {
-		t.Fatalf("expected 30 scenarios, got %d", len(scenarios))
+	if len(scenarios) != 32 {
+		t.Fatalf("expected 32 scenarios, got %d", len(scenarios))
 	}
 
 	seen := make(map[string]bool)
@@ -37,7 +37,7 @@ func TestCatalog_ScenarioCount30(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 30개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 32개 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -45,8 +45,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 30 {
-		t.Fatalf("expected 30 registered scenarios, got %d", len(list))
+	if len(list) != 32 {
+		t.Fatalf("expected 32 registered scenarios, got %d", len(list))
 	}
 }
 
@@ -195,8 +195,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 30 {
-		t.Fatalf("expected 30 results, got %d", len(results))
+	if len(results) != 32 {
+		t.Fatalf("expected 32 results, got %d", len(results))
 	}
 
 	failedCount := 0

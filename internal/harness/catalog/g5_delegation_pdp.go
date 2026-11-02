@@ -3,6 +3,8 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"authz-harness/internal/authn/exchange"
@@ -10,9 +12,10 @@ import (
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
+	"authz-harness/internal/orchestrator"
 )
 
-// G5: RFC 8693 위임 및 PDP 인가 정책 (E2E-19 ~ E2E-24)
+// G5: RFC 8693 위임 및 PDP 인가 정책 (E2E-19 ~ E2E-24, E2E-31 ~ E2E-32)
 func g5Scenarios() []harness.Scenario {
 	return []harness.Scenario{
 		&e2e19Scenario{},
@@ -21,6 +24,8 @@ func g5Scenarios() []harness.Scenario {
 		&e2e22Scenario{},
 		&e2e23Scenario{},
 		&e2e24Scenario{},
+		&e2e31Scenario{},
+		&e2e32Scenario{},
 	}
 }
 
@@ -508,4 +513,184 @@ func (s *e2e24Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 	return res.ExitCode, nil
+}
+
+// E2E-31: 2-Hop 다단계 정상 위임 및 권한 축소 실행
+type e2e31Scenario struct {
+	rootToken string
+}
+
+func (s *e2e31Scenario) Metadata() harness.ScenarioMetadata {
+	return harness.ScenarioMetadata{
+		ID:                 "E2E-31",
+		Group:              "G5",
+		Name:               "2-Hop 다단계 정상 위임 및 권한 축소 실행",
+		Description:        "루트 오케스트레이터(Depth 0) -> 중간 관리자(Depth 1) -> 최종 워커(Depth 2)로 이어지는 연쇄 위임 후 격리 파일 읽기를 성공적으로 수행한다.",
+		AttackClass:        "MultiHopDelegationAllow",
+		ParadoxExplanation: "2단계에 걸친 연쇄 권한 축소 위임이 이루어져도 최종 자식 프로세스가 안전하게 인가되었습니다.",
+		Expected: harness.ExpectedAssertion{
+			ExitCode: domain.ExitSuccess,
+			File: harness.FileExpectation{
+				RelPath:         "multihop_ok.txt",
+				ExpectExist:     true,
+				ExpectedContent: "multihop delegation success",
+			},
+			Audit: harness.AuditExpectation{
+				RequireEvent:     true,
+				ExpectedAction:   "pep.allow",
+				ExpectedDecision: "allow",
+				ExpectedReason:   domain.ReasonAuthorized,
+			},
+			HashChain: harness.HashChainExpectation{
+				RequireValidChain: true,
+				NoRawTokenLeak:    true,
+			},
+		},
+	}
+}
+
+func (s *e2e31Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironment) error {
+	stack, err := setupHarnessStack(env)
+	if err != nil {
+		return err
+	}
+	defer stack.Close()
+
+	// 1. 읽기 파일 생성
+	filePath := filepath.Join(env.WorkspaceDir, "multihop_ok.txt")
+	if err := os.WriteFile(filePath, []byte("multihop delegation success"), 0600); err != nil {
+		return fmt.Errorf("write test file: %w", err)
+	}
+
+	// 2. 최종 워커에게 PAP 파일 읽기 권한 부여
+	if _, err := grantPermission(ctx, stack, "worker-01", domain.ActionFileRead, "multihop_ok.txt"); err != nil {
+		return fmt.Errorf("grant worker-01: %w", err)
+	}
+
+	// 3. 루트 토큰 발급 (read + write 보유)
+	tok, err := issueTestToken(stack, "client-orchestrator", "orchestrator-secret-key-01", "orchestrator-root", "file:read file:write", 30*time.Minute, token.IssueOptions{})
+	if err != nil {
+		return fmt.Errorf("issue root token: %w", err)
+	}
+	s.rootToken = tok
+	return nil
+}
+
+func (s *e2e31Scenario) Execute(ctx context.Context, env *harness.SandboxEnvironment) (domain.ExitCode, error) {
+	stack, err := setupHarnessStack(env)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	defer stack.Close()
+
+	// MultiHopSpawner 구동
+	spawner := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
+		BinaryPath:   env.BinaryPath,
+		WorkspaceDir: env.WorkspaceDir,
+		StatePath:    env.StatePath,
+		PubJWKSPath:  env.PubJWKSPath,
+		ReplayPath:   env.ReplayPath,
+		AuditPath:    env.AuditPath,
+		Audit:        stack.AuditWriter,
+	})
+
+	return spawner.ExecuteMultiHop(ctx, orchestrator.MultiHopDelegationRequest{
+		TraceID:       "trace-e2e-31",
+		RootToken:     s.rootToken,
+		LeadSubject:   "lead-01",
+		LeadScope:     "file:read file:write",
+		WorkerSubject: "worker-01",
+		WorkerScope:   "file:read",
+		TargetFile:    "multihop_ok.txt",
+		Action:        domain.ActionFileRead,
+		TokenIssuer:   stack.TokenIssuer,
+		TokenVerifier: stack.TokenVerifier,
+		ClientReg:     stack.ClientReg,
+		Clock:         env.MockClock,
+	})
+}
+
+// E2E-32: 2-Hop 중간 관리자의 권한 초과 위임 시도 차단
+type e2e32Scenario struct {
+	rootToken string
+}
+
+func (s *e2e32Scenario) Metadata() harness.ScenarioMetadata {
+	return harness.ScenarioMetadata{
+		ID:                 "E2E-32",
+		Group:              "G5",
+		Name:               "2-Hop 중간 관리자의 권한 초과 위임 시도 차단",
+		Description:        "중간 관리자(Depth 1)가 읽기(file:read)만 보유한 상태에서 하위 워커에게 쓰기(file:write)를 초과 위임하려는 시도는 2차 교환 관문에서 차단된다.",
+		AttackClass:        "MultiHopDelegationScopeExceeded",
+		ParadoxExplanation: "중간 위임자가 자신이 보유하지 않은 권한을 하위 워커에게 부여하려는 월권을 2차 교환에서 차단했습니다.",
+		Expected: harness.ExpectedAssertion{
+			ExitCode: domain.ExitAuthzDenied,
+			File: harness.FileExpectation{
+				RelPath:            "output.txt",
+				ExpectZeroMutation: true,
+			},
+			Audit: harness.AuditExpectation{
+				RequireEvent:     true,
+				ExpectedAction:   "token.exchange.deny",
+				ExpectedDecision: "deny",
+				ExpectedReason:   domain.ReasonDelegationScopeExceeded,
+			},
+			HashChain: harness.HashChainExpectation{
+				RequireValidChain: true,
+				NoRawTokenLeak:    true,
+			},
+		},
+	}
+}
+
+func (s *e2e32Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironment) error {
+	stack, err := setupHarnessStack(env)
+	if err != nil {
+		return err
+	}
+	defer stack.Close()
+
+	// 루트 토큰 발급 (read + write 보유)
+	tok, err := issueTestToken(stack, "client-orchestrator", "orchestrator-secret-key-01", "orchestrator-root", "file:read file:write", 30*time.Minute, token.IssueOptions{})
+	if err != nil {
+		return fmt.Errorf("issue root token: %w", err)
+	}
+	s.rootToken = tok
+	return nil
+}
+
+func (s *e2e32Scenario) Execute(ctx context.Context, env *harness.SandboxEnvironment) (domain.ExitCode, error) {
+	stack, err := setupHarnessStack(env)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	defer stack.Close()
+
+	// MultiHopSpawner 구동
+	// Root -> Lead(file:read) -> Worker(file:write 초과 시도 -> 2차 교환 거부)
+	spawner := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
+		BinaryPath:   env.BinaryPath,
+		WorkspaceDir: env.WorkspaceDir,
+		StatePath:    env.StatePath,
+		PubJWKSPath:  env.PubJWKSPath,
+		ReplayPath:   env.ReplayPath,
+		AuditPath:    env.AuditPath,
+		Audit:        stack.AuditWriter,
+	})
+
+	return spawner.ExecuteMultiHop(ctx, orchestrator.MultiHopDelegationRequest{
+		TraceID:       "trace-e2e-32",
+		RootToken:     s.rootToken,
+		LeadSubject:   "lead-01",
+		LeadScope:     "file:read", // 중간 관리자는 file:read 만 보유
+		WorkerSubject: "worker-01",
+		WorkerScope:   "file:write", // 워커에게 file:write 초과 위임 시도 -> 차단
+		TargetFile:    "output.txt",
+		Action:        domain.ActionFileWrite,
+		Data:          []byte("should be blocked"),
+		TokenIssuer:   stack.TokenIssuer,
+		TokenVerifier: stack.TokenVerifier,
+		ClientReg:     stack.ClientReg,
+		Clock:         env.MockClock,
+	})
 }
