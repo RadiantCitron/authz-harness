@@ -279,6 +279,18 @@ func TestSubagentWorker_TC03_MissingToken(t *testing.T) {
 	if resp.ExitCode != int(domain.ExitTokenInvalid) {
 		t.Errorf("expected ExitTokenInvalid in response body, got: %d", resp.ExitCode)
 	}
+
+	// 감사 로그 파일 검사: 서브에이전트 입구에서 조기 차단되지 않고 PEP 단일 출구 감사를 거쳤는지 검증
+	auditBytes, err := os.ReadFile(f.auditPath)
+	if err != nil {
+		t.Fatalf("failed to read audit log: %v", err)
+	}
+	if !strings.Contains(string(auditBytes), "tr-sub-003") {
+		t.Errorf("audit log does not contain trace_id 'tr-sub-003'")
+	}
+	if !strings.Contains(string(auditBytes), "pep.deny") {
+		t.Errorf("audit log does not contain 'pep.deny' event for missing token")
+	}
 }
 
 func TestSubagentWorker_TC04_ForgedToken(t *testing.T) {
@@ -323,6 +335,18 @@ func TestSubagentWorker_TC04_ForgedToken(t *testing.T) {
 	_ = json.Unmarshal(outBuf.Bytes(), &resp)
 	if resp.ExitCode != int(domain.ExitTokenInvalid) {
 		t.Errorf("expected ExitTokenInvalid in response body, got: %d", resp.ExitCode)
+	}
+
+	// 감사 로그 파일 검사: 서브에이전트 입구에서 조기 차단되지 않고 PEP 단일 출구 감사를 거쳤는지 검증
+	auditBytes, err := os.ReadFile(f.auditPath)
+	if err != nil {
+		t.Fatalf("failed to read audit log: %v", err)
+	}
+	if !strings.Contains(string(auditBytes), "tr-sub-004") {
+		t.Errorf("audit log does not contain trace_id 'tr-sub-004'")
+	}
+	if !strings.Contains(string(auditBytes), "pep.deny") {
+		t.Errorf("audit log does not contain 'pep.deny' event for forged token")
 	}
 }
 

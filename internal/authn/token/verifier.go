@@ -116,6 +116,11 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	now := effectiveClock.Now().UTC()
 
 	// 1단계: 3단 점 분리 형식 검증
+	if strings.TrimSpace(tokenStr) == "" {
+		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token is missing or empty")
+		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", "token is missing or empty", ErrTokenMalformed)
+	}
+
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
 		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token format error")

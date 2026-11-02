@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
@@ -28,6 +27,7 @@ func NewWorker(gateway pep.Gateway) (*SubagentWorker, error) {
 }
 
 // Execute 는 파싱된 요청을 바탕으로 PEP 게이트웨이를 호출하고 응답과 Exit Code를 반환한다.
+// 모든 인자 검증 및 인증·인가는 PEP 단일 입출구(SESE) 게이트웨이에 위임하여 일관된 감사 로그를 보장한다.
 func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (SubagentResponse, int) {
 	resp := SubagentResponse{
 		TraceID:  req.TraceID,
@@ -35,47 +35,18 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		FilePath: req.FilePath,
 	}
 
-	// 1. 필수 인자 검증
-	if strings.TrimSpace(req.TraceID) == "" {
-		resp.ExitCode = int(domain.ExitBadInput)
-		resp.Reason = string(domain.ReasonMissingTraceContext)
-		resp.Error = "trace_id is required"
-		return resp, resp.ExitCode
-	}
-
-	if strings.TrimSpace(req.Token) == "" {
-		resp.ExitCode = int(domain.ExitTokenInvalid)
-		resp.Reason = string(domain.ReasonInvalidToken)
-		resp.Error = "bearer token is missing"
-		return resp, resp.ExitCode
-	}
-
-	normAction, err := pep.NormalizeAction(req.Action)
-	if err != nil {
-		resp.ExitCode = int(domain.ExitBadInput)
-		resp.Reason = string(domain.ReasonInvalidArguments)
-		resp.Error = fmt.Sprintf("invalid action: %v", err)
-		return resp, resp.ExitCode
-	}
-
-	if strings.TrimSpace(req.FilePath) == "" {
-		resp.ExitCode = int(domain.ExitBadInput)
-		resp.Reason = string(domain.ReasonInvalidArguments)
-		resp.Error = "file_path is required"
-		return resp, resp.ExitCode
-	}
-
-	// 2. PEP Gateway 요청 조립 (결함 주입 플래그는 게이트웨이 데코레이터로 전달)
+	// PEP Gateway 요청 조립 (RequireTraceID: true로 위임하여 Gate 0에서 동일하게 차단)
 	pepReq := pep.Request{
 		Token:                req.Token,
-		Action:               normAction,
+		Action:               domain.Action(req.Action),
 		Resource:             req.FilePath,
 		Data:                 []byte(req.Data),
 		TraceID:              req.TraceID,
+		RequireTraceID:       true,
 		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
 	}
 
-	// 3. PEP 5단계 관문 집행
+	// PEP 5단계 관문 집행
 	pepRes, err := w.gateway.Execute(ctx, pepReq)
 	if err != nil {
 		resp.ExitCode = int(domain.ExitInternalError)
@@ -84,11 +55,12 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		return resp, resp.ExitCode
 	}
 
-	// 4. 결과 매핑
+	// 결과 매핑
 	resp.ExitCode = int(pepRes.ExitCode)
 	resp.Reason = string(pepRes.Reason)
 
 	if pepRes.Allowed {
+		normAction, _ := pep.NormalizeAction(req.Action)
 		if normAction == domain.ActionFileRead {
 			resp.BytesRead = pepRes.BytesRead
 			resp.Output = string(pepRes.Data)
