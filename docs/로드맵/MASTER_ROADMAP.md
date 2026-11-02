@@ -355,14 +355,14 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **포함 능력 매핑**: `도메인 보호 / SESE 파이프라인 / 엔터프라이즈 리팩토링`
 * **주요 산출물**: [07-도메인보호-및-단일입출구-배선-고도화](07-도메인보호-및-단일입출구-배선-고도화/README.md), AST 가드레일 4종.
 
-### Phase 8: 서브프로세스 전 구간 E2E 통합 및 다단계(Multi-Hop) 프로세스 위임 실증
+### Phase 8: 서브프로세스 전 구간 E2E 통합 및 다단계(Multi-Hop) 프로세스 위임 실증 [완료]
 * **목적**: 30대 카탈로그의 실제 OS 서브프로세스 격리 실행 모드(`--execution-mode subprocess`) 전면 도입, 루트→중간자→워커 2-Hop 다단계 위임 시나리오(`E2E-31`, `E2E-32`), 프로세스 계보 및 시계열 감사 시각화(`audit timeline`)를 완성한다.
 * **진입 조건**: Phase 7 완료.
 * **포함 능력 매핑**: `OS 서브프로세스 통합 / RFC 8693 다단계 위임 / 시계열 타임라인 관측성`
 * **완료 조건 (관찰 가능한 행동)**:
-  1. `authz-harness run --scenario all`이 기본 서브프로세스 모드에서 32/32 Quad-Assertion PASS를 달성한다.
-  2. `authz-harness audit timeline --trace-id <id>` 실행 시 프로세스 계보 트리와 시계열 파이프라인이 터미널에 시각화된다.
-  3. `internal/app/builder.go` 단일 합성 루트로 스택 조립이 일원화되고 Control Plane 감사 에러 무시 잔재가 전면 제거된다.
+  1. `authz-harness run --scenario all`이 기본 서브프로세스 모드에서 32/32 Quad-Assertion PASS를 달성한다. [완료]
+  2. `authz-harness audit timeline --trace-id <id>` 실행 시 프로세스 계보 트리와 시계열 파이프라인이 터미널에 시각화된다. [완료]
+  3. `internal/app/builder.go` 단일 합성 루트로 스택 조립이 일원화되고 Control Plane 감사 에러 무시 잔재가 전면 제거된다. [완료]
 * **주요 산출물**: [08-서브프로세스-전구간-e2e-통합-및-다단계-위임-실증](08-서브프로세스-전구간-e2e-통합-및-다단계-위임-실증/README.md), `internal/app/builder.go`, `internal/storage/atomic.go`, `internal/orchestrator/multi_hop.go`, `internal/ui/timeline.go`.
 * **데모 한 줄**: `"단일 명령으로 실제 격리된 OS 서브프로세스 3대의 다단계 권한 축소 사슬과 실시간 차단 과정을 시계열 타임라인으로 눈앞에 증명한다."`
 

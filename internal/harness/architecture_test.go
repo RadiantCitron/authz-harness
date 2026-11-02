@@ -205,4 +205,40 @@ func TestArchitectureGuardrails(t *testing.T) {
 			t.Fatalf("violation of SESE: (g *gateway) Execute must have exactly 1 return statement (finalize 단일 출구), found %d", len(returnStmts))
 		}
 	})
+
+	// TC-080-01: Orchestrator 및 Control Plane 비즈니스 코드 내부의 _ = Audit.Log 무시 0건 검증
+	t.Run("TC-080-01: Orchestrator 비즈니스 코드의 감사 에러 무시(_ = s.cfg.Audit.Log) 0건 검증", func(t *testing.T) {
+		orchDir := filepath.Join(root, "internal", "orchestrator")
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, orchDir, func(fi fs.FileInfo) bool {
+			return !strings.HasSuffix(fi.Name(), "_test.go")
+		}, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("failed to parse orchestrator dir: %v", err)
+		}
+
+		for _, pkg := range pkgs {
+			for fname, file := range pkg.Files {
+				ast.Inspect(file, func(n ast.Node) bool {
+					assign, ok := n.(*ast.AssignStmt)
+					if !ok {
+						return true
+					}
+					// _ = ... 형태 검사
+					if len(assign.Lhs) == 1 {
+						if ident, ok := assign.Lhs[0].(*ast.Ident); ok && ident.Name == "_" {
+							for _, rhs := range assign.Rhs {
+								if call, ok := rhs.(*ast.CallExpr); ok {
+									if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Log" {
+										t.Errorf("forbidden audit error ignoring '_ = ...Log' found in %s:%d", fname, fset.Position(assign.Pos()).Line)
+									}
+								}
+							}
+						}
+					}
+					return true
+				})
+			}
+		}
+	})
 }
