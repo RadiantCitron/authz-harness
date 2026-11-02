@@ -36,6 +36,14 @@ type harnessStack struct {
 	PEP          pep.Gateway
 }
 
+// Close 는 스택에 바인딩된 리소스(감사 로그 기록기 등)를 안전하게 닫아 파일 디스크립터 누수를 방지한다.
+func (s *harnessStack) Close() error {
+	if s.AuditWriter != nil {
+		return s.AuditWriter.Close()
+	}
+	return nil
+}
+
 // setupHarnessStack 은 주어진 SandboxEnvironment 경로를 바탕으로 전체 스택을 초기화한다.
 func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 	auditWriter, err := audit.NewJSONLWriter(env.AuditPath)

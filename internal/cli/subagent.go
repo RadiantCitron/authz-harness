@@ -148,12 +148,21 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		return domain.ExitInternalError
 	}
 
-	worker, err := subagent.NewWorker(gw)
+	// 결함 주입 데코레이터 적용: req.InjectRevokeBeforeIO 시 I/O 직전 모든 Grant 회수 시뮬레이션
+	decoratedGW := pep.WithBeforeIOHook(gw, func(ctx context.Context, req pep.Request) error {
+		return stateStore.Update(func(st *state.GrantsState) error {
+			for i := range st.Grants {
+				st.Grants[i].Status = domain.GrantStatusRevoked
+			}
+			return nil
+		})
+	})
+
+	worker, err := subagent.NewWorker(decoratedGW)
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: failed to init subagent worker: %v\n", err)
 		return domain.ExitInternalError
 	}
-	worker.SetStateStore(stateStore)
 
 	// 2. stdin 스트림에서 JSON 프레임 읽어 실행 및 stdout 출력
 	stdinReader := r.stdin

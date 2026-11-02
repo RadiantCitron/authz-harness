@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/storage"
 )
 
 // GrantsState 는 Zone B 상태 파일(.authz-state/public/grants_state.json)의 직렬화 모델이다.
@@ -72,20 +73,7 @@ func (s *FileStore) withFileLock(how int, fn func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	lockFile, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return fmt.Errorf("state: failed to open lock file %s: %w", s.lockPath, err)
-	}
-	defer lockFile.Close()
-
-	if err := syscall.Flock(int(lockFile.Fd()), how); err != nil {
-		return fmt.Errorf("state: failed to acquire flock on %s: %w", s.lockPath, err)
-	}
-	defer func() {
-		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-	}()
-
-	return fn()
+	return storage.WithFileLock(s.lockPath, how, fn)
 }
 
 // Load 는 공유 락(LOCK_SH) 하에서 상태 파일을 읽어 역직렬화한다.
@@ -186,14 +174,8 @@ func (s *FileStore) writeUnlocked(state *GrantsState) error {
 		return fmt.Errorf("state: failed to marshal json: %w", err)
 	}
 
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("state: failed to write temp file %s: %w", tmpPath, err)
-	}
-
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("state: failed to atomic rename %s to %s: %w", tmpPath, s.path, err)
+	if err := storage.AtomicWriteFile(s.path, data, 0644); err != nil {
+		return fmt.Errorf("state: atomic write failed: %w", err)
 	}
 
 	return nil
