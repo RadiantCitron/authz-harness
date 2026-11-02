@@ -26,7 +26,7 @@ func TestMCPRunner_ServePipe(t *testing.T) {
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 
-	runner := NewMCPRunner(in, out, errOut, &dummyMCPExecutor{})
+	runner := NewMCPRunner(in, out, errOut, "", "", "", "", "", &dummyMCPExecutor{})
 	code := runner.Run(context.Background(), []string{"serve"})
 
 	if code != domain.ExitSuccess {
@@ -42,7 +42,7 @@ func TestMCPRunner_InvalidCommand(t *testing.T) {
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 
-	runner := NewMCPRunner(nil, out, errOut, nil)
+	runner := NewMCPRunner(nil, out, errOut, "", "", "", "", "", nil)
 	code := runner.Run(context.Background(), []string{"unknown"})
 
 	if code != domain.ExitBadInput {

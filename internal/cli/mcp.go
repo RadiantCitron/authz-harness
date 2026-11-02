@@ -7,21 +7,35 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
+	"time"
 
+	"authz-harness/internal/audit"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
+	"authz-harness/internal/orchestrator"
 )
 
 // MCPRunner 는 `mcp` 서브커맨드를 주관하는 CLI 러너다.
 type MCPRunner struct {
-	in       io.Reader
-	out      io.Writer
-	errOut   io.Writer
-	executor mcp.Executor
+	in           io.Reader
+	out          io.Writer
+	errOut       io.Writer
+	workspaceDir string
+	statePath    string
+	pubJWKSPath  string
+	replayPath   string
+	auditPath    string
+	executor     mcp.Executor // 테스트 주입 지원 (nil일 경우 플래그 기반 SubprocessExecutor 생성)
+	workerBin    string       // 테스트 지원 커스텀 바이너리 경로
 }
 
 // NewMCPRunner 는 MCPRunner 인스턴스를 생성한다.
-func NewMCPRunner(in io.Reader, out, errOut io.Writer, executor mcp.Executor) *MCPRunner {
+func NewMCPRunner(
+	in io.Reader, out, errOut io.Writer,
+	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
+	executor mcp.Executor,
+) *MCPRunner {
 	if in == nil {
 		in = os.Stdin
 	}
@@ -32,11 +46,21 @@ func NewMCPRunner(in io.Reader, out, errOut io.Writer, executor mcp.Executor) *M
 		errOut = os.Stderr
 	}
 	return &MCPRunner{
-		in:       in,
-		out:      out,
-		errOut:   errOut,
-		executor: executor,
+		in:           in,
+		out:          out,
+		errOut:       errOut,
+		workspaceDir: workspaceDir,
+		statePath:    statePath,
+		pubJWKSPath:  pubJWKSPath,
+		replayPath:   replayPath,
+		auditPath:    auditPath,
+		executor:     executor,
 	}
+}
+
+// SetWorkerBinaryPath 는 자식 프로세스로 실행할 바이너리 경로를 재정의한다 (테스트 지원).
+func (r *MCPRunner) SetWorkerBinaryPath(binPath string) {
+	r.workerBin = binPath
 }
 
 // Run 은 mcp 하위 명령어를 파싱하고 실행한다.
@@ -61,12 +85,79 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 	fs := flag.NewFlagSet("mcp serve", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
+	var (
+		workspaceFlag string
+		stateFlag     string
+		pubJWKSFlag   string
+		replayFlag    string
+		auditFlag     string
+		timeoutFlag   time.Duration
+	)
+
+	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
+	fs.StringVar(&stateFlag, "state-file", r.statePath, "Zone B 상태 파일 경로")
+	fs.StringVar(&pubJWKSFlag, "pub-jwks-file", r.pubJWKSPath, "Zone B 공개 검증 키(JWKS) 경로")
+	fs.StringVar(&replayFlag, "replay-file", r.replayPath, "Zone B Replay 방지 원장 경로")
+	fs.StringVar(&auditFlag, "audit-file", r.auditPath, "감사 로그 저장 파일 경로")
+	fs.DurationVar(&timeoutFlag, "timeout", 10*time.Second, "자식 프로세스 실행 타임아웃")
+
 	if err := fs.Parse(args); err != nil {
 		return domain.ExitBadInput
 	}
 
 	logger := slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	server := mcp.NewServer(r.in, r.out, r.errOut, r.executor, logger)
+
+	executor := r.executor
+	if executor == nil {
+		// 1. 감사 로그 기록기 초기화
+		auditWriter, err := audit.NewJSONLWriter(auditFlag)
+		if err != nil {
+			fmt.Fprintf(r.errOut, "Error: failed to init audit writer: %v\n", err)
+			return domain.ExitInternalError
+		}
+		defer auditWriter.Close()
+
+		// 2. 바이너리 결정
+		binPath := r.workerBin
+		if binPath == "" {
+			exe, err := os.Executable()
+			if err != nil {
+				fmt.Fprintf(r.errOut, "Error: failed to get executable path: %v\n", err)
+				return domain.ExitInternalError
+			}
+			binPath = exe
+		}
+
+		absStateFlag, _ := filepath.Abs(stateFlag)
+		absPubJWKSFlag, _ := filepath.Abs(pubJWKSFlag)
+		absReplayFlag, _ := filepath.Abs(replayFlag)
+		absAuditFlag, _ := filepath.Abs(auditFlag)
+		absWorkspaceFlag, _ := filepath.Abs(workspaceFlag)
+
+		childArgs := []string{
+			"subagent", "worker",
+			"-workspace", absWorkspaceFlag,
+			"-state-file", absStateFlag,
+			"-pub-jwks-file", absPubJWKSFlag,
+			"-replay-file", absReplayFlag,
+			"-audit-file", absAuditFlag,
+		}
+
+		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
+			BinaryPath: binPath,
+			Args:       childArgs,
+			Timeout:    timeoutFlag,
+			Audit:      auditWriter,
+		})
+		if err != nil {
+			fmt.Fprintf(r.errOut, "Error: failed to create spawner: %v\n", err)
+			return domain.ExitInternalError
+		}
+
+		executor = mcp.NewSubprocessExecutor(spawner)
+	}
+
+	server := mcp.NewServer(r.in, r.out, r.errOut, executor, logger)
 
 	if err := server.Serve(ctx); err != nil && err != context.Canceled {
 		fmt.Fprintf(r.errOut, "Error: mcp server encountered error: %v\n", err)

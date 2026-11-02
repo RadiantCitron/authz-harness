@@ -125,8 +125,7 @@ func main() {
 			exitCode := auditRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "mcp":
-			// 020 단계: stdio JSON-RPC 어댑터 서버 (집행기 배선은 030에서 연결)
-			mcpRunner := cli.NewMCPRunner(os.Stdin, os.Stdout, os.Stderr, nil)
+			mcpRunner := cli.NewMCPRunner(os.Stdin, os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath, nil)
 			exitCode := mcpRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		default:
