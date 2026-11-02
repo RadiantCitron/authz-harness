@@ -180,7 +180,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 				"expires_at":       childResult.Claims.ExpiresAt,
 			},
 		}
-		_ = s.auditWriter.Log(auditEv)
+		if err := s.auditWriter.Log(auditEv); err != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange audit log", err)
+		}
 	}
 
 	return &ExchangeResult{

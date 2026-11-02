@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
 )
 
@@ -73,7 +74,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 
 	// 1. 부모 사전 감사 이벤트 (ORCHESTRATE_SPAWN)
 	if s.cfg.Audit != nil {
-		_ = s.cfg.Audit.Log(audit.Event{
+		if err := s.cfg.Audit.Log(audit.Event{
 			Timestamp: time.Now(),
 			TraceID:   req.TraceID,
 			Step:      "ORCHESTRATE_SPAWN",
@@ -84,7 +85,9 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			Metadata: map[string]interface{}{
 				"binary": s.cfg.BinaryPath,
 			},
-		})
+		}); err != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_spawn", "failed to record pre-spawn audit log", err)
+		}
 	}
 
 	// 2. 실행 컨텍스트 및 프로세스 조립
@@ -138,7 +141,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 
 	// 3. 부모 사후 감사 이벤트 (ORCHESTRATE_COLLECT)
 	if s.cfg.Audit != nil {
-		_ = s.cfg.Audit.Log(audit.Event{
+		if err := s.cfg.Audit.Log(audit.Event{
 			Timestamp: time.Now(),
 			TraceID:   req.TraceID,
 			Step:      "ORCHESTRATE_COLLECT",
@@ -151,7 +154,9 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 				"duration_ms": duration.Milliseconds(),
 				"timed_out":   result.TimedOut,
 			},
-		})
+		}); err != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_collect", "failed to record post-spawn audit log", err)
+		}
 	}
 
 	return result, nil

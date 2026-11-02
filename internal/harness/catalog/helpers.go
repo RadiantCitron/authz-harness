@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"authz-harness/internal/app"
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
@@ -20,20 +21,20 @@ import (
 
 // harnessStack 은 단일 시나리오가 샌드박스 내에서 상호작용하는 모든 컴포넌트 묶음이다.
 type harnessStack struct {
-	Env          *harness.SandboxEnvironment
-	AuditWriter  audit.Writer
-	KeyStore     keys.Store
-	KeyManager   keys.KeyManager
-	TokenIssuer  token.TokenIssuer
+	Env           *harness.SandboxEnvironment
+	AuditWriter   audit.Writer
+	KeyStore      keys.Store
+	KeyManager    keys.KeyManager
+	TokenIssuer   token.TokenIssuer
 	TokenVerifier token.TokenVerifier
-	ClientReg    *token.InMemoryClientRegistry
-	ReplayLedger token.ReplayLedger
-	StateStore   state.Store
-	PAP          pap.Service
-	PIP          pip.Service
-	PDP          pdp.Service
-	Jail         jail.Jail
-	PEP          pep.Gateway
+	ClientReg     *token.InMemoryClientRegistry
+	ReplayLedger  token.ReplayLedger
+	StateStore    state.Store
+	PAP           pap.Service
+	PIP           pip.Service
+	PDP           pdp.Service
+	Jail          jail.Jail
+	PEP           pep.Gateway
 }
 
 // Close 는 스택에 바인딩된 리소스(감사 로그 기록기 등)를 안전하게 닫아 파일 디스크립터 누수를 방지한다.
@@ -46,83 +47,34 @@ func (s *harnessStack) Close() error {
 
 // setupHarnessStack 은 주어진 SandboxEnvironment 경로를 바탕으로 전체 스택을 초기화한다.
 func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
-	auditWriter, err := audit.NewJSONLWriter(env.AuditPath)
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: audit writer: %w", err)
-	}
-
-	keyStore, err := keys.NewFileStore(env.PrivKeyPath, env.PubJWKSPath)
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: key store: %w", err)
-	}
-
-	keyMgr, err := keys.NewManager(keyStore, auditWriter, keys.WithClock(env.MockClock))
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: key mgr: %w", err)
-	}
-
-	// 서명 키 초기 생성 (없을 경우)
-	activeKey, err := keyMgr.GetActiveSigningKey()
-	if err != nil || activeKey == nil {
-		if _, err := keyMgr.RotateKey(domain.AuditContext{
-			TraceID: "initial-key-rotation",
-			Actor:   "system",
-			Reason:  "initial active key setup",
-		}); err != nil {
-			return nil, fmt.Errorf("setup stack: initial rotate key: %w", err)
-		}
-	}
-
-	clientReg := token.NewInMemoryClientRegistry()
-	tokenIssuer := token.NewService(keyMgr, clientReg, auditWriter, env.MockClock)
-
-	replayLedger, err := token.NewFileReplayLedger(env.ReplayPath, env.MockClock)
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: replay ledger: %w", err)
-	}
-
-	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, env.MockClock)
-
-	stateStore, err := state.NewFileStore(env.StatePath)
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: state store: %w", err)
-	}
-
-	papSvc := pap.NewService(stateStore, auditWriter, pap.WithClock(env.MockClock))
-	pipSvc := pip.NewService(stateStore)
-	pdpSvc := pdp.NewService(pipSvc, auditWriter)
-
-	workspaceJail, err := jail.New(env.WorkspaceDir)
-	if err != nil {
-		return nil, fmt.Errorf("setup stack: jail: %w", err)
-	}
-
-	pepGateway, err := pep.NewGateway(pep.Config{
-		Verifier:    tokenVerifier,
-		PDP:         pdpSvc,
-		Jail:        workspaceJail,
-		AuditWriter: auditWriter,
-		Clock:       env.MockClock,
+	st, err := app.BuildStack(app.AppConfig{
+		StatePath:    env.StatePath,
+		PrivKeyPath:  env.PrivKeyPath,
+		PubJWKSPath:  env.PubJWKSPath,
+		ReplayPath:   env.ReplayPath,
+		AuditPath:    env.AuditPath,
+		WorkspaceDir: env.WorkspaceDir,
+		Clock:        env.MockClock,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("setup stack: pep gateway: %w", err)
+		return nil, fmt.Errorf("setup stack via app builder: %w", err)
 	}
 
 	return &harnessStack{
 		Env:           env,
-		AuditWriter:   auditWriter,
-		KeyStore:      keyStore,
-		KeyManager:    keyMgr,
-		TokenIssuer:   tokenIssuer,
-		TokenVerifier: tokenVerifier,
-		ClientReg:     clientReg,
-		ReplayLedger:  replayLedger,
-		StateStore:    stateStore,
-		PAP:           papSvc,
-		PIP:           pipSvc,
-		PDP:           pdpSvc,
-		Jail:          workspaceJail,
-		PEP:           pepGateway,
+		AuditWriter:   st.AuditWriter,
+		KeyStore:      st.KeyStore,
+		KeyManager:    st.KeyManager,
+		TokenIssuer:   st.TokenIssuer,
+		TokenVerifier: st.TokenVerifier,
+		ClientReg:     st.ClientReg,
+		ReplayLedger:  st.ReplayLedger,
+		StateStore:    st.StateStore,
+		PAP:           st.PAP,
+		PIP:           st.PIP,
+		PDP:           st.PDP,
+		Jail:          st.Jail,
+		PEP:           st.PEP,
 	}, nil
 }
 

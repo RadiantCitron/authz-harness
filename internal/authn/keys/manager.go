@@ -100,7 +100,7 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 		}
 
 		if m.auditWriter != nil {
-			_ = m.auditWriter.Log(audit.Event{
+			if err := m.auditWriter.Log(audit.Event{
 				Timestamp: now,
 				TraceID:   fmt.Sprintf("init-%s", kid),
 				Actor:     "system",
@@ -111,7 +111,9 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 					"alg":    entry.Algorithm,
 					"status": entry.Status,
 				},
-			})
+			}); err != nil {
+				return nil, fmt.Errorf("keys manager: failed to record initial key audit log: %w", err)
+			}
 		}
 	}
 
@@ -219,7 +221,7 @@ func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 	}
 
 	if m.auditWriter != nil {
-		_ = m.auditWriter.Log(audit.Event{
+		if err := m.auditWriter.Log(audit.Event{
 			Timestamp: now,
 			TraceID:   auditCtx.TraceID,
 			Actor:     auditCtx.Actor,
@@ -231,7 +233,9 @@ func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 				"new_active_kid": newKID,
 				"alg":            newEntry.Algorithm,
 			},
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("keys manager: failed to record rotate key audit log: %w", err)
+		}
 	}
 
 	jwk := domain.JWK{
@@ -296,7 +300,7 @@ func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
 	}
 
 	if m.auditWriter != nil {
-		_ = m.auditWriter.Log(audit.Event{
+		if err := m.auditWriter.Log(audit.Event{
 			Timestamp: now,
 			TraceID:   auditCtx.TraceID,
 			Actor:     auditCtx.Actor,
@@ -306,7 +310,9 @@ func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
 			Metadata: map[string]interface{}{
 				"revoked_kid": kid,
 			},
-		})
+		}); err != nil {
+			return fmt.Errorf("keys manager: failed to record revoke key audit log: %w", err)
+		}
 	}
 
 	return nil

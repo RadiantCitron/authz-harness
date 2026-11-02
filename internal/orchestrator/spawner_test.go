@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
 )
 
@@ -411,5 +413,58 @@ func TestTC10_ConcurrentSpawns(t *testing.T) {
 
 	for err := range errCh {
 		t.Errorf("concurrency error: %v", err)
+	}
+}
+
+// TC-010-03: Spawner.Spawn 호출 시 사전 감사 기록 실패 시 서브프로세스가 실행되지 않고 ExitAuditFailure 반환
+type mockFailingAuditWriter struct{}
+
+func (mockFailingAuditWriter) Log(ev audit.Event) error {
+	return errors.New("injected audit write failure")
+}
+
+func (mockFailingAuditWriter) Close() error {
+	return nil
+}
+
+func TestSpawner_FailClosedOnAuditError(t *testing.T) {
+	tmpDir := t.TempDir()
+	outPath := filepath.Join(tmpDir, "should_not_exist.txt")
+
+	spawner, err := NewSubprocessSpawner(SpawnConfig{
+		BinaryPath: "/bin/sh",
+		Args:       []string{"-c", fmt.Sprintf("echo 'created' > %s", outPath)},
+		Timeout:    2 * time.Second,
+		Audit:      mockFailingAuditWriter{},
+	})
+	if err != nil {
+		t.Fatalf("NewSubprocessSpawner failed: %v", err)
+	}
+
+	req := subagent.SubagentRequest{
+		TraceID:  "trace-audit-fail",
+		Action:   "write",
+		FilePath: outPath,
+	}
+
+	result, err := spawner.Spawn(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error from Spawn when audit fails, got nil")
+	}
+	if result != nil {
+		t.Fatalf("expected nil result, got %+v", result)
+	}
+
+	var dErr *domain.Error
+	if !errors.As(err, &dErr) {
+		t.Fatalf("expected *domain.Error, got %T: %v", err, err)
+	}
+	if dErr.ExitCode != domain.ExitAuditFailure {
+		t.Fatalf("expected ExitCode %d (ExitAuditFailure), got %d", domain.ExitAuditFailure, dErr.ExitCode)
+	}
+
+	// 서브프로세스가 실제로 실행되지 않아 파일이 생성되지 않았음을 보장
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Fatal("fail-closed violated: subprocess ran and created file despite audit failure")
 	}
 }
