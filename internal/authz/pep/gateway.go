@@ -59,7 +59,8 @@ type Request struct {
 	ExpectedAudience       string        // 토큰 수신자 기대값 (기본값: "authz-harness")
 	ExpectedSubject    string        // 선택적 주체 기대값 검증
 	ClockOffset        time.Duration // 선택적 가상 시계 오프셋 (테스트 및 시간 시뮬레이션)
-	TraceID            string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
+	TraceID                string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
+	RequireTraceID         bool          // true 인 경우 TraceID 누락 시 Gate 0 에서 즉각 차단 (E2E-28 검증용)
 }
 
 // Result 는 PEP 관문 집행 결과 및 단계별 판정 세부 정보다.
@@ -129,8 +130,19 @@ func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 	}
 
 	// 0. 기본 입력 인자 유효성 검증
-	normAction, actErr := NormalizeAction(string(req.Action))
 	cleanResource := strings.TrimSpace(req.Resource)
+	if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
+		g.logEvent(traceID, "", "", cleanResource, string(req.Action), StageGate0Input, false, domain.ReasonMissingTraceContext, "trace_id is required but missing")
+		return &Result{
+			Allowed:  false,
+			ExitCode: domain.ExitBadInput,
+			Stage:    StageGate0Input,
+			Reason:   domain.ReasonMissingTraceContext,
+			Details:  "trace_id is required but missing",
+		}, nil
+	}
+
+	normAction, actErr := NormalizeAction(string(req.Action))
 	if actErr != nil || cleanResource == "" {
 		g.logEvent(traceID, "", "", cleanResource, string(req.Action), StageGate0Input, false, domain.ReasonInvalidArguments, "invalid action or resource argument")
 		return &Result{

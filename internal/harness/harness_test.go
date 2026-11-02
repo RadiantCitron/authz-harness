@@ -447,3 +447,123 @@ func TestHarnessRunner_NoCrossContamination(t *testing.T) {
 		t.Fatal("Cross-contamination detected: Scenario B observed files from Scenario A!")
 	}
 }
+
+// TC-050-01: 해시 누락 이벤트에 대한 RequireValidChain: true 거부 (AP-07 가짜 해시 통과 완전 제거)
+func TestTC_050_01_MissingHashFails(t *testing.T) {
+	env, err := NewSandboxEnvironment(SandboxConfig{BaseDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("sandbox init failed: %v", err)
+	}
+	defer env.Cleanup()
+
+	// curr_hash 가 없는 가짜 감사 로그 직접 기록
+	lines := `{"timestamp":"2026-11-01T12:00:00Z","trace_id":"t1","actor":"w","action":"read","decision":"allow"}
+`
+	if err := os.WriteFile(env.AuditPath, []byte(lines), 0600); err != nil {
+		t.Fatalf("failed to write audit log: %v", err)
+	}
+
+	exp := ExpectedAssertion{
+		ExitCode: domain.ExitSuccess,
+		HashChain: HashChainExpectation{
+			RequireValidChain: true,
+		},
+	}
+
+	evaluator := NewDefaultEvaluator()
+	res := evaluator.Evaluate(env, domain.ExitSuccess, exp)
+
+	if res.Passed {
+		t.Fatal("expected assertion to fail when curr_hash is missing with RequireValidChain: true")
+	}
+	if res.HashChainPassed {
+		t.Fatal("expected HashChainPassed to be false")
+	}
+}
+
+// TC-050-02: ExpectedAction 불일치 시 폴백 없이 즉시 실패 (AP-08 무단 폴백 제거)
+func TestTC_050_02_ActionMismatchNoFallback(t *testing.T) {
+	env, err := NewSandboxEnvironment(SandboxConfig{BaseDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("sandbox init failed: %v", err)
+	}
+	defer env.Cleanup()
+
+	// "pep.allow" 액션과 AUTHORIZED 사유 기록
+	writer, err := audit.NewJSONLWriter(env.AuditPath)
+	if err != nil {
+		t.Fatalf("failed to open audit writer: %v", err)
+	}
+	_ = writer.Log(audit.Event{
+		TraceID:  "trc-50-02",
+		Actor:    "worker",
+		Action:   "pep.allow",
+		Decision: "allow",
+		Reason:   string(domain.ReasonAuthorized),
+		Success:  true,
+	})
+	_ = writer.Close()
+
+	// 그러나 기대값은 "pep.deny" / "AUTHORIZED"
+	exp := ExpectedAssertion{
+		ExitCode: domain.ExitSuccess,
+		Audit: AuditExpectation{
+			RequireEvent:     true,
+			ExpectedAction:   "pep.deny", // 불일치 액션
+			ExpectedDecision: "allow",
+			ExpectedReason:   domain.ReasonAuthorized,
+		},
+	}
+
+	evaluator := NewDefaultEvaluator()
+	res := evaluator.Evaluate(env, domain.ExitSuccess, exp)
+
+	if res.Passed {
+		t.Fatal("expected assertion to fail when ExpectedAction does not match (no fallback allowed)")
+	}
+	if res.AuditPassed {
+		t.Fatal("expected AuditPassed to be false")
+	}
+}
+
+// TC-050-03: ExpectedTraceID 불일치 시 즉시 실패
+func TestTC_050_03_TraceIDMismatchFails(t *testing.T) {
+	env, err := NewSandboxEnvironment(SandboxConfig{BaseDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("sandbox init failed: %v", err)
+	}
+	defer env.Cleanup()
+
+	writer, err := audit.NewJSONLWriter(env.AuditPath)
+	if err != nil {
+		t.Fatalf("failed to open audit writer: %v", err)
+	}
+	_ = writer.Log(audit.Event{
+		TraceID:  "trc-actual",
+		Actor:    "worker",
+		Action:   "pep.allow",
+		Decision: "allow",
+		Reason:   string(domain.ReasonAuthorized),
+		Success:  true,
+	})
+	_ = writer.Close()
+
+	exp := ExpectedAssertion{
+		ExitCode: domain.ExitSuccess,
+		Audit: AuditExpectation{
+			RequireEvent:    true,
+			ExpectedAction:  "pep.allow",
+			ExpectedTraceID: "trc-different-expected", // 불일치 TraceID
+		},
+	}
+
+	evaluator := NewDefaultEvaluator()
+	res := evaluator.Evaluate(env, domain.ExitSuccess, exp)
+
+	if res.Passed {
+		t.Fatal("expected assertion to fail when ExpectedTraceID does not match")
+	}
+	if res.AuditPassed {
+		t.Fatal("expected AuditPassed to be false")
+	}
+}

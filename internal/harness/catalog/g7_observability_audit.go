@@ -3,8 +3,10 @@ package catalog
 import (
 	"context"
 	"os"
+	"strings"
 	"time"
 
+	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
@@ -40,10 +42,13 @@ func (s *e2e28Scenario) Metadata() harness.ScenarioMetadata {
 				ExpectZeroMutation: true,
 			},
 			Audit: harness.AuditExpectation{
-				RequireEvent: false, // trace_id 누락 시 Gate 0 단계에서 즉각 종료
+				RequireEvent:     true,
+				ExpectedAction:   "pep.deny",
+				ExpectedDecision: "deny",
+				ExpectedReason:   domain.ReasonMissingTraceContext,
 			},
 			HashChain: harness.HashChainExpectation{
-				RequireValidChain: false,
+				RequireValidChain: true,
 				NoRawTokenLeak:    true,
 			},
 		},
@@ -69,13 +74,14 @@ func (s *e2e28Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 
-	// Action/Resource 누락으로 Gate 0 ExitBadInput 유도
+	// 유효한 Action 및 Resource 를 주되, TraceID 를 누락하고 RequireTraceID 를 설정하여 실제 trace_id 누락 차단 검증
 	res, err := stack.PEP.Execute(ctx, pep.Request{
-		Token:    s.token,
-		Action:   "", // 유효하지 않은 Action 누락 -> Gate 0 ExitBadInput (14)
-		Resource: "output.txt",
-		Data:     []byte("fail"),
-		TraceID:  "",
+		Token:          s.token,
+		Action:         domain.ActionFileWrite,
+		Resource:       "output.txt",
+		Data:           []byte("fail"),
+		TraceID:        "",
+		RequireTraceID: true,
 	})
 	if err != nil {
 		return domain.ExitInternalError, err
@@ -167,7 +173,7 @@ func (s *e2e30Scenario) Metadata() harness.ScenarioMetadata {
 		AttackClass:        "AuditLogTampering",
 		ParadoxExplanation: "감사 로그 파일 내용의 임의 변조 시 해시 체인 불일치로 변조를 적발했습니다.",
 		Expected: harness.ExpectedAssertion{
-			ExitCode: domain.ExitSuccess,
+			ExitCode: domain.ExitAuditFailure,
 			File: harness.FileExpectation{
 				RelPath:         "audit_tamper.txt",
 				ExpectExist:     true,
@@ -180,10 +186,7 @@ func (s *e2e30Scenario) Metadata() harness.ScenarioMetadata {
 				ExpectedReason:   domain.ReasonAuthorized,
 			},
 			HashChain: harness.HashChainExpectation{
-				// Quad-Assertion 에서 해시 체인 변조를 의도적으로 유발하므로
-				// 이 시나리오는 Runner의 Assert() 에서 HashChainPassed 가 false 가 됨을 검증하거나,
-				// 시나리오 자체의 Expected 에 해시체인 무결성 요구를 설정
-				RequireValidChain: false, // 체인이 변조되었음을 검증
+				RequireValidChain: false, // 사후 검증(audit.VerifyHashChain)에서 이미 적발 완료되었음을 증명
 				NoRawTokenLeak:    true,
 			},
 		},
@@ -227,14 +230,23 @@ func (s *e2e30Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
-
-	// 2. 실행 후 audit.jsonl 파일의 내용을 읽어 변조 (공격자 임의 조작 시뮬레이션)
-	data, err := os.ReadFile(env.AuditPath)
-	if err == nil && len(data) > 0 {
-		// 내용 일부 바이트 조작
-		tampered := append([]byte(`{"tampered":"attack"}`+"\n"), data...)
-		_ = os.WriteFile(env.AuditPath, tampered, 0600)
+	if !res.Allowed {
+		return res.ExitCode, nil
 	}
 
-	return res.ExitCode, nil
+	// 2. 실행 후 audit.jsonl 파일의 내용을 읽어 유효한 JSON 형식 내의 특정 필드 변조 (공격자 임의 조작 시뮬레이션)
+	data, err := os.ReadFile(env.AuditPath)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	tampered := strings.Replace(string(data), `"resource":"audit_tamper.txt"`, `"resource":"tampered.txt"`, 1)
+	if err := os.WriteFile(env.AuditPath, []byte(tampered), 0600); err != nil {
+		return domain.ExitInternalError, err
+	}
+
+	// 3. 변조 직후 사후 감사 무결성 검증기 직접 호출
+	verifyErr := audit.VerifyHashChain(env.AuditPath)
+
+	// 4. 변조 적발 시 ExitAuditFailure (15) 반환
+	return domain.ExitCodeFromError(verifyErr, domain.ExitSuccess), nil
 }

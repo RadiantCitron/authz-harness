@@ -38,7 +38,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 	// 1. 필수 인자 검증
 	if strings.TrimSpace(req.TraceID) == "" {
 		resp.ExitCode = int(domain.ExitBadInput)
-		resp.Reason = string(domain.ReasonInvalidArguments)
+		resp.Reason = string(domain.ReasonMissingTraceContext)
 		resp.Error = "trace_id is required"
 		return resp, resp.ExitCode
 	}

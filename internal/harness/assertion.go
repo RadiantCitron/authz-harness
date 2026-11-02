@@ -199,46 +199,24 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 				}
 			}
 
-			// 특정 Action 필터 없이도 결정이 있다면 최신 결정 이벤트 채택
 			if !found {
-				for i := len(events) - 1; i >= 0; i-- {
-					ev := events[i]
-					evDecision := ev.Decision
-					if evDecision == "" {
-						if !ev.Success {
-							evDecision = "deny"
-						} else if ev.Success && ev.Decision == "" && ev.Reason == string(domain.ReasonAuthorized) {
-							evDecision = "allow"
-						}
-					}
-					evReason := ev.Reason
-					if evReason == "" && ev.Metadata != nil {
-						if r, ok := ev.Metadata["reason"].(string); ok {
-							evReason = r
-						}
-					}
+				res.AuditPassed = false
+				res.Passed = false
+				res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("no audit event matched ExpectedAction %q and ExpectedTraceID %q", exp.Audit.ExpectedAction, exp.Audit.ExpectedTraceID))
+			} else {
+				res.AuditActualDecision = matchedDecision
+				res.AuditActualReason = matchedReason
 
-					if evDecision != "" || evReason != "" {
-						matchedDecision = evDecision
-						matchedReason = domain.Reason(evReason)
-						found = true
-						break
-					}
+				if exp.Audit.ExpectedDecision != "" && !strings.EqualFold(matchedDecision, exp.Audit.ExpectedDecision) {
+					res.AuditPassed = false
+					res.Passed = false
+					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit decision mismatch: expected %q, got %q", exp.Audit.ExpectedDecision, matchedDecision))
 				}
-			}
-
-			res.AuditActualDecision = matchedDecision
-			res.AuditActualReason = matchedReason
-
-			if exp.Audit.ExpectedDecision != "" && !strings.EqualFold(matchedDecision, exp.Audit.ExpectedDecision) {
-				res.AuditPassed = false
-				res.Passed = false
-				res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit decision mismatch: expected %q, got %q", exp.Audit.ExpectedDecision, matchedDecision))
-			}
-			if exp.Audit.ExpectedReason != "" && matchedReason != exp.Audit.ExpectedReason {
-				res.AuditPassed = false
-				res.Passed = false
-				res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit reason mismatch: expected %q, got %q", exp.Audit.ExpectedReason, matchedReason))
+				if exp.Audit.ExpectedReason != "" && matchedReason != exp.Audit.ExpectedReason {
+					res.AuditPassed = false
+					res.Passed = false
+					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit reason mismatch: expected %q, got %q", exp.Audit.ExpectedReason, matchedReason))
+				}
 			}
 		}
 	}
@@ -261,36 +239,45 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 		}
 	}
 
-	// 4-2. Hash Chain 검증
-	if exp.HashChain.RequireValidChain && len(events) > 0 {
-		var prevHash string
-		for i, ev := range events {
-			// metadata 내 prev_hash / curr_hash 검증
-			// 또는 이벤트 필드 prev_hash / curr_hash 검증
-			var evPrevHash, evCurrHash string
-			evPrevHash = ev.PrevHash
-			evCurrHash = ev.CurrHash
-			if ev.Metadata != nil {
-				if evPrevHash == "" {
-					if ph, ok := ev.Metadata["prev_hash"].(string); ok {
-						evPrevHash = ph
+	// 4-2. Hash Chain 검증 (가짜 통과 원천 제거 및 파일 체인 일체 검증)
+	if exp.HashChain.RequireValidChain {
+		if len(events) == 0 {
+			res.HashChainPassed = false
+			res.Passed = false
+			res.FailureReasons = append(res.FailureReasons, "audit events empty but RequireValidChain is true")
+		} else {
+			var prevHash string
+			for i, ev := range events {
+				var evPrevHash, evCurrHash string
+				evPrevHash = ev.PrevHash
+				evCurrHash = ev.CurrHash
+				if ev.Metadata != nil {
+					if evPrevHash == "" {
+						if ph, ok := ev.Metadata["prev_hash"].(string); ok {
+							evPrevHash = ph
+						}
+					}
+					if evCurrHash == "" {
+						if ch, ok := ev.Metadata["curr_hash"].(string); ok {
+							evCurrHash = ch
+						}
 					}
 				}
-				if evCurrHash == "" {
-					if ch, ok := ev.Metadata["curr_hash"].(string); ok {
-						evCurrHash = ch
-					}
-				}
-			}
 
-			if evPrevHash != "" || evCurrHash != "" {
+				if evCurrHash == "" {
+					res.HashChainPassed = false
+					res.Passed = false
+					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("event #%d missing curr_hash (vacuous pass forbidden)", i+1))
+					break
+				}
+
 				if evPrevHash != prevHash {
 					res.HashChainPassed = false
 					res.Passed = false
 					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("hash chain broken at event #%d: expected prev_hash %q, got %q", i+1, prevHash, evPrevHash))
 					break
 				}
-				// curr_hash 계산 일치 검증: sha256(prev_hash + trace_id + timestamp + decision + reason)
+
 				computedCurrHash := computeEventHash(evPrevHash, ev)
 				if evCurrHash != computedCurrHash {
 					res.HashChainPassed = false
@@ -299,6 +286,14 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 					break
 				}
 				prevHash = evCurrHash
+			}
+
+			if res.HashChainPassed && env != nil && env.AuditPath != "" {
+				if err := audit.VerifyHashChain(env.AuditPath); err != nil {
+					res.HashChainPassed = false
+					res.Passed = false
+					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit.VerifyHashChain failed: %v", err))
+				}
 			}
 		}
 	}
