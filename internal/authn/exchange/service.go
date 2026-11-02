@@ -166,6 +166,8 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 			Step:      "030-exchange",
 			Actor:     actor,
 			Action:    "token.exchanged",
+			Decision:  "allow",
+			Reason:    string(domain.ReasonAuthorized),
 			Success:   true,
 			Metadata: map[string]interface{}{
 				"parent_jti":       parentClaims.JWTID,
@@ -198,7 +200,9 @@ func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string
 		TraceID:   traceID,
 		Step:      "030-exchange",
 		Actor:     actor,
-		Action:    "authn.exchange_denied",
+		Action:    "token.exchange.deny",
+		Decision:  "deny",
+		Reason:    string(reason),
 		Success:   false,
 		Metadata: map[string]interface{}{
 			"client_id":  req.ClientID,

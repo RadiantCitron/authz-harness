@@ -297,20 +297,30 @@ func (g *gateway) logEvent(traceID, subject, jti, resource, action string, stage
 		return fmt.Errorf("pep: nil audit writer")
 	}
 
+	actionName := "pep.allow"
+	if !success {
+		actionName = "pep.deny"
+	}
+	stepName := string(stage)
+	if action != "" {
+		stepName = "pep." + action
+	}
+
 	event := audit.Event{
 		Timestamp: g.clock.Now().UTC(),
 		TraceID:   traceID,
-		Step:      string(stage),
+		Step:      stepName,
 		Actor:     subject,
-		Action:    "pep." + action,
+		Action:    actionName,
 		Resource:  resource,
-		Decision:  map[bool]string{true: "ALLOW", false: "DENY"}[success],
+		Decision:  map[bool]string{true: "allow", false: "deny"}[success],
 		Reason:    string(reason),
 		TokenJTI:  jti,
 		Success:   success,
 		Metadata: map[string]interface{}{
-			"stage":   string(stage),
-			"details": details,
+			"stage":            string(stage),
+			"requested_action": action,
+			"details":          details,
 		},
 	}
 	if subject == "" {

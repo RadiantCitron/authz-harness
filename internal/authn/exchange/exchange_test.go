@@ -658,3 +658,62 @@ func TestTC_010_09_Exchange_StructuredParentError(t *testing.T) {
 		t.Fatalf("expected ExitTokenInvalid (%d), got %d", domain.ExitTokenInvalid, domain.ExitCodeFromError(err, domain.ExitInternalError))
 	}
 }
+
+// TC-030-10: Token Exchange 거부 시 표준 Action 기록 (token.exchange.deny, decision: deny, reason: DELEGATION_SCOPE_EXCEEDED)
+func TestTC_030_10_ExchangeDenyStandardAction(t *testing.T) {
+	baseTime := time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+	svc, issuer, _, _, _, auditPath, _ := setupTestHarness(t, baseTime)
+
+	parentRes, err := issuer.IssueToken(token.IssueRequest{
+		ClientID:     "client-orchestrator",
+		ClientSecret: "orchestrator-secret-key-01",
+		Subject:      "orchestrator-main",
+		Scope:        "file:read:docs/plan.txt",
+		TTL:          10 * time.Minute,
+	}, token.IssueOptions{}, domain.AuditContext{TraceID: "trc-ex-setup"})
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	exchangeTraceID := "trc-exchange-999"
+	// Scope 확장 시도: read 전용 부모 토큰으로 write 요청 -> DELEGATION_SCOPE_EXCEEDED 거부
+	_, err = svc.Exchange(context.Background(), exchange.ExchangeRequest{
+		ClientID:     "client-subagent",
+		ClientSecret: "subagent-secret-key-02",
+		ParentToken:  parentRes.TokenString,
+		ChildSubject: "worker-01",
+		Scope:        "file:write:docs/plan.txt",
+	}, domain.AuditContext{
+		TraceID: exchangeTraceID,
+		Actor:   "client-subagent",
+	})
+	if err == nil {
+		t.Fatal("expected scope exceeded error, got nil")
+	}
+
+	// 감사 로그 검증
+	f, err := os.Open(auditPath)
+	if err != nil {
+		t.Fatalf("failed to open audit file: %v", err)
+	}
+	defer f.Close()
+
+	var lastEv audit.Event
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var ev audit.Event
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err == nil && ev.TraceID == exchangeTraceID {
+			lastEv = ev
+		}
+	}
+
+	if lastEv.Action != "token.exchange.deny" {
+		t.Errorf("expected Action 'token.exchange.deny', got %q", lastEv.Action)
+	}
+	if lastEv.Decision != "deny" {
+		t.Errorf("expected Decision 'deny', got %q", lastEv.Decision)
+	}
+	if lastEv.Reason != string(domain.ReasonDelegationScopeExceeded) {
+		t.Errorf("expected Reason %s, got %s", domain.ReasonDelegationScopeExceeded, lastEv.Reason)
+	}
+}

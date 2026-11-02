@@ -1,8 +1,6 @@
 package harness
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -270,12 +268,18 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			// metadata 내 prev_hash / curr_hash 검증
 			// 또는 이벤트 필드 prev_hash / curr_hash 검증
 			var evPrevHash, evCurrHash string
+			evPrevHash = ev.PrevHash
+			evCurrHash = ev.CurrHash
 			if ev.Metadata != nil {
-				if ph, ok := ev.Metadata["prev_hash"].(string); ok {
-					evPrevHash = ph
+				if evPrevHash == "" {
+					if ph, ok := ev.Metadata["prev_hash"].(string); ok {
+						evPrevHash = ph
+					}
 				}
-				if ch, ok := ev.Metadata["curr_hash"].(string); ok {
-					evCurrHash = ch
+				if evCurrHash == "" {
+					if ch, ok := ev.Metadata["curr_hash"].(string); ok {
+						evCurrHash = ch
+					}
 				}
 			}
 
@@ -304,24 +308,10 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 
 // computeEventHash 는 이벤트와 이전 해시를 바탕으로 정규화된 SHA-256 해시를 계산한다.
 func computeEventHash(prevHash string, ev audit.Event) string {
-	// curr_hash 계산 시 curr_hash 필드 자체는 제외한 정규 복제본으로 해시 계산
-	evCopy := ev
-	if evCopy.Metadata != nil {
-		cleanMeta := make(map[string]interface{})
-		for k, v := range evCopy.Metadata {
-			if k != "curr_hash" {
-				cleanMeta[k] = v
-			}
-		}
-		evCopy.Metadata = cleanMeta
-	}
-	data, _ := json.Marshal(evCopy)
-	raw := prevHash + ":" + string(data)
-	h := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(h[:])
+	return audit.ComputeEventHash(prevHash, ev)
 }
 
 // ComputeEventCurrHash 는 이벤트 메타데이터에 주입할 curr_hash 계산 헬퍼 함수다.
 func ComputeEventCurrHash(prevHash string, ev audit.Event) string {
-	return computeEventHash(prevHash, ev)
+	return audit.ComputeEventHash(prevHash, ev)
 }

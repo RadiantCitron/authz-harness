@@ -1,7 +1,9 @@
 package pep_test
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -705,5 +707,119 @@ func TestTC_010_08_StructuredErrorReason_Extraction(t *testing.T) {
 	}
 	if result.ExitCode != domain.ExitTokenInvalid {
 		t.Fatalf("expected ExitTokenInvalid (%d), got %d", domain.ExitTokenInvalid, result.ExitCode)
+	}
+}
+
+// TC-030-08: PEP -> PDP 단일 TraceID 관통 검증
+func TestTC_030_08_SingleTraceIDPropagation(t *testing.T) {
+	ctx := context.Background()
+	h := setupTestHarness(t)
+	sub := "worker-trace-01"
+	resPath := "trace_test.txt"
+	traceID := "trc-unified-777"
+
+	tok := issueValidToken(t, h, sub, "file:read", 10*time.Minute, 1)
+	createGrant(t, h, sub, domain.ActionFileRead, resPath)
+	if err := os.WriteFile(filepath.Join(h.workspaceDir, resPath), []byte("hello trace"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	req := pep.Request{
+		Token:    tok,
+		Action:   domain.ActionFileRead,
+		Resource: resPath,
+		TraceID:  traceID,
+	}
+
+	result, err := h.gateway.Execute(ctx, req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !result.Allowed {
+		t.Fatalf("expected allowed, got denied with %s", result.Reason)
+	}
+
+	// audit.jsonl 파일에서 발생한 모든 이벤트의 trace_id 검증
+	f, err := os.Open(h.auditFile)
+	if err != nil {
+		t.Fatalf("failed to open audit file: %v", err)
+	}
+	defer f.Close()
+
+	var events []audit.Event
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var ev audit.Event
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err == nil {
+			// 이번 요청과 관련된 이벤트 필터링
+			if ev.TraceID == traceID {
+				events = append(events, ev)
+			}
+		}
+	}
+
+	if len(events) < 3 {
+		t.Fatalf("expected at least 3 events for trace %s (authn.verify, pdp.decide, pep.allow), got %d", traceID, len(events))
+	}
+
+	for _, ev := range events {
+		if ev.TraceID != traceID {
+			t.Errorf("expected traceID %s, got %s", traceID, ev.TraceID)
+		}
+		if ev.Decision == "" {
+			t.Errorf("event missing top-level decision: %+v", ev)
+		}
+	}
+}
+
+// TC-030-09: PEP 거부 시 표준 Action 기록 (pep.deny, decision: deny)
+func TestTC_030_09_PepDenyStandardAction(t *testing.T) {
+	ctx := context.Background()
+	h := setupTestHarness(t)
+	sub := "worker-deny-01"
+	resPath := "unauthorized.txt"
+	traceID := "trc-deny-888"
+
+	tok := issueValidToken(t, h, sub, "file:write", 10*time.Minute, 1)
+	// Grant를 생성하지 않고 접근 시도 -> 거부 유도
+
+	req := pep.Request{
+		Token:    tok,
+		Action:   domain.ActionFileWrite,
+		Resource: resPath,
+		TraceID:  traceID,
+	}
+
+	result, err := h.gateway.Execute(ctx, req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Allowed {
+		t.Fatalf("expected denied, got allowed")
+	}
+
+	f, err := os.Open(h.auditFile)
+	if err != nil {
+		t.Fatalf("failed to open audit file: %v", err)
+	}
+	defer f.Close()
+
+	var lastEv audit.Event
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		var ev audit.Event
+		if err := json.Unmarshal(scanner.Bytes(), &ev); err == nil && ev.TraceID == traceID {
+			lastEv = ev
+		}
+	}
+
+	if lastEv.Action != "pep.deny" {
+		t.Errorf("expected final action 'pep.deny', got %q", lastEv.Action)
+	}
+	if lastEv.Decision != "deny" {
+		t.Errorf("expected decision 'deny', got %q", lastEv.Decision)
+	}
+	if lastEv.Reason != string(domain.ReasonNoActiveGrant) {
+		t.Errorf("expected reason %s, got %s", domain.ReasonNoActiveGrant, lastEv.Reason)
 	}
 }

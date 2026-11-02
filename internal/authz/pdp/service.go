@@ -168,9 +168,6 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 
 	now := s.clock.Now().UTC()
 	traceID := req.TraceID
-	if strings.TrimSpace(traceID) == "" {
-		traceID = fmt.Sprintf("pdp-%d", now.UnixNano())
-	}
 
 	// 도메인 이벤트 수집기가 컨텍스트에 주입된 경우 도메인 사건 기록 (DIP)
 	if recorder := domain.EventRecorderFromContext(ctx); recorder != nil {
@@ -200,6 +197,8 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 			Actor:     req.Subject,
 			Action:    "pdp.decide",
 			Resource:  req.Resource,
+			Decision:  strings.ToLower(string(decision.Decision)),
+			Reason:    string(decision.Reason),
 			Success:   decision.Decision == DecisionAllow,
 			Metadata: map[string]interface{}{
 				"decision":         string(decision.Decision),

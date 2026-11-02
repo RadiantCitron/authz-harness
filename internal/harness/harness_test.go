@@ -249,30 +249,13 @@ func TestQuadAssertion_HashChainBroken(t *testing.T) {
 	}
 	defer env.Cleanup()
 
-	// 해시 체인이 손상된 2개 이벤트 기록
-	writer, err := audit.NewJSONLWriter(env.AuditPath)
-	if err != nil {
-		t.Fatalf("failed to open audit writer: %v", err)
+	// 해시 체인이 손상된 2개 이벤트 직접 파일 기록 (외부 변조 시뮬레이션)
+	lines := `{"timestamp":"2026-11-01T12:00:00Z","trace_id":"t1","actor":"w","action":"read","decision":"allow","prev_hash":"","curr_hash":"hash-111"}
+{"timestamp":"2026-11-01T12:00:01Z","trace_id":"t1","actor":"w","action":"read","decision":"allow","prev_hash":"broken-mismatch-hash","curr_hash":"hash-222"}
+`
+	if err := os.WriteFile(env.AuditPath, []byte(lines), 0600); err != nil {
+		t.Fatalf("failed to write broken audit log: %v", err)
 	}
-	ev1 := audit.Event{
-		Timestamp: time.Now().UTC(),
-		Decision:  "allow",
-		Metadata: map[string]interface{}{
-			"prev_hash": "",
-			"curr_hash": "hash-111",
-		},
-	}
-	ev2 := audit.Event{
-		Timestamp: time.Now().UTC(),
-		Decision:  "allow",
-		Metadata: map[string]interface{}{
-			"prev_hash": "broken-mismatch-hash", // 손상
-			"curr_hash": "hash-222",
-		},
-	}
-	_ = writer.Log(ev1)
-	_ = writer.Log(ev2)
-	_ = writer.Close()
 
 	exp := ExpectedAssertion{
 		ExitCode: domain.ExitSuccess,

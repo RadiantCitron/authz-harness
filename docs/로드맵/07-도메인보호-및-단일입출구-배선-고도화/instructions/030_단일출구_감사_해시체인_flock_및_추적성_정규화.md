@@ -1,6 +1,6 @@
 # 030. 단일 출구 감사 해시 체인·`flock` 탑재 및 추적성 정규화 구현지시서
 
-> **상태**: `Draft`
+> **상태**: `Done`
 > **선행 조건**: 020 단계 (순수 PDP 스코프 검증 복원 및 도메인 이벤트 구조 분리) 완료
 > **상위 대시보드**: [README.md](../README.md) | **마스터 설계**: [ROADMAP.md](../ROADMAP.md) | **감사 근거**: [도메인 보호 및 배선 감사 보고서](../../../../DOMAIN_PROTECTION_AND_WIRING_AUDIT_REPORT.md)
 

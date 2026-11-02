@@ -273,6 +273,9 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 		Step:      "020-verify",
 		Actor:     actor,
 		Action:    "authn.verify",
+		Decision:  map[bool]string{true: "allow", false: "deny"}[success],
+		Reason:    string(reason),
+		TokenJTI:  jti,
 		Success:   success,
 		Metadata:  meta,
 	})
