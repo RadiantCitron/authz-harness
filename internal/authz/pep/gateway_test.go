@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1228,6 +1229,102 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 		}
 		if jailStub.callsWrite != 1 {
 			t.Errorf("expected Jail.WriteFile to be called 1 time, got %d", jailStub.callsWrite)
+		}
+	})
+
+	t.Run("TC-060-05-6: SESE 단일 입출구, slog Around 계측 및 AgentID/CallerID 위임 계보 스탬핑 검증", func(t *testing.T) {
+		var logBuf strings.Builder
+		testLogger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		}))
+
+		actorClaim := &domain.ActorClaim{
+			Subject: "orchestrator-main",
+		}
+		verifier := &stubVerifier{
+			claimsToReturn: &domain.VerifiedClaims{
+				Claims: domain.TokenClaims{
+					Subject: "worker-child-01",
+					JWTID:   "jti-child-888",
+					Scope:   "file:read",
+					Epoch:   1,
+					Actor:   actorClaim,
+				},
+			},
+		}
+		pdpStub := &stubPDP{
+			decisionToReturn: &pdp.Decision{
+				Decision: pdp.DecisionAllow,
+				Reason:   domain.ReasonAuthorized,
+				GrantID:  "grant-child-01",
+			},
+		}
+		jailStub := &stubJail{
+			files: map[string][]byte{
+				"delegated.txt": []byte("delegated content"),
+			},
+		}
+		auditStub := &stubAuditWriter{}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+			Logger:      testLogger,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		req := pep.Request{
+			Token:    "valid.delegated.token",
+			Action:   domain.ActionFileRead,
+			Resource: "delegated.txt",
+			TraceID:  "trc-delegation-sese-001",
+		}
+
+		res, err := gw.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected execution error: %v", err)
+		}
+		if !res.Allowed || res.ExitCode != domain.ExitSuccess {
+			t.Fatalf("expected allowed with ExitSuccess, got: allowed=%v exit=%d", res.Allowed, res.ExitCode)
+		}
+		if string(res.Data) != "delegated content" {
+			t.Errorf("unexpected read content: %s", string(res.Data))
+		}
+
+		// 1. slog Around 로깅 검증: entering, passed, finished
+		logs := logBuf.String()
+		if !strings.Contains(logs, "pep stage entering") {
+			t.Errorf("slog output missing 'pep stage entering'")
+		}
+		if !strings.Contains(logs, "pep stage passed") {
+			t.Errorf("slog output missing 'pep stage passed'")
+		}
+		if !strings.Contains(logs, "pep execution succeeded") {
+			t.Errorf("slog output missing 'pep execution succeeded'")
+		}
+		if strings.Contains(logs, "valid.delegated.token") {
+			t.Errorf("Zero Leakage violation: raw token leaked in slog logs")
+		}
+
+		// 2. audit.Event의 AgentID 및 CallerID 스탬핑 검증
+		if len(auditStub.events) < 2 {
+			t.Fatalf("expected at least 2 audit events (pre-commit + completed), got %d", len(auditStub.events))
+		}
+		preCommitEv := auditStub.events[0]
+		completedEv := auditStub.events[len(auditStub.events)-1]
+
+		for i, ev := range []audit.Event{preCommitEv, completedEv} {
+			if ev.AgentID != "worker-child-01" {
+				t.Errorf("event %d: expected AgentID 'worker-child-01', got %q", i, ev.AgentID)
+			}
+			callerID, ok := ev.Metadata["caller_id"].(string)
+			if !ok || callerID != "orchestrator-main" {
+				t.Errorf("event %d: expected Metadata['caller_id'] to be 'orchestrator-main', got %v", i, ev.Metadata["caller_id"])
+			}
 		}
 	})
 }

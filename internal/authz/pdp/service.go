@@ -195,6 +195,7 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 			TraceID:   traceID,
 			Step:      "pdp.decide",
 			Actor:     req.Subject,
+			AgentID:   req.Subject,
 			Action:    "pdp.decide",
 			Resource:  req.Resource,
 			Decision:  strings.ToLower(string(decision.Decision)),
@@ -210,6 +211,10 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 				"grant_id":         decision.GrantID,
 				"details":          decision.Details,
 			},
+		}
+
+		if req.Actor != nil && req.Actor.Subject != "" {
+			event.Metadata["caller_id"] = req.Actor.Subject
 		}
 
 		if err := s.audit.Log(event); err != nil {
