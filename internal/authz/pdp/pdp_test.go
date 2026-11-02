@@ -534,3 +534,285 @@ func TestTC_020_Scenarios(t *testing.T) {
 		}
 	})
 }
+
+// TestTrackA_PureDomainDecisionTable 은 TC-060-04 및 AP-03 불변식에 따라
+// 파일 I/O 및 감사 디스크 기록이 완전히 배제된 순수 인메모리 환경에서
+// PDP 15대 결정표(Epoch + Scope + Grant 조합)가 1ms 미만 내에 100% 일관되게 평가됨을 검증한다 (Track A).
+func TestTrackA_PureDomainDecisionTable(t *testing.T) {
+	now := time.Now().UTC()
+
+	standardSnapshot := &pip.SubjectSnapshot{
+		Subject:      "worker-trackA",
+		CurrentEpoch: 1,
+		ActiveGrants: []domain.Grant{
+			{
+				ID:        "grant-read-a",
+				Subject:   "worker-trackA",
+				Action:    domain.ActionFileRead,
+				Resource:  "a.txt",
+				Status:    domain.GrantStatusActive,
+				CreatedAt: now,
+			},
+			{
+				ID:        "grant-write-b",
+				Subject:   "worker-trackA",
+				Action:    domain.ActionFileWrite,
+				Resource:  "b.txt",
+				Status:    domain.GrantStatusActive,
+				CreatedAt: now,
+			},
+		},
+		RevokedGrants: []domain.Grant{
+			{
+				ID:        "grant-read-revoked",
+				Subject:   "worker-trackA",
+				Action:    domain.ActionFileRead,
+				Resource:  "revoked.txt",
+				Status:    domain.GrantStatusRevoked,
+				CreatedAt: now,
+				RevokedAt: &now,
+			},
+		},
+		Timestamp: now,
+	}
+
+	tests := []struct {
+		id               string
+		name             string
+		req              pdp.Request
+		snapshot         *pip.SubjectSnapshot
+		expectedDecision pdp.DecisionType
+		expectedReason   domain.Reason
+	}{
+		{
+			id:   "TC-01",
+			name: "활성 Grant 일치 + 유효 Epoch -> ALLOW",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "a.txt",
+				Epoch:    1,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionAllow,
+			expectedReason:   domain.ReasonAuthorized,
+		},
+		{
+			id:   "TC-02",
+			name: "리소스 불일치 (Grant 없음) -> DENY",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "c.txt",
+				Epoch:    1,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+		{
+			id:   "TC-03",
+			name: "액션 불일치 (Read Grant 보유, Write 요청) -> DENY",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileWrite,
+				Resource: "a.txt",
+				Epoch:    1,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+		{
+			id:   "TC-04",
+			name: "회수된 Grant 요청 -> DENY",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "revoked.txt",
+				Epoch:    1,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonGrantRevoked,
+		},
+		{
+			id:   "TC-05",
+			name: "Security Epoch 불일치 (요청 Epoch 2 != 스냅샷 Epoch 1) -> DENY (킬스위치 최우선)",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "a.txt",
+				Epoch:    2,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonSubjectEpochRevoked,
+		},
+		{
+			id:   "TC-06",
+			name: "요청 Subject 공백 누락 -> DENY",
+			req: pdp.Request{
+				Subject:  "",
+				Action:   domain.ActionFileRead,
+				Resource: "a.txt",
+				Epoch:    1,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+		{
+			id:   "TC-07",
+			name: "요청 Epoch 0 누락 -> DENY",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "a.txt",
+				Epoch:    0,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+		{
+			id:   "TC-08",
+			name: "스냅샷 nil Fail-Closed -> DENY",
+			req: pdp.Request{
+				Subject:  "worker-trackA",
+				Action:   domain.ActionFileRead,
+				Resource: "a.txt",
+				Epoch:    1,
+			},
+			snapshot:         nil,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+		{
+			id:   "TC-09",
+			name: "RequireScope=true & 유효 Grant 보유 & 불일치 Scope -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileWrite,
+				Resource:     "b.txt",
+				Epoch:        1,
+				TokenScope:   "file:read",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonTokenInsufficientScope,
+		},
+		{
+			id:   "TC-10",
+			name: "RequireScope=true & 빈 Scope (\"\") 요청 -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileWrite,
+				Resource:     "b.txt",
+				Epoch:        1,
+				TokenScope:   "",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonTokenInsufficientScope,
+		},
+		{
+			id:   "TC-11",
+			name: "RequireScope=true & 암묵적 admin 우회 차단 -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileWrite,
+				Resource:     "b.txt",
+				Epoch:        1,
+				TokenScope:   "admin",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonTokenInsufficientScope,
+		},
+		{
+			id:   "TC-12",
+			name: "RequireScope=true & 다중 Scope 일치 -> ALLOW",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileWrite,
+				Resource:     "b.txt",
+				Epoch:        1,
+				TokenScope:   "file:read:a.txt file:write:b.txt",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionAllow,
+			expectedReason:   domain.ReasonAuthorized,
+		},
+		{
+			id:   "TC-13",
+			name: "RequireScope=true & Epoch 불일치 + Scope 부족 동시 발생 시 Epoch 최우선 차단 -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileWrite,
+				Resource:     "b.txt",
+				Epoch:        1,
+				TokenScope:   "file:read",
+				RequireScope: true,
+			},
+			snapshot: &pip.SubjectSnapshot{
+				Subject:      "worker-trackA",
+				CurrentEpoch: 2, // snapshot epoch is 2
+				ActiveGrants: standardSnapshot.ActiveGrants,
+			},
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonSubjectEpochRevoked,
+		},
+		{
+			id:   "TC-14",
+			name: "RequireScope=true & Scope 충분하나 Grant가 회수됨 -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileRead,
+				Resource:     "revoked.txt",
+				Epoch:        1,
+				TokenScope:   "file:read:revoked.txt",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonGrantRevoked,
+		},
+		{
+			id:   "TC-15",
+			name: "RequireScope=true & Scope 충분하나 Grant가 아예 없음 -> DENY",
+			req: pdp.Request{
+				Subject:      "worker-trackA",
+				Action:       domain.ActionFileRead,
+				Resource:     "c.txt",
+				Epoch:        1,
+				TokenScope:   "file:read",
+				RequireScope: true,
+			},
+			snapshot:         standardSnapshot,
+			expectedDecision: pdp.DecisionDeny,
+			expectedReason:   domain.ReasonNoActiveGrant,
+		},
+	}
+
+	start := time.Now()
+	for _, tc := range tests {
+		t.Run(tc.id+"_"+tc.name, func(t *testing.T) {
+			dec := pdp.Evaluate(tc.req, tc.snapshot)
+			if dec.Decision != tc.expectedDecision {
+				t.Fatalf("[%s] expected decision %s, got %s", tc.id, tc.expectedDecision, dec.Decision)
+			}
+			if dec.Reason != tc.expectedReason {
+				t.Fatalf("[%s] expected reason %s, got %s", tc.id, tc.expectedReason, dec.Reason)
+			}
+		})
+	}
+	elapsed := time.Since(start)
+	if elapsed > 100*time.Millisecond {
+		t.Fatalf("pure domain decision table took too long: %v (expected < 100ms)", elapsed)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -822,4 +823,411 @@ func TestTC_030_09_PepDenyStandardAction(t *testing.T) {
 	if lastEv.Reason != string(domain.ReasonNoActiveGrant) {
 		t.Errorf("expected reason %s, got %s", domain.ReasonNoActiveGrant, lastEv.Reason)
 	}
+}
+
+// --- Track B: 인메모리 Stub 기반 순수 배선 독립 테스트 스위트 ---
+
+type stubVerifier struct {
+	claimsToReturn *domain.VerifiedClaims
+	errToReturn    error
+	calls          int
+	lastOpts       token.VerifyOptions
+	lastAuditCtx   domain.AuditContext
+}
+
+func (s *stubVerifier) VerifyToken(tokenStr string, opts token.VerifyOptions, actx domain.AuditContext) (*domain.VerifiedClaims, error) {
+	s.calls++
+	s.lastOpts = opts
+	s.lastAuditCtx = actx
+	if s.errToReturn != nil {
+		return nil, s.errToReturn
+	}
+	return s.claimsToReturn, nil
+}
+
+func (s *stubVerifier) InspectToken(tokenStr string) (*token.JWTHeader, *domain.TokenClaims, error) {
+	return nil, nil, nil
+}
+
+type stubPDP struct {
+	decisionToReturn *pdp.Decision
+	errToReturn      error
+	calls            int
+	lastReq          pdp.Request
+}
+
+func (s *stubPDP) Decide(ctx context.Context, req pdp.Request) (*pdp.Decision, error) {
+	s.calls++
+	s.lastReq = req
+	if s.errToReturn != nil {
+		return nil, s.errToReturn
+	}
+	return s.decisionToReturn, nil
+}
+
+type stubJail struct {
+	files        map[string][]byte
+	resolveErr   error
+	readErr      error
+	writeErr     error
+	callsRead    int
+	callsWrite   int
+	lastResolved string
+}
+
+func (s *stubJail) ResolvePath(rawPath string, forWrite bool) (string, error) {
+	if s.resolveErr != nil {
+		return "", s.resolveErr
+	}
+	s.lastResolved = "/safe/workspace/" + rawPath
+	return s.lastResolved, nil
+}
+
+func (s *stubJail) ReadFile(rawPath string) ([]byte, error) {
+	s.callsRead++
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	if s.files != nil {
+		if data, ok := s.files[rawPath]; ok {
+			return data, nil
+		}
+	}
+	return []byte("stub file content"), nil
+}
+
+func (s *stubJail) WriteFile(rawPath string, data []byte) error {
+	s.callsWrite++
+	if s.writeErr != nil {
+		return s.writeErr
+	}
+	if s.files == nil {
+		s.files = make(map[string][]byte)
+	}
+	s.files[rawPath] = data
+	return nil
+}
+
+func (s *stubJail) WorkspaceRoot() string {
+	return "/safe/workspace"
+}
+
+type stubAuditWriter struct {
+	events      []audit.Event
+	errToReturn error
+}
+
+func (s *stubAuditWriter) Log(e audit.Event) error {
+	if s.errToReturn != nil {
+		return s.errToReturn
+	}
+	s.events = append(s.events, e)
+	return nil
+}
+
+func (s *stubAuditWriter) Close() error {
+	return nil
+}
+
+// TestTrackB_WiringPipeline_Isolated 는 TC-060-05 불변식에 따라
+// 디스크 I/O 없이 메모리 Stub(Verifier, PDP, Jail, Audit)만을 사용하여
+// 단일 TraceID 관통, 관문 단락(Short-Circuit), Pre-Commit Fail-Closed, 데코레이터 배선만을
+// 100% 독립적으로 검증한다 (Track B).
+func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("TC-060-05-1: 단일 TraceID 관통 및 스탬핑 배선 검증", func(t *testing.T) {
+		traceID := "trc-trackB-001"
+		verifier := &stubVerifier{
+			claimsToReturn: &domain.VerifiedClaims{
+				Claims: domain.TokenClaims{
+					Subject: "worker-01",
+					JWTID:   "jti-001",
+					Scope:   "file:read",
+					Epoch:   1,
+				},
+			},
+		}
+		pdpStub := &stubPDP{
+			decisionToReturn: &pdp.Decision{
+				Decision: pdp.DecisionAllow,
+				Reason:   domain.ReasonAuthorized,
+				GrantID:  "grant-001",
+			},
+		}
+		jailStub := &stubJail{}
+		auditStub := &stubAuditWriter{}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		req := pep.Request{
+			Token:    "valid.mock.token",
+			Action:   domain.ActionFileRead,
+			Resource: "docs/spec.txt",
+			TraceID:  traceID,
+		}
+
+		res, err := gw.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.Allowed {
+			t.Fatalf("expected allowed, got denied: %s", res.Reason)
+		}
+
+		// Verifier 에 전달된 AuditContext의 TraceID 확인
+		if verifier.lastAuditCtx.TraceID != traceID {
+			t.Errorf("verifier received wrong traceID: %s", verifier.lastAuditCtx.TraceID)
+		}
+		// PDP 에 전달된 Request의 TraceID 확인
+		if pdpStub.lastReq.TraceID != traceID {
+			t.Errorf("pdp received wrong traceID: %s", pdpStub.lastReq.TraceID)
+		}
+		// 감사 이벤트들의 TraceID 확인
+		if len(auditStub.events) == 0 {
+			t.Fatal("expected audit events to be recorded")
+		}
+		for _, ev := range auditStub.events {
+			if ev.TraceID != traceID {
+				t.Errorf("audit event traceID mismatch: expected %s, got %s", traceID, ev.TraceID)
+			}
+		}
+	})
+
+	t.Run("TC-060-05-2: Gate 1 AuthN 실패 시 PDP/Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
+		verifier := &stubVerifier{
+			errToReturn: domain.NewError(domain.ReasonTokenInvalidSignature, "verify", "bad sig", token.ErrInvalidSignature),
+		}
+		pdpStub := &stubPDP{}
+		jailStub := &stubJail{}
+		auditStub := &stubAuditWriter{}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		req := pep.Request{
+			Token:    "bad.signature.token",
+			Action:   domain.ActionFileRead,
+			Resource: "docs/spec.txt",
+			TraceID:  "trc-short-authn",
+		}
+
+		res, err := gw.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Allowed {
+			t.Fatal("expected denied on authn error, got allowed")
+		}
+		if res.Stage != pep.StageGate1AuthN {
+			t.Errorf("expected StageGate1AuthN, got %s", res.Stage)
+		}
+		if pdpStub.calls != 0 {
+			t.Errorf("expected 0 calls to PDP on authn failure, got %d", pdpStub.calls)
+		}
+		if jailStub.callsRead != 0 || jailStub.callsWrite != 0 {
+			t.Errorf("expected 0 calls to Jail on authn failure, got read=%d write=%d", jailStub.callsRead, jailStub.callsWrite)
+		}
+	})
+
+	t.Run("TC-060-05-3: Gate 2 PDP Deny 시 Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
+		verifier := &stubVerifier{
+			claimsToReturn: &domain.VerifiedClaims{
+				Claims: domain.TokenClaims{
+					Subject: "worker-01",
+					JWTID:   "jti-002",
+					Scope:   "file:read",
+					Epoch:   1,
+				},
+			},
+		}
+		pdpStub := &stubPDP{
+			decisionToReturn: &pdp.Decision{
+				Decision: pdp.DecisionDeny,
+				Reason:   domain.ReasonNoActiveGrant,
+			},
+		}
+		jailStub := &stubJail{}
+		auditStub := &stubAuditWriter{}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		req := pep.Request{
+			Token:    "valid.token",
+			Action:   domain.ActionFileRead,
+			Resource: "unauthorized.txt",
+			TraceID:  "trc-short-pdp",
+		}
+
+		res, err := gw.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if res.Allowed {
+			t.Fatal("expected denied on pdp deny, got allowed")
+		}
+		if res.Stage != pep.StageGate2AuthZ {
+			t.Errorf("expected StageGate2AuthZ, got %s", res.Stage)
+		}
+		if jailStub.callsRead != 0 || jailStub.callsWrite != 0 {
+			t.Errorf("expected 0 calls to Jail on pdp deny, got read=%d write=%d", jailStub.callsRead, jailStub.callsWrite)
+		}
+	})
+
+	t.Run("TC-060-05-4: Pre-Commit 감사 실패 시 Fail-Closed 배선 검증", func(t *testing.T) {
+		verifier := &stubVerifier{
+			claimsToReturn: &domain.VerifiedClaims{
+				Claims: domain.TokenClaims{
+					Subject: "worker-01",
+					JWTID:   "jti-003",
+					Scope:   "file:write",
+					Epoch:   1,
+				},
+			},
+		}
+		pdpStub := &stubPDP{
+			decisionToReturn: &pdp.Decision{
+				Decision: pdp.DecisionAllow,
+				Reason:   domain.ReasonAuthorized,
+				GrantID:  "grant-003",
+			},
+		}
+		jailStub := &stubJail{}
+		auditStub := &stubAuditWriter{
+			errToReturn: fmt.Errorf("simulated audit disk full error"),
+		}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		req := pep.Request{
+			Token:    "valid.token",
+			Action:   domain.ActionFileWrite,
+			Resource: "data.txt",
+			Data:     []byte("fail closed test"),
+			TraceID:  "trc-audit-fail",
+		}
+
+		res, err := gw.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected execution error: %v", err)
+		}
+		if res == nil {
+			t.Fatal("expected non-nil result on pre-commit audit failure")
+		}
+		if res.Allowed {
+			t.Fatal("expected denied on pre-commit audit failure, got allowed")
+		}
+		if res.ExitCode != domain.ExitAuditFailure {
+			t.Errorf("expected ExitAuditFailure (%d), got %d", domain.ExitAuditFailure, res.ExitCode)
+		}
+		if res.Reason != domain.ReasonAuditLogFailed {
+			t.Errorf("expected ReasonAuditLogFailed, got %s", res.Reason)
+		}
+		// 핵심: 감사 기록 실패 시 파일 쓰기가 절대로 실행되지 않아야 함 (디스크 부작용 0)
+		if jailStub.callsWrite != 0 {
+			t.Fatalf("violation of Fail-Closed: Jail.WriteFile was called %d times despite audit failure", jailStub.callsWrite)
+		}
+	})
+
+	t.Run("TC-060-05-5: WithBeforeIOHook 데코레이터 정상 배선 검증", func(t *testing.T) {
+		verifier := &stubVerifier{
+			claimsToReturn: &domain.VerifiedClaims{
+				Claims: domain.TokenClaims{
+					Subject: "worker-01",
+					JWTID:   "jti-004",
+					Scope:   "file:write",
+					Epoch:   1,
+				},
+			},
+		}
+		pdpStub := &stubPDP{
+			decisionToReturn: &pdp.Decision{
+				Decision: pdp.DecisionAllow,
+				Reason:   domain.ReasonAuthorized,
+				GrantID:  "grant-004",
+			},
+		}
+		jailStub := &stubJail{}
+		auditStub := &stubAuditWriter{}
+
+		gw, err := pep.NewGateway(pep.Config{
+			Verifier:    verifier,
+			PDP:         pdpStub,
+			Jail:        jailStub,
+			AuditWriter: auditStub,
+		})
+		if err != nil {
+			t.Fatalf("failed to create gateway: %v", err)
+		}
+
+		hookCalled := false
+		hookAction := ""
+		hookResource := ""
+
+		hook := func(ctx context.Context, r pep.Request) error {
+			hookCalled = true
+			hookAction = string(r.Action)
+			hookResource = r.Resource
+			return nil
+		}
+
+		decoratedGW := pep.WithBeforeIOHook(gw, hook)
+
+		req := pep.Request{
+			Token:                "valid.token",
+			Action:               domain.ActionFileWrite,
+			Resource:             "hook_test.txt",
+			Data:                 []byte("hook test data"),
+			TraceID:              "trc-hook-001",
+			InjectRevokeBeforeIO: true,
+		}
+
+		res, err := decoratedGW.Execute(ctx, req)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !res.Allowed {
+			t.Fatalf("expected allowed, got denied: %s", res.Reason)
+		}
+		if !hookCalled {
+			t.Fatal("expected WithBeforeIOHook to be called before I/O, but was not called")
+		}
+		if hookAction != string(domain.ActionFileWrite) || hookResource != "hook_test.txt" {
+			t.Errorf("hook received unexpected args: action=%s resource=%s", hookAction, hookResource)
+		}
+		if jailStub.callsWrite != 1 {
+			t.Errorf("expected Jail.WriteFile to be called 1 time, got %d", jailStub.callsWrite)
+		}
+	})
 }
