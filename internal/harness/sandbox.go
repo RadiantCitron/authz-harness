@@ -29,6 +29,7 @@ type SandboxEnvironment struct {
 	WorkspaceDir string        // Zone C: Workspace 격리 디렉터리 경로
 	AuditPath    string        // 감사 로그 (audit.jsonl) 경로
 	MockClock    domain.Clock  // 결정론적 가상 시계
+	BinaryPath   string        // 서브프로세스 실행에 사용할 컴파일된 authz-harness 바이너리 경로
 }
 
 // fixedClock 은 고정된 시각을 반환하는 가상 시계다.

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"authz-harness/internal/authn/token"
-	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 )
@@ -87,17 +86,14 @@ func (s *e2e01Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
-	res, err := stack.PEP.Execute(ctx, pep.Request{
+	return executeHarnessAction(ctx, env, stack, ActionRequest{
 		Token:    s.token,
 		Action:   domain.ActionFileRead,
 		Resource: "hello.txt",
 		TraceID:  "trace-e2e-01",
 	})
-	if err != nil {
-		return domain.ExitInternalError, err
-	}
-	return res.ExitCode, nil
 }
 
 // E2E-02: 정상 단일 파일 쓰기
@@ -159,18 +155,15 @@ func (s *e2e02Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
-	res, err := stack.PEP.Execute(ctx, pep.Request{
+	return executeHarnessAction(ctx, env, stack, ActionRequest{
 		Token:    s.token,
 		Action:   domain.ActionFileWrite,
 		Resource: "output.txt",
 		Data:     []byte("secure data written"),
 		TraceID:  "trace-e2e-02",
 	})
-	if err != nil {
-		return domain.ExitInternalError, err
-	}
-	return res.ExitCode, nil
 }
 
 // E2E-03: 동적 전환 [거부→허용→회수 후 즉시 거부]
@@ -238,16 +231,13 @@ func (s *e2e03Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
-	res, err := stack.PEP.Execute(ctx, pep.Request{
+	return executeHarnessAction(ctx, env, stack, ActionRequest{
 		Token:    s.token,
 		Action:   domain.ActionFileWrite,
 		Resource: "revoked.txt",
 		Data:     []byte("should not be written"),
 		TraceID:  "trace-e2e-03",
 	})
-	if err != nil {
-		return domain.ExitInternalError, err
-	}
-	return res.ExitCode, nil
 }

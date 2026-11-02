@@ -93,18 +93,15 @@ func (s *e2e25Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
-	res, err := stack.PEP.Execute(ctx, pep.Request{
+	return executeHarnessAction(ctx, env, stack, ActionRequest{
 		Token:    s.token,
 		Action:   domain.ActionFileWrite,
 		Resource: "../../etc/passwd",
 		Data:     []byte("malicious traversal"),
 		TraceID:  "trace-e2e-25",
 	})
-	if err != nil {
-		return domain.ExitInternalError, err
-	}
-	return res.ExitCode, nil
 }
 
 // E2E-26: 루트 접두사 착시(/workspace-evil) 차단

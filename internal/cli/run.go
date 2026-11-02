@@ -15,12 +15,13 @@ import (
 
 // RunConfig 는 run 서브커맨드 실행 파라미터다.
 type RunConfig struct {
-	ScenarioID   string // "all" 또는 "E2E-01" ~ "E2E-30" (기본값: "all")
-	GroupID      string // "" 또는 "G1" ~ "G7" (기본값: "")
-	OutputFormat string // "summary" (기본), "explain", "json"
-	FailFast     bool   // 첫 실패 발생 시 즉시 중단 여부 (기본값: false)
-	BaseDir      string // 샌드박스 생성 기준 디렉터리 (공백 시 os.MkdirTemp)
-	Verbose      bool   // 상세 운영 로그 출력 여부
+	ScenarioID    string // "all" 또는 "E2E-01" ~ "E2E-30" (기본값: "all")
+	GroupID       string // "" 또는 "G1" ~ "G7" (기본값: "")
+	ExecutionMode string // "subprocess" (기본값) 또는 "inproc"
+	OutputFormat  string // "summary" (기본), "explain", "json"
+	FailFast      bool   // 첫 실패 발생 시 즉시 중단 여부 (기본값: false)
+	BaseDir       string // 샌드박스 생성 기준 디렉터리 (공백 시 os.MkdirTemp)
+	Verbose       bool   // 상세 운영 로그 출력 여부
 }
 
 // RunRunner 는 run 서브커맨드를 조립하고 실행하는 러너다.
@@ -47,6 +48,7 @@ func (r *RunRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	var cfg RunConfig
 	fs.StringVar(&cfg.ScenarioID, "scenario", "all", "실행할 시나리오 ID (all 또는 E2E-01~E2E-30)")
 	fs.StringVar(&cfg.GroupID, "group", "", "실행할 시나리오 그룹 (G1~G7)")
+	fs.StringVar(&cfg.ExecutionMode, "execution-mode", "subprocess", "실행 격리 모드 (subprocess | inproc)")
 	fs.StringVar(&cfg.OutputFormat, "output-format", "summary", "출력 형식 (summary, explain, json)")
 	fs.BoolVar(&cfg.FailFast, "fail-fast", false, "첫 실패 발생 시 즉시 중단 여부")
 	fs.BoolVar(&cfg.Verbose, "verbose", false, "상세 운영 로그 활성화")
@@ -75,8 +77,14 @@ func (r *RunRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		baseDir = cfg.BaseDir
 	}
 
+	execMode := harness.ModeSubprocess
+	if strings.ToLower(strings.TrimSpace(cfg.ExecutionMode)) == "inproc" {
+		execMode = harness.ModeInProc
+	}
+
 	runner := harness.NewDefaultRunner(
 		harness.WithBaseDir(baseDir),
+		harness.WithExecutionMode(execMode),
 		harness.WithEvaluator(harness.NewDefaultEvaluator()),
 	)
 

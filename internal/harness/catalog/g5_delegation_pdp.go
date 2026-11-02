@@ -354,19 +354,16 @@ func (s *e2e22Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
 	// file:write 액션 시도 -> 스코프 불충분 거부
-	res, err := stack.PEP.Execute(ctx, pep.Request{
+	return executeHarnessAction(ctx, env, stack, ActionRequest{
 		Token:    s.readOnlyChildToken,
 		Action:   domain.ActionFileWrite,
 		Resource: "readonly.txt",
 		Data:     []byte("fail"),
 		TraceID:  "trace-e2e-22",
 	})
-	if err != nil {
-		return domain.ExitInternalError, err
-	}
-	return res.ExitCode, nil
 }
 
 // E2E-23: 미허가 리소스 경로 접근 거부

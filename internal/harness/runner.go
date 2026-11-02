@@ -9,6 +9,17 @@ import (
 	"authz-harness/internal/domain"
 )
 
+// ExecutionMode 는 E2E 하네스 시나리오의 실행 격리 모드를 정의한다.
+type ExecutionMode string
+
+const (
+	// ModeSubprocess 는 독립된 OS 자식 프로세스(`authz-harness subagent worker`)를 스폰하여 실행하는 표준 모드다.
+	ModeSubprocess ExecutionMode = "subprocess"
+
+	// ModeInProc 는 단일 프로세스 메모리 내에서 PEP Gateway를 직접 호출하는 고속 실행 모드다.
+	ModeInProc ExecutionMode = "inproc"
+)
+
 // ScenarioResult 는 단일 시나리오의 종합 실행 결과다.
 type ScenarioResult struct {
 	Metadata  ScenarioMetadata `json:"metadata"`
@@ -38,15 +49,31 @@ type Runner interface {
 
 // DefaultRunner 는 Runner 인터페이스의 표준 구현체다.
 type DefaultRunner struct {
-	mu        sync.RWMutex
-	scenarios map[string]Scenario
-	order     []string
-	evaluator Evaluator
-	baseDir   string
+	mu             sync.RWMutex
+	scenarios      map[string]Scenario
+	order          []string
+	evaluator      Evaluator
+	baseDir        string
+	executionMode  ExecutionMode
+	binaryProvider BinaryProvider
 }
 
 // RunnerOption 은 Runner 생성 옵션이다.
 type RunnerOption func(*DefaultRunner)
+
+// WithExecutionMode 는 실행 모드(subprocess | inproc)를 지정하는 옵션이다.
+func WithExecutionMode(mode ExecutionMode) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.executionMode = mode
+	}
+}
+
+// WithBinaryProvider 는 서브프로세스 바이너리 프로바이더를 주입하는 옵션이다.
+func WithBinaryProvider(provider BinaryProvider) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.binaryProvider = provider
+	}
+}
 
 // WithEvaluator 는 커스텀 Evaluator 를 주입하는 옵션이다.
 func WithEvaluator(eval Evaluator) RunnerOption {
@@ -65,12 +92,16 @@ func WithBaseDir(dir string) RunnerOption {
 // NewDefaultRunner 는 DefaultRunner 인스턴스를 생성한다.
 func NewDefaultRunner(opts ...RunnerOption) *DefaultRunner {
 	r := &DefaultRunner{
-		scenarios: make(map[string]Scenario),
-		order:     make([]string, 0),
-		evaluator: NewDefaultEvaluator(),
+		scenarios:     make(map[string]Scenario),
+		order:         make([]string, 0),
+		evaluator:     NewDefaultEvaluator(),
+		executionMode: ModeSubprocess, // 기본값: 실제 OS 서브프로세스 격리 모드
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if r.executionMode == ModeSubprocess && r.binaryProvider == nil {
+		r.binaryProvider = NewCachedBinaryProvider()
 	}
 	return r
 }
@@ -145,6 +176,20 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 	defer func() {
 		_ = env.Cleanup()
 	}()
+
+	// 서브프로세스 모드인 경우 컴파일된 바이너리 경로 주입
+	if r.executionMode == ModeSubprocess && r.binaryProvider != nil {
+		binPath, err := r.binaryProvider.GetBinaryPath()
+		if err != nil {
+			return ScenarioResult{
+				Metadata: meta,
+				Passed:   false,
+				Duration: time.Since(startTime),
+				Error:    fmt.Sprintf("failed to acquire test binary: %v", err),
+			}, err
+		}
+		env.BinaryPath = binPath
+	}
 
 	// 2. Setup 단계 실행
 	if err := s.Setup(ctx, env); err != nil {

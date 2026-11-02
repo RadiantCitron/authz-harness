@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -17,7 +18,24 @@ import (
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/orchestrator"
+	"authz-harness/internal/subagent"
 )
+
+// grantPermission 은 PAP에 주체의 권한을 등록하는 헬퍼 함수다.
+func grantPermission(
+	ctx context.Context,
+	stack *harnessStack,
+	subject string,
+	action domain.Action,
+	resource string,
+) (*domain.Grant, error) {
+	return stack.PAP.CreateGrant(ctx, pap.CreateGrantRequest{
+		Subject:  subject,
+		Action:   action,
+		Resource: resource,
+	})
+}
 
 // harnessStack 은 단일 시나리오가 샌드박스 내에서 상호작용하는 모든 컴포넌트 묶음이다.
 type harnessStack struct {
@@ -106,17 +124,71 @@ func issueTestToken(
 	return res.TokenString, nil
 }
 
-// grantPermission 은 PAP에 주체의 권한을 등록하는 헬퍼 함수다.
-func grantPermission(
-	ctx context.Context,
-	stack *harnessStack,
-	subject string,
-	action domain.Action,
-	resource string,
-) (*domain.Grant, error) {
-	return stack.PAP.CreateGrant(ctx, pap.CreateGrantRequest{
-		Subject:  subject,
-		Action:   action,
-		Resource: resource,
-	})
+// ActionRequest 는 카탈로그 시나리오가 하네스 환경에서 액션을 실행할 때 전달하는 표준 요청 구조체다.
+type ActionRequest struct {
+	Token                string
+	Action               domain.Action
+	Resource             string
+	Data                 []byte
+	TraceID              string
+	CallerID             string
+	InjectAuditFailure   bool
+	InjectRevokeBeforeIO bool
+}
+
+// executeHarnessAction 은 env.BinaryPath 유무에 따라 서브프로세스 또는 인메모리 PEP로 액션을 라우팅하여 실행하고 종료 코드를 반환한다.
+func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, stack *harnessStack, req ActionRequest) (domain.ExitCode, error) {
+	// 1. BinaryPath 가 주입된 경우 실제 OS 서브프로세스(authz-harness subagent worker) 스폰 실행
+	if env != nil && env.BinaryPath != "" && !req.InjectAuditFailure {
+		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
+			BinaryPath: env.BinaryPath,
+			Args: []string{
+				"subagent", "worker",
+				"-workspace", env.WorkspaceDir,
+				"-state-file", env.StatePath,
+				"-pub-jwks-file", env.PubJWKSPath,
+				"-replay-file", env.ReplayPath,
+				"-audit-file", env.AuditPath,
+			},
+			Audit: stack.AuditWriter,
+		})
+		if err != nil {
+			return domain.ExitInternalError, fmt.Errorf("create subprocess spawner: %w", err)
+		}
+
+		res, err := spawner.Spawn(ctx, subagent.SubagentRequest{
+			TraceID:              req.TraceID,
+			Token:                req.Token,
+			Action:               string(req.Action),
+			FilePath:             req.Resource,
+			Data:                 string(req.Data),
+			InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
+		})
+		if err != nil {
+			// 감사 실패 등 도메인 에러 판정
+			var dErr *domain.Error
+			if errors.As(err, &dErr) {
+				return dErr.ExitCode, err
+			}
+			return domain.ExitInternalError, err
+		}
+		return domain.ExitCode(res.ExitCode), nil
+	}
+
+	// 2. InProc 모드 (또는 인메모리 에러 주입 테스트)
+	pepReq := pep.Request{
+		Token:                req.Token,
+		Action:               req.Action,
+		Resource:             req.Resource,
+		Data:                 req.Data,
+		TraceID:              req.TraceID,
+		InjectAuditFailure:   req.InjectAuditFailure,
+		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
+	}
+
+	res, err := stack.PEP.Execute(ctx, pepReq)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	return res.ExitCode, nil
 }

@@ -151,3 +151,57 @@ func TestRunCLI_AT_CLI_08_TriSeparation(t *testing.T) {
 		t.Errorf("stdout UI output leaked into stderr")
 	}
 }
+
+// TC-020-01: authz-harness run --scenario E2E-01 --execution-mode subprocess 성공 검증
+func TestRunCLI_TC_020_01_SubprocessMode_E2E01(t *testing.T) {
+	tempDir := t.TempDir()
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, tempDir)
+
+	exitCode := runner.Run(context.Background(), []string{
+		"-scenario", "E2E-01",
+		"-execution-mode", "subprocess",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
+		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
+
+// TC-020-02: authz-harness run --scenario E2E-22 --execution-mode subprocess 성공 검증
+func TestRunCLI_TC_020_02_SubprocessMode_E2E22(t *testing.T) {
+	tempDir := t.TempDir()
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, tempDir)
+
+	exitCode := runner.Run(context.Background(), []string{
+		"-scenario", "E2E-22",
+		"-execution-mode", "subprocess",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
+		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
+
+// TC-020-03: authz-harness run --execution-mode inproc 플래그 호환 검증
+func TestRunCLI_TC_020_03_InProcMode(t *testing.T) {
+	tempDir := t.TempDir()
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, tempDir)
+
+	exitCode := runner.Run(context.Background(), []string{
+		"-scenario", "E2E-01",
+		"-execution-mode", "inproc",
+	})
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("expected ExitSuccess (0), got %v. Stderr: %s", exitCode, errOut.String())
+	}
+	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
+		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
