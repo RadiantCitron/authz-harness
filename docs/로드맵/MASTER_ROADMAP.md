@@ -366,6 +366,17 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [08-서브프로세스-전구간-e2e-통합-및-다단계-위임-실증](08-서브프로세스-전구간-e2e-통합-및-다단계-위임-실증/README.md), `internal/app/builder.go`, `internal/storage/atomic.go`, `internal/orchestrator/multi_hop.go`, `internal/ui/timeline.go`.
 * **데모 한 줄**: `"단일 명령으로 실제 격리된 OS 서브프로세스 3대의 다단계 권한 축소 사슬과 실시간 차단 과정을 시계열 타임라인으로 눈앞에 증명한다."`
 
+### Phase 9: 다중 에이전트(MCP / Tool-Call) 보안 게이트웨이 어댑터 [완료]
+* **목적**: 외부 LLM/에이전트 프레임워크와의 표준 연결 규격인 MCP stdio JSON-RPC 2.0 보안 게이트웨이(`authz-harness mcp serve`)를 제공하고, 격리된 OS 서브프로세스 도구 집행, Zero Leakage 토큰 비노출 및 G8 카탈로그(`E2E-33`~`39`) 총 39대 완주를 달성한다.
+* **진입 조건**: Phase 8 완료.
+* **포함 능력 매핑**: `MCP 호환 프로토콜 / stdio JSON-RPC 2.0 / Zero Leakage 토큰 비노출 / G8 E2E 39대 완결`
+* **완료 조건 (관찰 가능한 행동)**:
+  1. `mcp serve`를 통해 `tools/list`, `tools/call` 명령이 위임 토큰과 함께 서브프로세스 PEP로 안전 집행된다. [완료]
+  2. 어댑터 프로세스 자체의 파일 I/O 0건 및 감사/로그 내 원시 토큰 유출 0건(`TC-090-01`)을 보장한다. [완료]
+  3. 39대 전체 시나리오 Quad-Assertion 100% 통과(`PASS`)를 달성한다. [완료]
+* **주요 산출물**: [09-mcp-tool-call-보안-게이트웨이-어댑터](09-mcp-tool-call-보안-게이트웨이-어댑터/README.md), `internal/mcp`, `internal/cli/mcp.go`, `internal/harness/catalog/g8_mcp.go`.
+* **데모 한 줄**: `"표준 MCP 프로토콜 도구 호출 요청이 격리된 서브프로세스 보안 게이트웨이를 거치며 권한 축소와 감사 해시 체인이 완결된다."`
+
 ## 20) 크로스커팅 관심사 (Cross-Cutting Concerns)
 1. **설정 관리**: 외부 설정 서버 없이 기본 플래그 값만으로 즉시 동작하며, `--workspace-dir`, `--state-dir`, `--audit-file`로 모든 경로를 격리 지정할 수 있다.
 2. **시크릿 및 서명 키 보호**: Zone A 개인키(`signing_keys.priv.json`)는 `0600` 권한으로 보호되며 서브에이전트에 노출되지 않는다. 모든 로그에는 토큰 원문 대신 `jti`만 기록한다.
