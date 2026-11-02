@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,61 @@ func TestAtomicFileStore_Basic(t *testing.T) {
 	}
 	if readVal == nil || readVal.Counter != 42 || readVal.Message != "hello" {
 		t.Fatalf("unexpected read value: %+v", readVal)
+	}
+}
+
+func TestAtomicFileStore_Options_And_Default(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "default_state.json")
+	customLock := filepath.Join(tmpDir, "custom.lock")
+
+	store := storage.NewAtomicFileStore(
+		filePath,
+		storage.WithPerm[sampleState](0644),
+		storage.WithLockPath[sampleState](customLock),
+		storage.WithDefault(func() *sampleState {
+			return &sampleState{Counter: 100, Message: "default"}
+		}),
+	)
+
+	// 파일 미존재 시 default 반환
+	val, err := store.Read()
+	if err != nil {
+		t.Fatalf("expected default value without error, got err=%v", err)
+	}
+	if val == nil || val.Counter != 100 || val.Message != "default" {
+		t.Fatalf("unexpected default value: %+v", val)
+	}
+
+	// Update 테스트
+	err = store.Update(func(item *sampleState) error {
+		item.Counter += 50
+		item.Message = "updated"
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("update failed: %v", err)
+	}
+
+	// 재확인
+	updated, err := store.Read()
+	if err != nil {
+		t.Fatalf("failed to read updated: %v", err)
+	}
+	if updated.Counter != 150 || updated.Message != "updated" {
+		t.Fatalf("unexpected updated value: %+v", updated)
+	}
+
+	// 커스텀 락 파일 및 파일 퍼미션 검증
+	if _, err := os.Stat(customLock); os.IsNotExist(err) {
+		t.Errorf("custom lock file was not created: %s", customLock)
+	}
+	fi, err := os.Stat(filePath)
+	if err != nil {
+		t.Fatalf("stat failed: %v", err)
+	}
+	if fi.Mode().Perm() != 0644 {
+		t.Errorf("expected perm 0644, got %v", fi.Mode().Perm())
 	}
 }
 
@@ -85,5 +141,79 @@ func TestAtomicFileStore_Concurrent(t *testing.T) {
 	}
 	if len(rawBytes) == 0 {
 		t.Fatal("file is empty")
+	}
+}
+
+// T-01: 10개 고루틴이 동시 Update(item.Counter++) 수행 시 정확히 10 증가 보장
+func TestAtomicFileStore_Concurrent_Update(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "counter.json")
+
+	store := storage.NewAtomicFileStore(
+		filePath,
+		storage.WithDefault(func() *sampleState {
+			return &sampleState{Counter: 0, Message: "init"}
+		}),
+	)
+
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			err := store.Update(func(item *sampleState) error {
+				item.Counter++
+				return nil
+			})
+			if err != nil {
+				t.Errorf("concurrent update error: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	finalVal, err := store.Read()
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if finalVal.Counter != numGoroutines {
+		t.Fatalf("expected counter %d, got %d", numGoroutines, finalVal.Counter)
+	}
+}
+
+func TestAtomicFileStore_Update_ErrorRollback(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "rollback.json")
+
+	store := storage.NewAtomicFileStore(
+		filePath,
+		storage.WithDefault(func() *sampleState {
+			return &sampleState{Counter: 10, Message: "original"}
+		}),
+	)
+
+	// 초기 상태 저장
+	if err := store.Write(&sampleState{Counter: 10, Message: "original"}); err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+
+	expectedErr := errors.New("business failure")
+	err := store.Update(func(item *sampleState) error {
+		item.Counter = 999
+		return expectedErr
+	})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	val, err := store.Read()
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if val.Counter != 10 {
+		t.Fatalf("expected counter to remain 10, got %d", val.Counter)
 	}
 }
