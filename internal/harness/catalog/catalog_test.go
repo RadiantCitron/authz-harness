@@ -7,11 +7,11 @@ import (
 	"authz-harness/internal/harness"
 )
 
-// TestCatalog_ScenarioCount32 는 카탈로그에 32개의 고유 시나리오가 등록되어 있는지 검증한다.
-func TestCatalog_ScenarioCount32(t *testing.T) {
+// TestCatalog_ScenarioCount39 는 카탈로그에 39개의 고유 시나리오가 등록되어 있는지 검증한다.
+func TestCatalog_ScenarioCount39(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 32 {
-		t.Fatalf("expected 32 scenarios, got %d", len(scenarios))
+	if len(scenarios) != 39 {
+		t.Fatalf("expected 39 scenarios, got %d", len(scenarios))
 	}
 
 	seen := make(map[string]bool)
@@ -37,7 +37,7 @@ func TestCatalog_ScenarioCount32(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 32개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 39개 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -45,8 +45,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 32 {
-		t.Fatalf("expected 32 registered scenarios, got %d", len(list))
+	if len(list) != 39 {
+		t.Fatalf("expected 39 registered scenarios, got %d", len(list))
 	}
 }
 
@@ -183,7 +183,26 @@ func TestCatalog_Group_G7_ObservabilityAudit(t *testing.T) {
 	}
 }
 
-// TestCatalog_RunAll_QuadAssertion 은 30개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
+// TestCatalog_Group_G8_MCPAdapter 는 G8 그룹 (E2E-33 ~ E2E-39) 실행 검증
+func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	for _, sc := range g8Scenarios() {
+		_ = runner.Register(sc)
+	}
+
+	for _, sc := range g8Scenarios() {
+		id := sc.Metadata().ID
+		res, err := runner.RunScenario(context.Background(), id)
+		if err != nil {
+			t.Fatalf("scenario %s failed with error: %v", id, err)
+		}
+		if !res.Passed {
+			t.Errorf("Scenario %s FAILED: reasons=%v err=%s", id, res.Assertion.FailureReasons, res.Error)
+		}
+	}
+}
+
+// TestCatalog_RunAll_QuadAssertion 은 39개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -195,8 +214,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 32 {
-		t.Fatalf("expected 32 results, got %d", len(results))
+	if len(results) != 39 {
+		t.Fatalf("expected 39 results, got %d", len(results))
 	}
 
 	failedCount := 0

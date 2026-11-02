@@ -34,6 +34,7 @@ type IssueOptions struct {
 	TamperSignature bool
 	TamperAlgNone   bool
 	TamperTyp       string // 비어있지 않으면 typ 헤더를 해당 값으로 교체 (예: "JWT")
+	TamperExpired   bool   // true인 경우 이미 만료된 과거 exp/iat/nbf 로 서명 발급
 }
 
 // IssueResult 는 토큰 발급 결과다.
@@ -166,6 +167,13 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		DelegationDepth: req.DelegationDepth,
 	}
 
+	if opts.TamperExpired {
+		// 1시간 전 발급, 30분 전 만료
+		claims.IssuedAt = now.Add(-1 * time.Hour).Unix()
+		claims.NotBefore = claims.IssuedAt
+		claims.ExpiresAt = now.Add(-30 * time.Minute).Unix()
+	}
+
 	if err := claims.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid token claims: %w", err)
 	}
@@ -242,7 +250,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 				"scope":       claims.Scope,
 				"expires_at":  claims.ExpiresAt,
 				"epoch":       int64(claims.Epoch),
-				"tampered":    opts.TamperSignature || opts.TamperAlgNone || opts.TamperTyp != "",
+				"tampered":    opts.TamperSignature || opts.TamperAlgNone || opts.TamperTyp != "" || opts.TamperExpired,
 			},
 		}
 		if err := s.auditWriter.Log(auditEv); err != nil {
