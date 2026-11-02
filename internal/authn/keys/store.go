@@ -4,16 +4,15 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/storage"
 )
 
 var (
@@ -51,12 +50,14 @@ type Store interface {
 	Save(priv *ZoneAPrivateState) error
 }
 
-// FileStore 는 flock 기반의 Zone A/B 원자적 동기화 파일 저장소다.
+// FileStore 는 storage.AtomicFileStore 및 WithFileLock 기반의 Zone A/B 원자적 동기화 파일 저장소다.
 type FileStore struct {
-	privPath string
-	pubPath  string
-	lockPath string
-	mu       sync.Mutex
+	privPath  string
+	pubPath   string
+	lockPath  string
+	privStore *storage.AtomicFileStore[ZoneAPrivateState]
+	pubStore  *storage.AtomicFileStore[domain.JWKS]
+	mu        sync.Mutex
 }
 
 // NewFileStore 는 지정된 Zone A 및 Zone B 경로를 관리하는 FileStore 인스턴스를 생성한다.
@@ -83,10 +84,27 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 		lockPath = privPath + ".lock"
 	}
 
+	var privStore *storage.AtomicFileStore[ZoneAPrivateState]
+	if privPath != "" {
+		privStore = storage.NewAtomicFileStore[ZoneAPrivateState](
+			privPath,
+			storage.WithPerm[ZoneAPrivateState](0600),
+			storage.WithLockPath[ZoneAPrivateState](lockPath),
+		)
+	}
+
+	pubStore := storage.NewAtomicFileStore[domain.JWKS](
+		pubPath,
+		storage.WithPerm[domain.JWKS](0644),
+		storage.WithLockPath[domain.JWKS](lockPath),
+	)
+
 	return &FileStore{
-		privPath: privPath,
-		pubPath:  pubPath,
-		lockPath: lockPath,
+		privPath:  privPath,
+		pubPath:   pubPath,
+		lockPath:  lockPath,
+		privStore: privStore,
+		pubStore:  pubStore,
 	}, nil
 }
 
@@ -142,38 +160,26 @@ func (fs *FileStore) withLock(fn func() error) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	lockFile, err := os.OpenFile(fs.lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return fmt.Errorf("keys store: failed to open lock file %s: %w", fs.lockPath, err)
-	}
-	defer lockFile.Close()
-
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("keys store: failed to acquire flock on %s: %w", fs.lockPath, err)
-	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-
-	return fn()
+	return storage.WithFileLock(fs.lockPath, 2 /* LOCK_EX */, fn)
 }
 
 // LoadPrivate 은 Zone A 서명 키 파일을 로드한다. 파일이 없으면 nil을 반환한다.
 func (fs *FileStore) LoadPrivate() (*ZoneAPrivateState, error) {
+	if fs.privStore == nil {
+		return nil, nil
+	}
+
 	var state *ZoneAPrivateState
 	err := fs.withLock(func() error {
-		data, err := os.ReadFile(fs.privPath)
+		loaded, err := fs.privStore.ReadUnlocked()
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, os.ErrNotExist) {
 				state = nil
 				return nil
 			}
 			return fmt.Errorf("keys store: read private error: %w", err)
 		}
-
-		var s ZoneAPrivateState
-		if err := json.Unmarshal(data, &s); err != nil {
-			return fmt.Errorf("keys store: unmarshal private error: %w", err)
-		}
-		state = &s
+		state = loaded
 		return nil
 	})
 	return state, err
@@ -183,20 +189,15 @@ func (fs *FileStore) LoadPrivate() (*ZoneAPrivateState, error) {
 func (fs *FileStore) LoadPublic() (*domain.JWKS, error) {
 	var jwks *domain.JWKS
 	err := fs.withLock(func() error {
-		data, err := os.ReadFile(fs.pubPath)
+		loaded, err := fs.pubStore.ReadUnlocked()
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, os.ErrNotExist) {
 				jwks = nil
 				return nil
 			}
 			return fmt.Errorf("keys store: read public error: %w", err)
 		}
-
-		var j domain.JWKS
-		if err := json.Unmarshal(data, &j); err != nil {
-			return fmt.Errorf("keys store: unmarshal public error: %w", err)
-		}
-		jwks = &j
+		jwks = loaded
 		return nil
 	})
 	return jwks, err
@@ -206,32 +207,16 @@ func (fs *FileStore) LoadPublic() (*domain.JWKS, error) {
 func (fs *FileStore) Save(priv *ZoneAPrivateState) error {
 	return fs.withLock(func() error {
 		// 1. Zone A 원자적 저장 (0600)
-		privData, err := json.MarshalIndent(priv, "", "  ")
-		if err != nil {
-			return fmt.Errorf("keys store: marshal private error: %w", err)
-		}
-		privTmp := fmt.Sprintf("%s.tmp.%d", fs.privPath, time.Now().UnixNano())
-		if err := os.WriteFile(privTmp, append(privData, '\n'), 0600); err != nil {
-			return fmt.Errorf("keys store: write tmp private error: %w", err)
-		}
-		if err := os.Rename(privTmp, fs.privPath); err != nil {
-			_ = os.Remove(privTmp)
-			return fmt.Errorf("keys store: rename private error: %w", err)
+		if fs.privStore != nil {
+			if err := fs.privStore.WriteUnlocked(priv); err != nil {
+				return fmt.Errorf("keys store: write private error: %w", err)
+			}
 		}
 
 		// 2. Zone B 원자적 저장 (0644, Zero Leakage)
 		pubJWKS := priv.ToJWKS()
-		pubData, err := json.MarshalIndent(pubJWKS, "", "  ")
-		if err != nil {
-			return fmt.Errorf("keys store: marshal public error: %w", err)
-		}
-		pubTmp := fmt.Sprintf("%s.tmp.%d", fs.pubPath, time.Now().UnixNano())
-		if err := os.WriteFile(pubTmp, append(pubData, '\n'), 0644); err != nil {
-			return fmt.Errorf("keys store: write tmp public error: %w", err)
-		}
-		if err := os.Rename(pubTmp, fs.pubPath); err != nil {
-			_ = os.Remove(pubTmp)
-			return fmt.Errorf("keys store: rename public error: %w", err)
+		if err := fs.pubStore.WriteUnlocked(pubJWKS); err != nil {
+			return fmt.Errorf("keys store: write public error: %w", err)
 		}
 
 		return nil

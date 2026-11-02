@@ -1,13 +1,11 @@
 package state
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -44,11 +42,10 @@ type Store interface {
 	Update(fn func(state *GrantsState) error) error
 }
 
-// FileStore 는 flock 및 Atomic Rename 기반의 파일 시스템 저장소 구현체다.
+// FileStore 는 storage.AtomicFileStore 기반의 파일 시스템 저장소 구현체다.
 type FileStore struct {
-	path     string
-	lockPath string
-	mu       sync.Mutex // 단일 프로세스 내 고루틴 간 동기화용 뮤텍스
+	store *storage.AtomicFileStore[GrantsState]
+	mu    sync.Mutex
 }
 
 // NewFileStore 는 지정된 경로를 관리하는 FileStore 인스턴스를 생성한다.
@@ -62,37 +59,33 @@ func NewFileStore(path string) (*FileStore, error) {
 		return nil, fmt.Errorf("state: failed to create directory %s: %w", dir, err)
 	}
 
+	store := storage.NewAtomicFileStore[GrantsState](
+		path,
+		storage.WithPerm[GrantsState](0644),
+		storage.WithDefault(func() *GrantsState {
+			return NewEmptyGrantsState()
+		}),
+	)
+
 	return &FileStore{
-		path:     path,
-		lockPath: path + ".lock",
+		store: store,
 	}, nil
-}
-
-// withFileLock 은 락 파일(.lock)에 대해 OS 수준 flock을 획득한 채 작업을 수행한다.
-func (s *FileStore) withFileLock(how int, fn func() error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return storage.WithFileLock(s.lockPath, how, fn)
 }
 
 // Load 는 공유 락(LOCK_SH) 하에서 상태 파일을 읽어 역직렬화한다.
 // 파일이 존재하지 않는 경우 빈 초기 상태를 반환한다.
 func (s *FileStore) Load() (*GrantsState, error) {
-	var state *GrantsState
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	err := s.withFileLock(syscall.LOCK_SH, func() error {
-		loaded, err := s.readUnlocked()
-		if err != nil {
-			return err
-		}
-		state = loaded
-		return nil
-	})
-
+	state, err := s.store.Read()
 	if err != nil {
 		return nil, err
 	}
+	if state == nil {
+		state = NewEmptyGrantsState()
+	}
+	ensureStateFields(state)
 	return state, nil
 }
 
@@ -102,9 +95,11 @@ func (s *FileStore) Save(state *GrantsState) error {
 		return errors.New("state: state cannot be nil")
 	}
 
-	return s.withFileLock(syscall.LOCK_EX, func() error {
-		return s.writeUnlocked(state)
-	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizeState(state)
+	return s.store.Write(state)
 }
 
 // Update 는 배타적 락(LOCK_EX) 하에서 최신 상태를 읽고, fn을 적용한 후 원자적으로 디스크에 저장한다.
@@ -113,70 +108,32 @@ func (s *FileStore) Update(fn func(state *GrantsState) error) error {
 		return errors.New("state: update function cannot be nil")
 	}
 
-	return s.withFileLock(syscall.LOCK_EX, func() error {
-		state, err := s.readUnlocked()
-		if err != nil {
-			return err
-		}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	return s.store.Update(func(state *GrantsState) error {
+		ensureStateFields(state)
 		if err := fn(state); err != nil {
 			return err
 		}
-
-		return s.writeUnlocked(state)
+		normalizeState(state)
+		return nil
 	})
 }
 
-// readUnlocked 는 락이 이미 획득된 상태에서 내부적으로 파일을 읽는 헬퍼다.
-func (s *FileStore) readUnlocked() (*GrantsState, error) {
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return NewEmptyGrantsState(), nil
-		}
-		return nil, fmt.Errorf("state: failed to read file %s: %w", s.path, err)
-	}
-
-	if len(data) == 0 {
-		return NewEmptyGrantsState(), nil
-	}
-
-	var state GrantsState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("state: failed to unmarshal json from %s: %w", s.path, err)
-	}
-
+func ensureStateFields(state *GrantsState) {
 	if state.Grants == nil {
 		state.Grants = make([]domain.Grant, 0)
 	}
 	if state.Epochs == nil {
 		state.Epochs = make(domain.SecurityEpochs)
 	}
-
-	return &state, nil
 }
 
-// writeUnlocked 는 락이 이미 획득된 상태에서 임시 파일 기록 후 원자적으로 Rename하는 헬퍼다.
-func (s *FileStore) writeUnlocked(state *GrantsState) error {
+func normalizeState(state *GrantsState) {
 	state.UpdatedAt = time.Now().UTC()
 	if state.Version == 0 {
 		state.Version = 1
 	}
-	if state.Grants == nil {
-		state.Grants = make([]domain.Grant, 0)
-	}
-	if state.Epochs == nil {
-		state.Epochs = make(domain.SecurityEpochs)
-	}
-
-	data, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("state: failed to marshal json: %w", err)
-	}
-
-	if err := storage.AtomicWriteFile(s.path, data, 0644); err != nil {
-		return fmt.Errorf("state: atomic write failed: %w", err)
-	}
-
-	return nil
+	ensureStateFields(state)
 }
