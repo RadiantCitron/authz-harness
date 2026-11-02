@@ -48,19 +48,37 @@ type Service interface {
 type papService struct {
 	store state.Store
 	audit audit.Writer
+	clock domain.Clock
+}
+
+// ServiceOption 은 PAP Service 구성 옵션이다.
+type ServiceOption func(*papService)
+
+// WithClock 은 가상 시계를 주입하기 위한 옵션이다.
+func WithClock(c domain.Clock) ServiceOption {
+	return func(s *papService) {
+		if c != nil {
+			s.clock = c
+		}
+	}
 }
 
 // NewService 는 PAP 서비스를 생성한다.
-func NewService(store state.Store, auditWriter audit.Writer) Service {
-	return &papService{
+func NewService(store state.Store, auditWriter audit.Writer, opts ...ServiceOption) Service {
+	s := &papService{
 		store: store,
 		audit: auditWriter,
+		clock: domain.RealClock{},
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CreateGrant 는 신규 활성 Grant를 생성하고 감사 로그를 기록한다.
 func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
-	now := time.Now().UTC()
+	now := s.clock.Now().UTC()
 	grant := &domain.Grant{
 		ID:        fmt.Sprintf("grant-%d", now.UnixNano()),
 		Subject:   strings.TrimSpace(req.Subject),
@@ -71,7 +89,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 	}
 
 	if err := grant.Validate(); err != nil {
-		return nil, fmt.Errorf("pap: validation failed: %w", err)
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: validation failed", err)
 	}
 
 	err := s.store.Update(func(st *state.GrantsState) error {
@@ -79,7 +97,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("pap: failed to store grant: %w", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store grant", err)
 	}
 
 	// 감사 이벤트 기록
@@ -100,7 +118,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			return nil, fmt.Errorf("pap: audit logging failed: %w", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
 
@@ -111,10 +129,10 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.Grant, error) {
 	cleanID := strings.TrimSpace(grantID)
 	if cleanID == "" {
-		return nil, domain.ErrEmptyGrantID
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: grant id required", domain.ErrEmptyGrantID)
 	}
 
-	now := time.Now().UTC()
+	now := s.clock.Now().UTC()
 	var revokedGrant *domain.Grant
 
 	err := s.store.Update(func(st *state.GrantsState) error {
@@ -129,7 +147,10 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 		return ErrGrantNotFound
 	})
 	if err != nil {
-		return nil, fmt.Errorf("pap: failed to revoke grant: %w", err)
+		if errors.Is(err, ErrGrantNotFound) {
+			return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: grant not found", ErrGrantNotFound)
+		}
+		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to revoke grant", err)
 	}
 
 	// 감사 이벤트 기록
@@ -150,7 +171,7 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			return nil, fmt.Errorf("pap: audit logging failed: %w", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
 
@@ -161,12 +182,12 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
 	cleanSub := strings.TrimSpace(subject)
 	if cleanSub == "" {
-		return 0, domain.ErrEmptySubject
+		return 0, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: subject required", domain.ErrEmptySubject)
 	}
 
 	var newEpoch domain.Epoch
 	var prevEpoch domain.Epoch
-	now := time.Now().UTC()
+	now := s.clock.Now().UTC()
 
 	err := s.store.Update(func(st *state.GrantsState) error {
 		if st.Epochs == nil {
@@ -177,7 +198,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 		return nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("pap: failed to bump epoch: %w", err)
+		return 0, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to bump epoch", err)
 	}
 
 	// 감사 이벤트 기록
@@ -196,7 +217,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			return 0, fmt.Errorf("pap: audit logging failed: %w", err)
+			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
 

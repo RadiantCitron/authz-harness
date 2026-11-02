@@ -48,7 +48,7 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 		return nil, fmt.Errorf("setup stack: key store: %w", err)
 	}
 
-	keyMgr, err := keys.NewManager(keyStore, auditWriter)
+	keyMgr, err := keys.NewManager(keyStore, auditWriter, keys.WithClock(env.MockClock))
 	if err != nil {
 		return nil, fmt.Errorf("setup stack: key mgr: %w", err)
 	}
@@ -80,7 +80,7 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 		return nil, fmt.Errorf("setup stack: state store: %w", err)
 	}
 
-	papSvc := pap.NewService(stateStore, auditWriter)
+	papSvc := pap.NewService(stateStore, auditWriter, pap.WithClock(env.MockClock))
 	pipSvc := pip.NewService(stateStore)
 	pdpSvc := pdp.NewService(pipSvc, auditWriter)
 
@@ -94,6 +94,7 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 		PDP:         pdpSvc,
 		Jail:        workspaceJail,
 		AuditWriter: auditWriter,
+		Clock:       env.MockClock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("setup stack: pep gateway: %w", err)

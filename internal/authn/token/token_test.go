@@ -2,7 +2,6 @@ package token
 
 import (
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,7 +134,7 @@ func TestScenario2_AlgNoneBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected alg: none to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenAlgNotAllowed)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenAlgNotAllowed {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenAlgNotAllowed, err)
 	}
 }
@@ -159,7 +158,7 @@ func TestScenario3_InvalidTypBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid typ to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenInvalidType)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenInvalidType {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenInvalidType, err)
 	}
 }
@@ -183,7 +182,7 @@ func TestScenario4_TamperedSignatureBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected tampered signature to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenInvalidSignature)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenInvalidSignature {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenInvalidSignature, err)
 	}
 }
@@ -209,7 +208,7 @@ func TestScenario5_ExpiredTokenBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected expired token to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenExpired)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenExpired {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenExpired, err)
 	}
 }
@@ -240,7 +239,7 @@ func TestScenario6_ReplayBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected replayed token to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenReplayDetected)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenReplayDetected {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenReplayDetected, err)
 	}
 }
@@ -271,7 +270,7 @@ func TestScenario7_KeyRevokedBlocked(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected revoked key token to be blocked, but got pass")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonTokenKeyRetired)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenKeyRetired {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonTokenKeyRetired, err)
 	}
 }
@@ -289,7 +288,7 @@ func TestScenario8_ClientAuthFail(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected unknown client to fail")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonAuthnUnknownClient)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonAuthnUnknownClient {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonAuthnUnknownClient, err)
 	}
 
@@ -302,7 +301,7 @@ func TestScenario8_ClientAuthFail(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected wrong secret to fail")
 	}
-	if !containsStr(err.Error(), string(domain.ReasonAuthnInvalidSecret)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonAuthnInvalidSecret {
 		t.Fatalf("expected reason %s, got %v", domain.ReasonAuthnInvalidSecret, err)
 	}
 }
@@ -368,8 +367,4 @@ func FuzzTokenParser(f *testing.F) {
 		_, _, _ = rig.verifier.InspectToken(token)
 		_, _ = rig.verifier.VerifyToken(token, VerifyOptions{}, domain.AuditContext{})
 	})
-}
-
-func containsStr(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

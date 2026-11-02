@@ -5,22 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"time"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/domain"
 )
-
-// Clock 은 시간 주입 포트 인터페이스다.
-type Clock interface {
-	Now() time.Time
-}
-
-type realClock struct{}
-
-func (realClock) Now() time.Time {
-	return time.Now().UTC()
-}
 
 // KeyManager 는 Zone A/B 키 링의 수명주기를 제어하는 인터페이스다.
 type KeyManager interface {
@@ -42,16 +30,16 @@ type KeyManager interface {
 
 // Manager 는 KeyManager 인터페이스를 구현하는 엔진이다.
 type Manager struct {
-	store Store
+	store       Store
 	auditWriter audit.Writer
-	clock Clock
+	clock       domain.Clock
 }
 
 // ManagerOption 은 Manager 옵션 구성자다.
 type ManagerOption func(*Manager)
 
 // WithClock 은 가상 시간을 주입하기 위한 옵션이다.
-func WithClock(c Clock) ManagerOption {
+func WithClock(c domain.Clock) ManagerOption {
 	return func(m *Manager) {
 		m.clock = c
 	}
@@ -68,7 +56,7 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 	m := &Manager{
 		store:       store,
 		auditWriter: auditLog,
-		clock:       realClock{},
+		clock:       domain.RealClock{},
 	}
 
 	for _, opt := range opts {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authz/pap"
@@ -223,5 +224,48 @@ func TestPAP_Concurrency(t *testing.T) {
 	}
 	if len(grants) != concurrency {
 		t.Errorf("expected %d grants, got %d", concurrency, len(grants))
+	}
+}
+
+type testFixedClock struct {
+	t time.Time
+}
+
+func (c *testFixedClock) Now() time.Time {
+	return c.t
+}
+
+// TC-010-07: pap.Service의 결정론적 시계 적용
+func TestTC_010_07_PAP_DeterministicClock(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	store, _ := state.NewFileStore(filepath.Join(tempDir, "state.json"))
+	auditWriter, _ := audit.NewJSONLWriter(filepath.Join(tempDir, "audit.jsonl"))
+	defer auditWriter.Close()
+
+	fixedTime := time.Date(2026, 11, 2, 12, 34, 56, 0, time.UTC)
+	mockClock := &testFixedClock{t: fixedTime}
+
+	svc := pap.NewService(store, auditWriter, pap.WithClock(mockClock))
+
+	grant, err := svc.CreateGrant(ctx, pap.CreateGrantRequest{
+		Subject:  "worker-clock-test",
+		Action:   domain.ActionFileRead,
+		Resource: "docs/clock.txt",
+	})
+	if err != nil {
+		t.Fatalf("CreateGrant failed: %v", err)
+	}
+
+	if !grant.CreatedAt.Equal(fixedTime) {
+		t.Fatalf("expected CreatedAt %v, got %v", fixedTime, grant.CreatedAt)
+	}
+
+	revoked, err := svc.RevokeGrant(ctx, grant.ID)
+	if err != nil {
+		t.Fatalf("RevokeGrant failed: %v", err)
+	}
+	if revoked.RevokedAt == nil || !revoked.RevokedAt.Equal(fixedTime) {
+		t.Fatalf("expected RevokedAt %v, got %v", fixedTime, revoked.RevokedAt)
 	}
 }

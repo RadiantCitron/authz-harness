@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -170,7 +169,7 @@ func TestExchange_Deny_ScopeExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected scope exceeded error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonDelegationScopeExceeded)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonDelegationScopeExceeded {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonDelegationScopeExceeded, err)
 	}
 }
@@ -203,7 +202,7 @@ func TestExchange_Deny_TTLExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ttl exceeded error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonDelegationTTLExceeded)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonDelegationTTLExceeded {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonDelegationTTLExceeded, err)
 	}
 }
@@ -238,7 +237,7 @@ func TestExchange_Deny_TamperedParentToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected signature verification error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonTokenInvalidSignature)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenInvalidSignature {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonTokenInvalidSignature, err)
 	}
 }
@@ -274,7 +273,7 @@ func TestExchange_Deny_ExpiredParentToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected expired token error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonTokenExpired)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenExpired {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonTokenExpired, err)
 	}
 }
@@ -313,7 +312,7 @@ func TestExchange_Deny_RevokedParentKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected retired key error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonTokenKeyRetired)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenKeyRetired {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonTokenKeyRetired, err)
 	}
 }
@@ -397,7 +396,7 @@ func TestExchange_Deny_MaxDepthExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected max depth exceeded error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonDelegationDepthExceeded)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonDelegationDepthExceeded {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonDelegationDepthExceeded, err)
 	}
 }
@@ -431,7 +430,7 @@ func TestExchange_Deny_SelfLoop(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected self loop error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonDelegationSelfLoop)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonDelegationSelfLoop {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonDelegationSelfLoop, err)
 	}
 
@@ -472,7 +471,7 @@ func TestExchange_Deny_SelfLoop(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected actor chain self loop error, got nil")
 	}
-	if !strings.Contains(err.Error(), string(domain.ReasonDelegationSelfLoop)) {
+	if domain.ReasonFromError(err, "") != domain.ReasonDelegationSelfLoop {
 		t.Errorf("expected reason %s in error: %v", domain.ReasonDelegationSelfLoop, err)
 	}
 }
@@ -622,4 +621,40 @@ func FuzzScopeValidator(f *testing.F) {
 		// 패닉이 발생하지 않는지 검증
 		_ = validator.ValidateDownscope(pClaims, "child", childScope, 10*time.Minute, now)
 	})
+}
+
+// TC-010-09: exchange/service.go 내 문자열 에러 파싱 제거 검증 (부모 토큰 검증 실패 시 strings.Contains 없이 구조화된 Reason 반환)
+func TestTC_010_09_Exchange_StructuredParentError(t *testing.T) {
+	baseTime := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	svc, issuer, _, _, _, _, clk := setupTestHarness(t, baseTime)
+
+	parentRes, err := issuer.IssueToken(token.IssueRequest{
+		ClientID:     "client-orchestrator",
+		ClientSecret: "orchestrator-secret-key-01",
+		Subject:      "orchestrator-main",
+		Scope:        "file:read:docs/plan.txt",
+		TTL:          10 * time.Minute,
+	}, token.IssueOptions{}, domain.AuditContext{})
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	// 1. 만료 부모 토큰
+	clk.Set(baseTime.Add(20 * time.Minute))
+	_, err = svc.Exchange(context.Background(), exchange.ExchangeRequest{
+		ClientID:     "client-subagent",
+		ClientSecret: "subagent-secret-key-02",
+		ParentToken:  parentRes.TokenString,
+		ChildSubject: "worker-01",
+		Scope:        "file:read:docs/plan.txt",
+	}, domain.AuditContext{})
+	if err == nil {
+		t.Fatal("expected expired error, got nil")
+	}
+	if domain.ReasonFromError(err, "") != domain.ReasonTokenExpired {
+		t.Fatalf("expected ReasonTokenExpired, got %s", domain.ReasonFromError(err, ""))
+	}
+	if domain.ExitCodeFromError(err, domain.ExitInternalError) != domain.ExitTokenInvalid {
+		t.Fatalf("expected ExitTokenInvalid (%d), got %d", domain.ExitTokenInvalid, domain.ExitCodeFromError(err, domain.ExitInternalError))
+	}
 }

@@ -78,7 +78,7 @@ func NewService(keyMgr keys.KeyManager, clients ClientRegistry, auditWriter audi
 		clients:     clients,
 		auditWriter: auditWriter,
 		clock:       clock,
-		defaultAud:  "authz-service",
+		defaultAud:  domain.DefaultAudience,
 		defaultTTL:  1 * time.Hour,
 	}
 }
@@ -89,15 +89,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	clientInfo, err := s.clients.AuthenticateClient(req.ClientID, req.ClientSecret)
 	if err != nil {
 		if s.auditWriter != nil {
-			var reason domain.Reason = domain.ReasonInvalidToken
-			switch {
-			case errors.Is(err, ErrUnknownClient):
-				reason = domain.ReasonAuthnUnknownClient
-			case errors.Is(err, ErrInvalidSecret):
-				reason = domain.ReasonAuthnInvalidSecret
-			case errors.Is(err, ErrClientSuspended):
-				reason = domain.ReasonAuthnClientSuspended
-			}
+			reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
 			traceID := auditCtx.TraceID
 			if traceID == "" {
 				traceID = fmt.Sprintf("trace-%d", s.clock.Now().UnixNano())
@@ -130,8 +122,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		return nil, errors.New("subject is required")
 	}
 	if !clientInfo.IsSubjectAllowed(req.Subject) {
-		return nil, fmt.Errorf("client %s is not authorized to request tokens for subject %s (%s)",
-			req.ClientID, req.Subject, domain.ReasonNoActiveGrant)
+		return nil, domain.NewError(domain.ReasonNoActiveGrant, "issue", fmt.Sprintf("client %s is not authorized to request tokens for subject %s", req.ClientID, req.Subject), nil)
 	}
 
 	// 3. 서명 키(Zone A Active Key) 획득
@@ -161,7 +152,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	}
 
 	claims := domain.TokenClaims{
-		Issuer:          "authz-harness",
+		Issuer:          domain.DefaultIssuer,
 		Subject:         req.Subject,
 		Audience:        aud,
 		ClientID:        req.ClientID,

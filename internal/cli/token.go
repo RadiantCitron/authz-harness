@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"authz-harness/internal/audit"
@@ -105,7 +104,7 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 	clientSecret := fs.String("client-secret", "", "클라이언트 시크릿 (필수)")
 	sub := fs.String("sub", "", "토큰 주체 Subject (필수, 예: worker-01)")
 	scope := fs.String("scope", "", "권한 스코프 (예: file:read:docs/plan.txt)")
-	aud := fs.String("aud", "authz-service", "수신 대상 Audience")
+	aud := fs.String("aud", domain.DefaultAudience, "수신 대상 Audience")
 	ttl := fs.Duration("ttl", time.Hour, "토큰 유효 기간 (기본 1h)")
 	epoch := fs.Int64("epoch", 1, "Security Epoch 번호 (기본 1)")
 
@@ -347,32 +346,12 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 }
 
 func extractReason(err error) string {
-	str := err.Error()
-	for _, r := range []domain.Reason{
-		domain.ReasonDelegationScopeEmpty,
-		domain.ReasonDelegationScopeExceeded,
-		domain.ReasonDelegationTTLExceeded,
-		domain.ReasonDelegationDepthExceeded,
-		domain.ReasonDelegationSelfLoop,
-		domain.ReasonTokenInvalidType,
-		domain.ReasonTokenAlgNotAllowed,
-		domain.ReasonTokenKeyRetired,
-		domain.ReasonTokenKeyNotFound,
-		domain.ReasonTokenInvalidSignature,
-		domain.ReasonTokenExpired,
-		domain.ReasonTokenNotYetValid,
-		domain.ReasonTokenInvalidIssAud,
-		domain.ReasonTokenSubjectMismatch,
-		domain.ReasonTokenReplayDetected,
-		domain.ReasonTokenMalformed,
-		domain.ReasonAuthnInvalidSecret,
-		domain.ReasonAuthnUnknownClient,
-		domain.ReasonAuthnClientSuspended,
-		domain.ReasonNoActiveGrant,
-	} {
-		if strings.Contains(str, string(r)) {
-			return string(r)
-		}
+	if err == nil {
+		return ""
+	}
+	r := domain.ReasonFromError(err, "")
+	if r != "" {
+		return string(r)
 	}
 	return "TOKEN_VERIFICATION_FAILED"
 }

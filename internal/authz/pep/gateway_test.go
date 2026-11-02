@@ -613,3 +613,97 @@ func TestZeroLeakageAuditLog(t *testing.T) {
 		t.Fatalf("ZERO LEAKAGE VIOLATION: raw bearer token leaked in audit.jsonl!")
 	}
 }
+
+// TC-010-05: 기본 Audience 통일 검증 (IssueRequest{Audience: ""} -> pep.Execute(ExpectedAudience: "") 정상 통과)
+func TestTC_010_05_DefaultAudience_Alignment(t *testing.T) {
+	h := setupTestHarness(t)
+	ctx := context.Background()
+
+	// 파일 준비
+	testFile := filepath.Join(h.workspaceDir, "default_aud.txt")
+	if err := os.WriteFile(testFile, []byte("default aud content"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	// Grant 발급
+	_, err := h.papSvc.CreateGrant(ctx, pap.CreateGrantRequest{
+		Subject:  "worker-default-aud",
+		Action:   domain.ActionFileRead,
+		Resource: "default_aud.txt",
+	})
+	if err != nil {
+		t.Fatalf("CreateGrant failed: %v", err)
+	}
+
+	// Audience 를 지정하지 않고 발급 (DefaultAudience="authz-harness" 적용)
+	res, err := h.tokenIssuer.IssueToken(token.IssueRequest{
+		ClientID:     "client-orchestrator",
+		ClientSecret: "orchestrator-secret-key-01",
+		Subject:      "worker-default-aud",
+		Scope:        "file:read:default_aud.txt",
+		Audience:     "", // 기본값 사용
+	}, token.IssueOptions{}, domain.AuditContext{TraceID: "tc-010-05-issue"})
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	// PEP 도 ExpectedAudience 없이 기본값으로 실행
+	result, err := h.gateway.Execute(ctx, pep.Request{
+		Token:            res.TokenString,
+		Action:           domain.ActionFileRead,
+		Resource:         "default_aud.txt",
+		ExpectedAudience: "", // 기본값 사용
+		TraceID:          "tc-010-05-exec",
+	})
+	if err != nil {
+		t.Fatalf("PEP execute returned error: %v", err)
+	}
+
+	if !result.Allowed {
+		t.Fatalf("expected allowed with default audience, got denied: reason=%s, details=%s",
+			result.Reason, result.Details)
+	}
+	if result.Reason != domain.ReasonAuthorized {
+		t.Fatalf("expected ReasonAuthorized, got %s", result.Reason)
+	}
+}
+
+// TC-010-08: pep/gateway.go 내 문자열 에러 파싱 제거 검증 (Verifier 가 *domain.Error 반환 시 정확한 Reason 전달)
+func TestTC_010_08_StructuredErrorReason_Extraction(t *testing.T) {
+	h := setupTestHarness(t)
+	ctx := context.Background()
+
+	// 만료된 토큰으로 실행 (Gate 1 만료 에러 발생)
+	res, err := h.tokenIssuer.IssueToken(token.IssueRequest{
+		ClientID:     "client-orchestrator",
+		ClientSecret: "orchestrator-secret-key-01",
+		Subject:      "worker-expire",
+		Scope:        "file:read:test.txt",
+		TTL:          1 * time.Hour,
+	}, token.IssueOptions{}, domain.AuditContext{TraceID: "tc-010-08-issue"})
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	// ClockOffset 을 2시간 뒤로 설정하여 만료 유도
+	result, err := h.gateway.Execute(ctx, pep.Request{
+		Token:       res.TokenString,
+		Action:      domain.ActionFileRead,
+		Resource:    "test.txt",
+		ClockOffset: 2 * time.Hour,
+		TraceID:     "tc-010-08-exec",
+	})
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+
+	if result.Allowed {
+		t.Fatal("expected expired token to be denied, but got allowed")
+	}
+	if result.Reason != domain.ReasonTokenExpired {
+		t.Fatalf("expected ReasonTokenExpired, got %s", result.Reason)
+	}
+	if result.ExitCode != domain.ExitTokenInvalid {
+		t.Fatalf("expected ExitTokenInvalid (%d), got %d", domain.ExitTokenInvalid, result.ExitCode)
+	}
+}

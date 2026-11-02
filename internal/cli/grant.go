@@ -102,13 +102,7 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 	})
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		if strings.Contains(err.Error(), "parent directory traversal") || strings.Contains(err.Error(), "validation failed") {
-			return domain.ExitBadInput
-		}
-		if strings.Contains(err.Error(), "audit logging failed") {
-			return domain.ExitAuditFailure
-		}
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	fmt.Fprintf(r.out, "[GRANT CREATED] ID: %s | Subject: %s | Action: %s | Resource: %s\n",
@@ -135,13 +129,7 @@ func (r *GrantRunner) runRevoke(ctx context.Context, args []string) domain.ExitC
 	revoked, err := r.papSvc.RevokeGrant(ctx, id)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		if strings.Contains(err.Error(), "not found") {
-			return domain.ExitBadInput
-		}
-		if strings.Contains(err.Error(), "audit logging failed") {
-			return domain.ExitAuditFailure
-		}
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	revokedAtStr := ""
@@ -172,10 +160,7 @@ func (r *GrantRunner) runBumpEpoch(ctx context.Context, args []string) domain.Ex
 	newEpoch, err := r.papSvc.BumpEpoch(ctx, sub)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		if strings.Contains(err.Error(), "audit logging failed") {
-			return domain.ExitAuditFailure
-		}
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	prevEpoch := newEpoch - 1

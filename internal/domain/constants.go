@@ -4,6 +4,14 @@ package domain
 type ExitCode int
 
 const (
+	// DefaultIssuer 는 전 시스템 표준 토큰 발급자 식별자다.
+	DefaultIssuer = "authz-harness"
+
+	// DefaultAudience 는 전 시스템 표준 토큰 수신 대상 식별자다.
+	DefaultAudience = "authz-harness"
+)
+
+const (
 	// ExitSuccess 는 요청이 성공적으로 인가되고 수행되었음을 의미한다.
 	ExitSuccess ExitCode = 0
 
@@ -122,4 +130,13 @@ const (
 
 	// ReasonAuditLogFailed 는 감사 기록(audit.Writer) 실패로 인해 안전 거부되었음을 나타낸다.
 	ReasonAuditLogFailed Reason = "AUDIT_LOG_FAILED"
+
+	// ReasonMissingTraceContext 는 요청에 필수 추적 컨텍스트(trace_id)가 누락되었음을 나타낸다.
+	ReasonMissingTraceContext Reason = "MISSING_TRACE_CONTEXT"
+
+	// ReasonAuditIntegrityBroken 은 감사 로그 해시 체인 무결성이 훼손되었음을 나타낸다.
+	ReasonAuditIntegrityBroken Reason = "AUDIT_INTEGRITY_BROKEN"
+
+	// ReasonInternalError 는 시스템 예외, I/O 실패 등 내부 복구 불가능 오류를 나타낸다.
+	ReasonInternalError Reason = "INTERNAL_ERROR"
 )

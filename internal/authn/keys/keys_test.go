@@ -229,3 +229,37 @@ func TestKeyManager_Concurrency(t *testing.T) {
 		t.Fatalf("expected at least 1 key after concurrent operations, got %d", len(keys))
 	}
 }
+
+// TC-010-06: keys.Manager의 domain.Clock 단일 사용 및 가상 시계 주입 검증
+func TestTC_010_06_KeysManager_SingleDomainClock(t *testing.T) {
+	store, _, _, auditPath := setupTestStore(t)
+	auditWriter, err := audit.NewJSONLWriter(auditPath)
+	if err != nil {
+		t.Fatalf("failed to create audit writer: %v", err)
+	}
+	defer auditWriter.Close()
+
+	fixedBase := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	mockBase := &mockClock{t: fixedBase}
+	offset := 24 * time.Hour
+	offsetClock := domain.NewOffsetClock(mockBase, offset) // 2026-11-03 12:00:00
+
+	mgr, err := NewManager(store, auditWriter, WithClock(offsetClock))
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	newKey, err := mgr.RotateKey(domain.AuditContext{
+		TraceID: "tc-010-06-trace",
+		Actor:   "admin",
+		Reason:  "test clock injection",
+	})
+	if err != nil {
+		t.Fatalf("RotateKey failed: %v", err)
+	}
+
+	expectedTime := fixedBase.Add(offset)
+	if !newKey.CreatedAt.Equal(expectedTime) {
+		t.Fatalf("expected CreatedAt %v, got %v", expectedTime, newKey.CreatedAt)
+	}
+}

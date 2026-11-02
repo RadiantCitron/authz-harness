@@ -111,50 +111,18 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		RecordReplay: false,
 	}, auditCtx)
 	if err != nil {
-		var reason domain.Reason
-		switch {
-		case strings.Contains(err.Error(), string(domain.ReasonTokenInvalidSignature)):
-			reason = domain.ReasonTokenInvalidSignature
-		case strings.Contains(err.Error(), string(domain.ReasonTokenExpired)):
-			reason = domain.ReasonTokenExpired
-		case strings.Contains(err.Error(), string(domain.ReasonTokenKeyRetired)):
-			reason = domain.ReasonTokenKeyRetired
-		case strings.Contains(err.Error(), string(domain.ReasonTokenKeyNotFound)):
-			reason = domain.ReasonTokenKeyNotFound
-		case strings.Contains(err.Error(), string(domain.ReasonTokenAlgNotAllowed)):
-			reason = domain.ReasonTokenAlgNotAllowed
-		case strings.Contains(err.Error(), string(domain.ReasonTokenInvalidType)):
-			reason = domain.ReasonTokenInvalidType
-		case strings.Contains(err.Error(), string(domain.ReasonTokenMalformed)):
-			reason = domain.ReasonTokenMalformed
-		default:
-			reason = domain.ReasonInvalidToken
-		}
+		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
 		s.recordAuditDenied(now, traceID, actor, req, "", reason, err.Error())
-		return nil, fmt.Errorf("parent token verification failed: %w", err)
+		return nil, domain.NewError(reason, "exchange", "parent token verification failed", err)
 	}
 
 	parentClaims := verifiedParent.Claims
 
 	// 4. 축소 위임(Downscoping) 불변식 검증
 	if err := s.validator.ValidateDownscope(&parentClaims, req.ChildSubject, req.Scope, req.TTL, now); err != nil {
-		var reason domain.Reason
-		switch {
-		case errors.Is(err, ErrScopeEmpty):
-			reason = domain.ReasonDelegationScopeEmpty
-		case errors.Is(err, ErrScopeExceeded):
-			reason = domain.ReasonDelegationScopeExceeded
-		case errors.Is(err, ErrTTLExceeded):
-			reason = domain.ReasonDelegationTTLExceeded
-		case errors.Is(err, ErrDepthExceeded):
-			reason = domain.ReasonDelegationDepthExceeded
-		case errors.Is(err, ErrSelfLoop):
-			reason = domain.ReasonDelegationSelfLoop
-		default:
-			reason = domain.ReasonTokenInsufficientScope
-		}
+		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
 		s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
-		return nil, fmt.Errorf("downscope validation failed: %w", err)
+		return nil, domain.NewError(reason, "exchange", "downscope validation failed", err)
 	}
 
 	// 5. act 체인 구성 및 깊이 계산

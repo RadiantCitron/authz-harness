@@ -88,10 +88,12 @@ type Config struct {
 	PDP         pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
 	Jail        jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
 	AuditWriter audit.Writer        // Layer 1: 감사 로그 기록기
+	Clock       domain.Clock        // 결정론적 가상 시계 주입
 }
 
 type gateway struct {
-	cfg Config
+	cfg   Config
+	clock domain.Clock
 }
 
 // NewGateway 는 검증기, PDP, Jail, 감사 기록기를 주입받아 Gateway 인스턴스를 생성한다.
@@ -110,14 +112,19 @@ func NewGateway(cfg Config) (Gateway, error) {
 		return nil, fmt.Errorf("pep: audit writer is required")
 	}
 
-	return &gateway{cfg: cfg}, nil
+	clk := cfg.Clock
+	if clk == nil {
+		clk = domain.RealClock{}
+	}
+
+	return &gateway{cfg: cfg, clock: clk}, nil
 }
 
 // Execute 는 5단계 관문 집행 파이프라인을 실행한다.
 func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 	traceID := req.TraceID
 	if strings.TrimSpace(traceID) == "" {
-		traceID = fmt.Sprintf("pep-%d", time.Now().UnixNano())
+		traceID = fmt.Sprintf("pep-%d", g.clock.Now().UnixNano())
 	}
 
 	// 0. 기본 입력 인자 유효성 검증
@@ -138,7 +145,7 @@ func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 	// Stage 1: Gate 1 - AuthN Token Verification
 	expectedAud := req.ExpectedAudience
 	if expectedAud == "" {
-		expectedAud = "authz-harness"
+		expectedAud = domain.DefaultAudience
 	}
 
 	auditCtx := domain.AuditContext{
@@ -303,7 +310,7 @@ func (g *gateway) logEvent(traceID, subject, jti, resource, action string, stage
 	}
 
 	event := audit.Event{
-		Timestamp: time.Now().UTC(),
+		Timestamp: g.clock.Now().UTC(),
 		TraceID:   traceID,
 		Step:      string(stage),
 		Actor:     subject,
@@ -329,29 +336,7 @@ func extractReasonFromTokenError(err error) domain.Reason {
 	if err == nil {
 		return domain.ReasonAuthorized
 	}
-	errStr := err.Error()
-
-	reasons := []domain.Reason{
-		domain.ReasonTokenInvalidSignature,
-		domain.ReasonTokenExpired,
-		domain.ReasonTokenReplayDetected,
-		domain.ReasonTokenNotYetValid,
-		domain.ReasonTokenInvalidIssAud,
-		domain.ReasonTokenSubjectMismatch,
-		domain.ReasonTokenInvalidType,
-		domain.ReasonTokenAlgNotAllowed,
-		domain.ReasonTokenKeyRetired,
-		domain.ReasonTokenKeyNotFound,
-		domain.ReasonTokenMalformed,
-	}
-
-	for _, r := range reasons {
-		if strings.Contains(errStr, string(r)) {
-			return r
-		}
-	}
-
-	return domain.ReasonInvalidToken
+	return domain.ReasonFromError(err, domain.ReasonInvalidToken)
 }
 
 // tokenScopeAllows 는 주어진 스코프 문자열이 요청 액션/리소스를 허용하는지 판별한다.
