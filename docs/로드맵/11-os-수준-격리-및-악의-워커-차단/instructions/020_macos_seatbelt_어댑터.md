@@ -41,6 +41,7 @@ macOS(`darwin`) 환경에서 서브프로세스 워커에 커널 수준 격리�
    (deny network*) ; policy.AllowNetwork == false 일 때
    (deny file-write* (subpath "/Users") (subpath "/private/var") (subpath "/private/tmp"))
    (allow file-read* file-write* (subpath "<AllowWritePath_1>") ...)
+   (deny file-write* (literal "<ReadOnlyPath_grants_state.json>") (literal "<ReadOnlyPath_jwks.json>"))
    (deny file-read* file-write* (subpath "<DenyPath_ZoneA>") ...)
    ```
    - 시스템 라이브러리(`/usr/lib`, `/System/Library`, `/dev/null`, `/dev/urandom`)와 바이너리 읽기는 유지하면서, `AllowWritePaths`(`workspace`, `zone_b`, `audit.jsonl`) 외의 임시·사용자 경로 쓰기를 막고, 마지막 줄의 `(deny file-read* file-write* (subpath "<DenyPath>"))`로 Zone A(`zone_a`) 접근을 최우선 차단한다.
@@ -48,6 +49,7 @@ macOS(`darwin`) 환경에서 서브프로세스 워커에 커널 수준 격리�
 ### 3.2 커널 VFS DAC 잠금 및 복구 (`Prepare` & `cleanup`)
 1. `Prepare(cmd *exec.Cmd, policy ConfinementPolicy)` 실행 시:
    - `policy.DenyPaths`(예: `zone_a` 디렉터리 및 외부 읽기 금지 대상)에 대해 현재 파일 모드를 저장한 뒤 `os.Chmod(p, 0000)`을 호출한다. 이로써 악의 워커(및 그 손자 프로세스)가 PEP를 우회해 `os.ReadFile(zone_a/private_keys.json)`을 호출하면 XNU 커널 VFS `open(2)` 시스템콜이 즉시 `EACCES (permission denied)`를 반환한다.
+   - `policy.ReadOnlyPaths`(`grants_state.json`, `jwks.json`) 파일에 대해서는 현재 파일 모드를 저장한 뒤 `os.Chmod(p, 0400)`(읽기 전용)으로 잠그어, 워커가 `zone_b` 내 `.lock` 및 실행 원장(`replay`, `budget`, `approvals`)은 갱신할 수 있으면서도 정책·공개키 원장 본파일은 절대 덮어쓸 수 없게 보호한다.
    - 외부 쓰기 금지 대상 디렉터리(또는 `DenyPaths` 내 쓰기 금지 디렉터리)가 존재하면 `0500`(읽기·탐색만 허용, 쓰기 불가) 또는 `0000`으로 잠근다.
    - `CanApplySeatbelt() == true`이면 `cmd`를 `/usr/bin/sandbox-exec -p <profile>`로 추가 래핑한다.
    - `CanApplySeatbelt() == false`(상위 Seatbelt 샌드박스 내부에서 실행 중)이고 `!policy.AllowNetwork`이면 `cmd.Env`에 커널 소켓 차단 정책 지시자(`AUTHZ_CONFINED_NO_NET=1` + 워커 시작 시 `RLIMIT` 또는 커널 가드 적용)를 함께 주입한다.

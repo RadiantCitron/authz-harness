@@ -32,8 +32,16 @@ PIP가 활성 Grant 정보와 함께 현재 주체에 발급된 승인 레코드
 
 ## 3. 세부 명세
 
-1. **판정 우선순위 불변식 (`pdp.Evaluate`)**:
-   - 1단계(입력 검증) → 2단계(본인 및 `act` 계보 Security Epoch 일치) → 3단계(토큰 Scope 포함 및 예산 충분) → 4단계(활성 Grant 존재)를 **모두 통과한 뒤에만** 해당 활성 Grant의 `g.RequiresApproval` 여부를 평가한다.
+1. **8단 누적 판정 우선순위 불변식 (`pdp.Evaluate` — [012번 보고서](../../../보고서/012-타에이전트_구현이관대비_전체설계정합성_및_코어구조_위험요소_검증보고서.md) §3.3-A)**:
+   - `pdp.Evaluate(req, snapshot)`은 반드시 다음 8단 순서를 엄수한다:
+     - ① 입력 무결성 검사 (`ReasonNoActiveGrant = 12`)
+     - ② 본인 `Epoch` 일치 검사 (`req.Epoch != snapshot.CurrentEpoch` → `ReasonSubjectEpochRevoked = 12`)
+     - ③ 다단계 위임 `act` 조상 계보 전원의 `Epoch` 연쇄 검사 (로드맵 13: `anc.Epoch < snapshot.SubjectEpochs.Get(anc.Subject)` → `ReasonSubjectEpochRevoked = 12`)
+     - ④ 토큰 `Scope` 포함 검사 (`ReasonTokenInsufficientScope = 12`)
+     - ⑤ 활성/회수 Grant 매칭 검사 (`ReasonGrantRevoked = 12` / `ReasonNoActiveGrant = 12`)
+     - ⑥ 예산 충분 여부 검사 (로드맵 12: `snapshot.BudgetEntries[req.TokenJTI]` 잔량 부족 시 `ReasonBudgetExhausted = 12` 하드 거부 — 예산이 고갈된 요청은 절대 `ask(18)`로 넘어가지 않음)
+     - ⑦ 매칭된 활성 Grant의 `g.RequiresApproval == true`일 때만 5요소 승인 바인딩(`sub`, `action`, `resource`, `TokenJTI`, 선택적 `ArgHash`) 및 만료(`now < ExpiresAt`) 검사 → 미충족 시 `DecisionAsk`(`ExitApprovalRequired = 18`)
+     - ⑧ 최종 `DecisionAllow`(`ReasonAuthorized = 0`)
    - 따라서 승인(`Approval`)을 받은 뒤에 Grant가 Revoke되거나 Epoch가 증가하면 `ask`나 `allow`가 아니라 즉시 `DecisionDeny`(`GRANT_REVOKED` / `SUBJECT_EPOCH_REVOKED`, 종료 코드 `12`)가 반환된다.
 2. **`RequiresApproval == true`일 때의 승인 매칭 우선순위**:
    - 평가 시각 `evalTime := req.Now` (`evalTime.IsZero()`이면 `snapshot.Timestamp`)를 사용한다.

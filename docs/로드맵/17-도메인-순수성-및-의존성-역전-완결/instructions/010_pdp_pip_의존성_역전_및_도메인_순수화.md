@@ -20,7 +20,7 @@
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/domain/snapshot.go` [신규]: Phase 01~15 및 [011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md)의 모든 누적 필드를 포함한 순수 `SubjectSnapshot` 구조체(`Subject`, `CurrentEpoch`, `SubjectEpochs SecurityEpochs`[계보 연쇄 Epoch 검증용], `StateVersion int`[단조 증가 원장 버전], `ActiveGrants`, `RevokedGrants`, Phase 12의 `BudgetEntries` / `BudgetRemaining`·`BudgetInitial`, Phase 15의 `Approvals []Approval`, `Timestamp`) 및 `SnapshotProvider` 인터페이스 정의
+  - `internal/domain/snapshot.go` [신규]: Phase 01~15 및 [011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md)의 모든 누적 필드를 포함한 순수 `SubjectSnapshot` 구조체(`Subject`, `CurrentEpoch`, `SubjectEpochs SecurityEpochs`[계보 연쇄 Epoch 검증용], `StateVersion int`[단조 증가 원장 버전], `ActiveGrants`, `RevokedGrants`, Phase 12의 `BudgetEntries map[string]BudgetEntry`, Phase 15의 `Approvals []Approval`, `Timestamp`) 및 `SnapshotProvider` 인터페이스 정의
   - `internal/domain/audit_port.go` [신규]: 순수 `AuditEvent` 구조체(Phase 14의 `SchemaVersion`, `ArgHash`, `ResultHash`, `SpanID`, `ParentSpanID` 포함) 및 `AuditWriter` 인터페이스(`Log(AuditEvent) error`, `Close() error`) 정의
   - `internal/authz/pip/service.go`: `type SubjectSnapshot = domain.SubjectSnapshot` 타입 별칭 선언 및 `domain.SnapshotProvider` 구현
   - `internal/audit/audit.go`: `type Event = domain.AuditEvent`, `type Writer = domain.AuditWriter` 타입 별칭 선언으로 기존 `audit.Event`·`audit.Writer` 참조 코드 100% 무수정 호환 보장

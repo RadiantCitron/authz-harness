@@ -1,6 +1,8 @@
 # authz-harness 마스터 로드맵 (Master Blueprint & Roadmap)
 
-> **상위 안내**: 본 문서는 `authz-harness` 전체 아키텍처 및 Phase 0~6의 통합 청사진을 보존하는 **마스터 설계도**입니다.
+> **상위 안내**: 본 문서는 `authz-harness` 전체 아키텍처 및 Phase 0~18의 통합 청사진을 보존하는 **마스터 설계도**입니다.
+> - **타 에이전트 이관 대비 설계 정합성 검증 보고서**: [012-타에이전트_구현이관대비_전체설계정합성_및_코어구조_위험요소_검증보고서.md](../보고서/012-타에이전트_구현이관대비_전체설계정합성_및_코어구조_위험요소_검증보고서.md)
+> - **코어 권한·파이프라인 5대 기본기 진단 보고서**: [011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md](../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md)
 > - **로드맵 거버넌스 및 실행 절차**: [ROADMAP_정책.md](ROADMAP_정책.md)
 > - **전체 로드맵 색인 및 진행 대시보드**: [README.md](README.md)
 > - **엔터프라이즈 아키텍처 심층 검토 보고서**: [003-엔터프라이즈_인가_보강_기술보고서.md](../보고서/003-엔터프라이즈_인가_보강_기술보고서.md)
@@ -38,9 +40,9 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 1. **실제 LLM 연동 및 에이전트 지능 구현**: 프롬프트 엔지니어링, 추론 루프, 외부 LLM API 호출은 일절 포함하지 않는다. 에이전트는 지정된 파일 읽기/쓰기 명령을 수행하는 결정론적 실행기다.
 2. **상용 대규모 분산 IAM/IdP 구축**: 멀티 리전 복제, 고가용성 클러스터링, 외부 OIDC 연합(Federation), LDAP/AD 연동, 엔터프라이즈 외부 DB 서버 의존은 다루지 않는다.
 3. **브라우저 기반 UI 및 대화형 로그인 플로우**: OAuth 2.1의 Authorization Code + 브라우저 리다이렉트 + 로그인 웹 UI + 동의 화면(Consent Screen)은 하네스 목적에 불필요하므로 생략한다.
-4. **복잡한 파일/시스템 작업**: 파일 삭제, 디렉토리 권한 변경, 셸 명령어 실행, 네트워크 소켓 오픈 등 `file:read`와 `file:write` 외의 에이전트 작업은 지원하지 않는다.
-5. **OS 커널 수준의 완전한 샌드박싱**: `chroot`, Linux namespaces, `seccomp`, 컨테이너 런타임, macOS Seatbelt 등 OS 커널 수준 강제 격리는 구현 범위에 넣지 않으며, 애플리케이션 수준 PEP 및 경로 검증의 한계는 위협 모델에 명시한다.
-6. **장기 세션 관리 및 Refresh Token 회전**: 기본 범위에서는 단기 만료 Access Token에만 집중하며, Refresh Token 발급 및 회전(Rotation) 메커니즘은 구현하지 않는다.
+4. **복잡한 파일/시스템 작업 (ADR 0003 C-2 조건부 해제 반영)**: 초기(Phase 0~9)에는 `file:read`와 `file:write`로만 한정하며, Phase 16([16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md))에 한해 [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-2 조건 하에서 결정론적 루프백 전용 `net:fetch`와 allow-list ID 전용 `exec:run` 가짜 도구만 PEP 단일 입출구 위로 허용한다(외부 인터넷 접속 및 임의 셸 명령 실행은 영구 금지).
+5. **컨테이너·가상머신 제품화 (ADR 0003 C-1 조건부 해제 반영)**: 전체 시스템 컨테이너 런타임이나 VM 구축은 비목표로 유지하되, Phase 11([11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md))에서 [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-1에 따라 서브프로세스 워커 한정 커널 격리 어댑터(`internal/confinement`: macOS Seatbelt/VFS DAC, Linux Landlock/seccomp)를 검증한다.
+6. **Refresh Token 회전 (ADR 0003 C-4 조건부 해제 반영)**: Refresh Token 발급 및 회전 메커니즘은 영구 비목표로 유지하되, Phase 13([13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md))에서 만료 임박 시 부모 토큰의 현재 유효성과 Epoch/예산을 재검증하여 새 단기 자식 토큰을 발급받는 **부모 기반 재교환(`re-exchange`)** 흐름만 허용한다.
 
 ## 5) 성공 정의 (Definition of Success) — 데모·종료 조건
 1. **단일 명령 전체 시나리오 통과**: 로컬 터미널에서 단일 CLI 명령(`authz-harness run --scenario all`)을 실행했을 때, 정의된 30개 긍정(Allow) 및 부정(Deny/Error) E2E 시나리오 전체가 실행되고 최종 요약에서 모든 시나리오가 `PASS`로 출력되며 프로세스 종료 코드가 `0`이다.
@@ -140,15 +142,15 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ### 8.2 6계층 비순환 의존성 그래프 (6-Layer Strict Acyclic Dependency Graph)
 모든 내부 패키지는 **자신보다 낮은 번호의 계층(Lower Layer)만 단방향으로 참조**할 수 있으며, `pdp`가 `jail`이나 OS 파일 I/O를 참조하는 것은 컴파일 타임에 원천 금지된다.
-* **Layer 5 (Entry & Harness)**: `cmd/authz-harness`, `internal/harness`, `internal/ui`
-* **Layer 4 (Process Coordinators)**: `internal/orchestrator` (부모 스포너), `internal/subagent` (자식 워커 엔트리)
-* **Layer 3 (Enforcement Gateway)**: `internal/authz/pep` (AuthN 검증 + PDP 결정 + Jail 격리 + Audit 기록 조율)
+* **Layer 5 (Entry, Composition Root & Harness)**: `cmd/authz-harness`, `internal/app` (단일 합성 루트 `BuildStack`), `internal/cli`, `internal/harness`, `internal/ui`, `internal/mcp`
+* **Layer 4 (Process Coordinators & OS Confinement)**: `internal/orchestrator` (부모 스포너·세션 러너), `internal/subagent` (자식 워커 엔트리), `internal/confinement` (Phase 11 OS 커널 격리 어댑터 — 코어 패키지에서 import 금지 `TC-110-01`)
+* **Layer 3 (Enforcement Gateway)**: `internal/authz/pep` (AuthN 검증 + PDP 결정 + 도구 경계 검증 + Pre-Commit 원장/감사 + I/O 실행 SESE 단일 입출구 조율, Phase 17 `ToolHandler` 전략 포트)
 * **Layer 2 (Core Security Domains — 수평 상호 참조 금지)**:
-  * **Layer 2A**: `internal/authn` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장)
-  * **Layer 2B**: `internal/authz/pap`, `internal/authz/pip`, `internal/authz/pdp` (순수 인가 결정 코어 — 파일 시스템 I/O 의존성 0%)
-  * **Layer 2C**: `internal/jail` (경로 정규화, 심볼릭 링크 차단, 범위 제한 파일 Read/Write)
-* **Layer 1 (Observability & Evidence)**: `internal/audit` (JSONL + 해시 체인), `internal/opslog` (`slog` stderr 전용)
-* **Layer 0 (Pure Primitives)**: `internal/domain` (모델·클레임·사유·ExitCode 상수), `internal/clock` (가상/실제 시계), `internal/trace` (`trace_id`/`span_seq` 컨텍스트)
+  * **Layer 2A**: `internal/authn/{keys,token,exchange,budget}` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장, Phase 12 예산 원장)
+  * **Layer 2B**: `internal/authz/{pap,pip,pdp,state}` (인가 관리·상태 공급·순수 결정 코어 — `pdp`는 파일/OS 의존성 0% 및 Phase 17에서 `domain.SubjectSnapshot` DIP로 전이적 인프라 의존성 0% 달성 `TC-170-01`)
+  * **Layer 2C**: `internal/jail` (파일 경로 격리), `internal/netguard` (Phase 16 루프백 Egress 가드), `internal/execguard` (Phase 16 Allow-List 실행 가드)
+* **Layer 1 (Persistence, Observability & Evidence)**: `internal/storage` (`AtomicFileStore[T]` 단일 `flock` 원장 엔진 `TC-081-01`), `internal/audit` (JSONL + 해시 체인 + Phase 14 v2 해시·서명 체크포인트), `internal/observe` (Phase 14 관측성 포트 및 `slogadapter`/`otel`/`noop` 어댑터 — `internal/opslog` 가칭 폐기)
+* **Layer 0 (Pure Primitives & Domain Ports)**: `internal/domain` (순수 도메인 엔티티, `Clock` 가상/실제 시계 인터페이스 `TC-130-01`, `AuditContext`/`TraceID`, `*domain.Error` 및 `ExitCode` 상수, `BudgetEntry`/`BudgetSnapshotReader`, Phase 17 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter` 포트)
 
 ## 9) 핵심 원칙 (Core Architectural Principles)
 1. **이중 관문(Dual-Gate: AuthN before AuthZ) 및 기본 거부(Fail-Closed)**: 신원 및 암호학적 무결성(Gate 1)이 검증되기 전에는 인가 정책(Gate 2)을 평가하지 않으며, 감사 기록 실패를 포함한 모든 경계 오류 시 즉시 거부하고 중단한다.
@@ -166,14 +168,17 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **Resource (`resource`)**: Workspace Root 기준의 정규화된 논리적 상대 경로 (예: `docs/plan.txt`).
 * **Security Epoch & Grant State**: 주체별 일괄 철회 버전(`epoch`) 및 개별 Grant 레코드의 활성 상태(`active` vs `revoked`).
 
-### 최종 허용 불변식 ( Master Allow Invariant)
-요청이 허용(`ALLOW`)되려면 다음 6가지 조건이 동시에 참(True)이어야 한다:
-1. **토큰 무결성 및 수명 유효**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
-2. **주체 바인딩 및 비재사용**: 토큰의 `sub`가 현재 실행 중인 서브에이전트 ID와 일치하며, 일회성(`one_time_use`) 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태.
-3. **Scope 포함**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`를 포함.
-4. **Epoch 일치**: 토큰에 찍힌 `epoch`가 PIP에서 조회한 해당 주체의 현재 `epoch`와 일치.
-5. **실시간 활성 Grant 존재**: PIP에서 조회한 중앙 Grant 저장소에 `(sub [또는 위임 권원], action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
-6. **Workspace Jail 내부 경로**: 정규화 및 심볼릭 링크 해석을 거친 실제 물리 경로가 Workspace Root 내부임이 확인됨.
+### 최종 허용 불변식 (Master Allow Invariant — Phase 0~17 통합 9대 조건)
+요청이 최종 허용(`ALLOW`, `EXIT_SUCCESS = 0`)되어 실제 도구 I/O가 집행되려면 다음 9가지 조건이 동시에 참(True)이어야 한다:
+1. **토큰 무결성 및 수명 유효 (Gate 1)**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
+2. **주체 바인딩 및 비재사용 (Gate 1 & Pre-Commit)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(단, Gate 2에서 `DecisionAsk(18)` 반환 시에는 재시도를 위해 `jti`를 소진하지 않음).
+3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]` 이상이어야 함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
+4. **Scope 포함 (Gate 2 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
+5. **실시간 활성 Grant 존재 (Gate 2)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
+6. **예산(Budget) 잔량 충분 (Gate 2 & Pre-Commit — Phase 12)**: 토큰에 `Budget`이 설정된 경우 `BudgetEntries[jti]`의 잔여 호출 횟수(`MaxCalls >= 1`) 및 읽기/쓰기 바이트 한도가 충분하고 원자적 차감(`Consume`)을 통과함.
+7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (Gate 2 & Pre-Commit — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고 `ConsumeMatching` 원자적 1회 소비를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
+8. **도구별 실행 경계(Boundary) 검증 통과 (Gate 2c — Phase 03 & 16)**: `file:*`는 Workspace Jail 내부 경로(`ResolvePath`), `net:fetch`는 루프백 리터럴 및 허용 포트(`netguard`), `exec:run`은 허용 바이너리 ID 및 인자 정규식(`execguard`) 검증을 통과함.
+9. **사전 커밋 감사(Pre-Commit Audit) 기록 성공 (Stage 4)**: I/O 실행 직전 `audit.jsonl`에 사전 커밋 이벤트 기록이 성공함(실패 시 차감된 예산을 즉시 `Refund`하고 I/O 진입 없이 `ExitAuditFailure = 15`로 중단).
 
 ## 11) 토큰 / OAuth 2.1 범위 (채택 부분집합과 의도적 생략)
 ### 채택하는 OAuth 2.1 및 표준 프로파일 핵심 요소
@@ -211,8 +216,10 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | **`EXIT_AUTHZ_DENIED`** | `12` | **Gate 2 (PDP & Delegation)** 인가/위임 거부 | `NO_ACTIVE_GRANT`, `GRANT_REVOKED`, `SUBJECT_EPOCH_REVOKED`, `TOKEN_INSUFFICIENT_SCOPE`, `DELEGATION_SCOPE_ESCALATION` 등 |
 | **`EXIT_PATH_VIOLATION`** | `13` | **Gate 2c (PEP & Jail)** 경로 격리 위반 | `PATH_TRAVERSAL_DETECTED`, `PATH_OUTSIDE_WORKSPACE`, `SYMLINK_ESCAPE_DETECTED` |
 | **`EXIT_BAD_INPUT`** | `14` | **Stage 0** 입력/컨텍스트 누락 오류 | `MISSING_TRACE_CONTEXT`, `UNSUPPORTED_ACTION`, `MALFORMED_CLI_ARGS` |
-| **`EXIT_AUDIT_FAILURE`** | `15` | **Stage 5** 감사 기록 실패 또는 무결성 파손 | `AUDIT_WRITE_FAILED`, `AUDIT_INTEGRITY_BROKEN` |
-| **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 | `INTERNAL_RUNTIME_ERROR`, `STATE_LOCK_TIMEOUT` |
+| **`EXIT_AUDIT_FAILURE`** | `15` | **Stage 4/5** 감사 기록 실패 또는 무결성 파손 | `AUDIT_WRITE_FAILED`, `AUDIT_INTEGRITY_BROKEN`, `AUDIT_TRUNCATION_DETECTED` |
+| **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 및 격리 불가 | `INTERNAL_RUNTIME_ERROR`, `STATE_LOCK_TIMEOUT`, `CONFINEMENT_UNAVAILABLE` |
+| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 서브프로세스 자원·수명 한계 초과 | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_EXCEEDED`, `RESOURCE_SIGNAL_KILLED` |
+| **`EXIT_APPROVAL_REQUIRED`** | `18` | **Phase 15** Gate 2 사람 승인 필요(`ask`) 및 승인 불일치/만료 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED`, `APPROVAL_MISMATCH` |
 
 ## 14) 파일 접근 모델 (Workspace Jail, Read/Write, 경로 규칙)
 * **허용 작업**: Workspace Root(`./workspace`) 내부 파일에 대한 `file:read` 및 `file:write`만 허용하며, 삭제·실행·권한 변경·네트워크 접근은 배제한다.
@@ -376,6 +383,42 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
   3. 39대 전체 시나리오 Quad-Assertion 100% 통과(`PASS`)를 달성한다. [완료]
 * **주요 산출물**: [09-mcp-tool-call-보안-게이트웨이-어댑터](09-mcp-tool-call-보안-게이트웨이-어댑터/README.md), `internal/mcp`, `internal/cli/mcp.go`, `internal/harness/catalog/g8_mcp.go`.
 * **데모 한 줄**: `"표준 MCP 프로토콜 도구 호출 요청이 격리된 서브프로세스 보안 게이트웨이를 거치며 권한 축소와 감사 해시 체인이 완결된다."`
+
+### Phase 10: 서브프로세스 자원·수명 통제 (`G9`: `E2E-40`~`E2E-44`)
+* **목적**: 허가받은 워커가 무한 루프에 빠지거나 손자 프로세스를 남기거나 대량 출력을 쏟아낼 때, 프로세스 그룹(`Setpgid`, `-pgid` 시그널) 일괄 소멸, `limitedBuffer` 출력 상한, `rlimit` 적용 기록 및 전용 종료 코드 `17`(`ExitResourceLimit`)로 통제함을 증명한다.
+* **주요 산출물**: [10-서브프로세스-자원-및-수명-통제](10-서브프로세스-자원-및-수명-통제/README.md), `testworker` 빌드 태그 격리(`TC-010-04`), `G9` 시나리오(`E2E-40`~`44`).
+
+### Phase 11: OS 수준 커널 격리 및 악의 워커 차단 (`G10`: `E2E-45`~`E2E-49`)
+* **목적**: PEP 배선을 우회해 직접 OS 시스템콜(`open`, `socket`, `fork`)을 호출하는 악의 워커가 격리를 껐을 때(대조군)는 성공하지만 커널 격리(`internal/confinement`: macOS Seatbelt/VFS DAC + `ReadOnlyPaths`, Linux Landlock/seccomp)를 켰을 때(실험군)는 커널 수준에서 차단(`Exit 13`, `CONFINEMENT_VIOLATION`)됨을 쌍 대조로 증명한다.
+* **주요 산출물**: [11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md), `internal/confinement`, `TC-110-01` AST 가드, `G10` 시나리오(`E2E-45`~`49`).
+
+### Phase 12: 예산(Budget) 단조 축소 위임 및 원장 정산 (`G11`: `E2E-50`~`E2E-54`)
+* **목적**: 호출 횟수(`MaxCalls`)·읽기/쓰기 바이트(`MaxReadBytes`/`MaxWriteBytes`) 예산의 단조 축소 위임($B_{child} \le B_{parent\_rem}$), Zone B 원자적 예산 원장(`budget_ledger.json`, `Version++` 단조 증가), 만료 자식 예약 자동 회수(Lazy Reclaim)를 증명한다.
+* **주요 산출물**: [12-예산-축소-위임](12-예산-축소-위임/README.md), `internal/domain/budget.go`(`Budget`, `BudgetEntry`, `BudgetSnapshotReader`), `internal/authn/budget`, `G11` 시나리오(`E2E-50`~`54`).
+
+### Phase 13: 장기 실행 세션 수명주기, `act` 계보 연쇄 회수 및 재교환 (`G12`: `E2E-55`~`E2E-60`)
+* **목적**: 다회차 장기 세션(`SessionRunner`) 중 토큰 만료·Grant 회수·서명키 폐기·상위 에이전트 Epoch 갱신(`ActorClaim.Epoch` 분리 및 `pdp.Evaluate` 조상 계보 연쇄 검증)에 따른 실시간 차단과 부모 기반 재교환(`re-exchange`), 결정론적 TOCTOU 창 측정을 증명한다. 코어 패키지 `time.Now()` 직접 호출을 전면 제거하고 `TC-130-01` AST 가드로 고정한다.
+* **주요 산출물**: [13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md), `internal/orchestrator/session.go`, `G12` 시나리오(`E2E-55`~`60`).
+
+### Phase 14: 감사 확장(v2 해시·서명 체크포인트·위임 트리) 및 관측성 포트 분리 (`G13`: `E2E-61`~`E2E-66`)
+* **목적**: 코어에서 `log/slog` 의존을 끊고 `internal/observe`(`slogadapter`/`otel`/`noop`) 포트로 분리하며(`TC-140-01`), 컨트롤 플레인 SESE 감사 단일화(`TC-080-01` 전 패키지 확대), 감사 스키마 v2(`ArgHash`, `ResultHash`), Zone A Ed25519 서명 체크포인트(꼬리 절단·전체 재작성 탐지), `audit tree` 위임 계보 시각화를 완성한다.
+* **주요 산출물**: [14-감사-확장-및-관측성-포트](14-감사-확장-및-관측성-포트/README.md), `internal/observe`, `internal/audit/checkpoint.go`, `G13` 시나리오(`E2E-61`~`66`).
+
+### Phase 15: PDP 3값 승인 결정(`ask`) 및 5요소 바인딩 1회용 승인 원장 (`G14`: `E2E-67`~`E2E-72`)
+* **목적**: 순수 PDP 결정을 `allow`/`deny`/`ask` 3값으로 확장하고, `(sub, action, resource, token_jti)` 4요소 및 선택적 5번째 요소 `ArgHash`(`sha256(req.Data)`, Confused Deputy 페이로드 바꿔치기 방어)에 바인딩된 Zone B 1회용 승인 원장(`approvals_state.json`)과 종료 코드 `18`(`ExitApprovalRequired`)을 증명한다.
+* **주요 산출물**: [15-pdp-승인-결정-ask](15-pdp-승인-결정-ask/README.md), `internal/authz/state/approval_store.go`, `approval grant/list` CLI, `G14` 시나리오(`E2E-67`~`72`).
+
+### Phase 16: 도구 종류 확장(`net:fetch`, `exec:run`) 및 Egress/실행 가드 (`G15`: `E2E-73`~`E2E-78`) — [기능 동결선]
+* **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고 78대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
+* **주요 산출물**: [16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md), `internal/netguard`, `internal/execguard`, `G15` 시나리오(`E2E-73`~`78`).
+
+### Phase 17: [포스트 로드맵 1] 도메인 순수성 및 전이적 의존성 역전(DIP) 완결
+* **목적**: 신규 기능 추가 없이 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter`를 `internal/domain`으로 역전시켜 `pdp`의 전이적 인프라 의존성을 0%로 만들고(`TC-170-01`), PEP 도구 실행을 `ToolHandler` 전략 포트로 추상화하며, 전 CLI 러너의 `app.BuildStack` 일원화(`TC-170-02`) 및 카탈로그 중복 제거를 완결한다.
+* **주요 산출물**: [17-도메인-순수성-및-의존성-역전-완결](17-도메인-순수성-및-의존성-역전-완결/README.md), `internal/domain/snapshot.go`, `internal/authz/pep/handler.go`.
+
+### Phase 18: [포스트 로드맵 2] 아키텍처·패턴 교보재 및 코드리딩 가이드 편찬
+* **목적**: 코드 변경 없이 본 레포지토리의 5단계 코드리딩 동선, 4계층 의존성 역전(DIP) 실물 해부, 7대 디자인 패턴 및 12대 안티패턴 대조 교본, SESE 감사·권한 무결성 해설, 멀티·분산 에이전트 SDK 이식 가이드를 `docs/교보재/`에 편찬하여 프로젝트를 최종 완결한다.
+* **주요 산출물**: [18-아키텍처-패턴-교보재-및-코드리딩-가이드](18-아키텍처-패턴-교보재-및-코드리딩-가이드/README.md), `docs/교보재/01..04.md`.
 
 ## 20) 크로스커팅 관심사 (Cross-Cutting Concerns)
 1. **설정 관리**: 외부 설정 서버 없이 기본 플래그 값만으로 즉시 동작하며, `--workspace-dir`, `--state-dir`, `--audit-file`로 모든 경로를 격리 지정할 수 있다.

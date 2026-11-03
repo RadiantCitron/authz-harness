@@ -28,7 +28,8 @@
 
 ## 3. 세부 명세
 
-### 3.1 원장 엔트리 구조 (`BudgetEntry`) 및 상태 버전 단조 증가
+### 3.1 원장 엔트리 구조 (`domain.BudgetEntry` 재사용 및 `domain.BudgetSnapshotReader` 구현) 및 상태 버전 단조 증가
+- `010`에서 `internal/domain/budget.go`에 정의한 `domain.BudgetEntry`를 그대로 사용하여 중복 구조체 정의를 방지하고, `FileLedger`가 `domain.BudgetSnapshotReader`(`ListEntries(now time.Time) (map[string]domain.BudgetEntry, error)`)를 구현하여 `internal/authz/pip`(Layer 2B)가 `internal/authn/budget`(Layer 2A)을 직접 import하지 않고도 예산 스냅샷을 조회할 수 있게 한다.
 ```go
 type BudgetEntry struct {
     TokenJTI  string        `json:"token_jti"`
