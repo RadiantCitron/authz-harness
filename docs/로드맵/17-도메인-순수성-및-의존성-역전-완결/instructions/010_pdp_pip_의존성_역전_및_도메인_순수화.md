@@ -3,7 +3,7 @@
 > **문서 상태**: `Draft`
 > **상위 대시보드**: [17번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **선행 조건**: [로드맵 16](../../16-도구-종류-확장-및-egress-통제/README.md) `Done`
-> **후속 단계**: [020_pep_도구_핸들러_전략_포트_추상화.md](020_pep_도구_핸들러_전략_포트_추상화.md)
+> **후속 단계**: [030_cli_합성루트_일원화_및_중복_제거.md](030_cli_합성루트_일원화_및_중복_제거.md) (`020`은 과잉 추상화 배제를 위해 `Dropped`)
 
 ---
 
@@ -21,7 +21,6 @@
 
 - **변경**:
   - `internal/domain/snapshot.go` [신규]: Phase 01~15 및 [011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md)의 모든 누적 필드를 포함한 순수 `SubjectSnapshot` 구조체(`Subject`, `CurrentEpoch`, `SubjectEpochs SecurityEpochs`[계보 연쇄 Epoch 검증용], `StateVersion int`[단조 증가 원장 버전], `ActiveGrants`, `RevokedGrants`, Phase 12의 `BudgetEntries map[string]BudgetEntry`, Phase 15의 `Approvals []Approval`, `Timestamp`) 및 `SnapshotProvider` 인터페이스 정의
-  - `internal/domain/audit_port.go` [신규]: 순수 `AuditEvent` 구조체(Phase 14의 `SchemaVersion`, `ArgHash`, `ResultHash`, `SpanID`, `ParentSpanID` 포함) 및 `AuditWriter` 인터페이스(`Log(AuditEvent) error`, `Close() error`) 정의
   - `internal/authz/pip/service.go`: `type SubjectSnapshot = domain.SubjectSnapshot` 타입 별칭 선언 및 `domain.SnapshotProvider` 구현
   - `internal/audit/audit.go`: `type Event = domain.AuditEvent`, `type Writer = domain.AuditWriter` 타입 별칭 선언으로 기존 `audit.Event`·`audit.Writer` 참조 코드 100% 무수정 호환 보장
   - `internal/authz/pdp/service.go`: `"authz-harness/internal/authz/pip"` 및 `"authz-harness/internal/audit"` import를 제거하고 오직 `"authz-harness/internal/domain"`(및 순수 표준 라이브러리 `context`, `fmt`, `strings`, `time`)만 import하도록 전환

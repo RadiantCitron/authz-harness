@@ -19,7 +19,7 @@ PIP가 활성 Grant 정보와 함께 현재 주체에 발급된 승인 레코드
 - **변경**:
   - `internal/authz/pip/service.go`:
     - `SubjectSnapshot`에 `Approvals []domain.Approval` (`json:"approvals,omitempty"`) 및 `StateVersion int` (`json:"state_version,omitempty"`) 필드 추가
-    - `pip.NewService(store, opts ...Option)`에 `WithApprovalStore(approvalStore state.ApprovalStore)` 및 `WithClock(clock domain.Clock)` 옵션 지원
+    - `pip.NewService(store, opts ...Option)`에 `WithClock(clock domain.Clock)` 옵션 지원
   - `internal/authz/pdp/service.go`:
     - `DecisionAsk DecisionType = "ASK"` 상수 추가
     - `pdp.Request`에 `TokenJTI string` (`json:"token_jti,omitempty"`), `ArgHash string` (`json:"arg_hash,omitempty"`), `Now time.Time` (`json:"now,omitempty"`) 필드 추가 (`Decide`에서 감사 이벤트 `Metadata["state_version"] = snapshot.StateVersion` 기록)

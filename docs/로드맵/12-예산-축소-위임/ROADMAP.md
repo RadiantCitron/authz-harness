@@ -8,7 +8,7 @@
 |---|---|---|
 | 위임 불변식 | 권한 부분집합, 수명 상한, 깊이 제한 3종([`exchange/validator.go`](../../../internal/authn/exchange/validator.go)) | 여기에 **예산 부분 상한($B_{child} \le B_{parent\_remaining}$)**을 4번째 단조 축소로 추가 |
 | 횟수·양 통제 | 없음. Gate 1 `ReplayLedger`가 모든 토큰을 1회용으로만 소비([`verifier.go`](../../../internal/authn/token/verifier.go)) | `Budget != nil` 토큰은 `BudgetLedger`가 호출 횟수·읽기 바이트·쓰기 바이트 예산을 통제 (`Budget == nil`은 기존 1회성 유지) |
-| 상태 저장 | 토큰은 불변, 소비 개념 없음 | 소비는 Zone B 원장(`zone_b/budget_ledger.json`, `AtomicFileStore` 기반)에서 배타 잠금으로 원자 차감 |
+| 상태 저장 | 토큰은 불변, 소비 개념 없음 | 소비는 Zone B 원장(`zone_b/grants_state.json(단일 상태 원장 통합)`, `AtomicFileStore` 기반)에서 배타 잠금으로 원자 차감 |
 | 소진 사유 | 없음 | 인가 거부 `12`(`ExitAuthzDenied`) + Reason `BUDGET_EXHAUSTED`, 교환 거부 `DELEGATION_BUDGET_EXCEEDED` |
 | 시나리오 | 39대 + 로드맵 10~11의 G9~G10(49대) | 신규 G11 그룹 5대(`E2E-50`~`E2E-54`, 총 54대) |
 
@@ -24,12 +24,12 @@ flowchart LR
 
 - **토큰은 상한만 담는다**(클레임 `budget`). 소비량은 토큰에 적지 않는다(복제 우회 방지).
 - **PDP는 순수 유지**: 잔량은 PIP가 공급하고 PDP는 `allow/deny + reason`만 낸다. PDP가 원장 파일을 직접 열지 않는다(기존 AST 가드 `TC-060-01` 유지).
-- **원장 변경은 `internal/storage.AtomicFileStore` 경로로만**: 직접 `syscall.Flock`을 호출하지 않아 `TC-081-01` 가드를 준수하고, `app.BuildStack`에서 `filepath.Dir(StatePath)/budget_ledger.json`으로 경로를 자동 파생해 부모와 자식 워커가 동일 원장을 공유한다.
+- **원장 변경은 `internal/storage.AtomicFileStore` 경로로만**: 직접 `syscall.Flock`을 호출하지 않아 `TC-081-01` 가드를 준수하고, `app.BuildStack`에서 `filepath.Dir(StatePath)/grants_state.json(단일 상태 원장 통합)`으로 경로를 자동 파생해 부모와 자식 워커가 동일 원장을 공유한다.
 - **PEP 단일 출구(`TC-060-04`) 보존**: 차감과 실패 시 환급(`Refund`)은 `runPipeline` 내부에서 처리하여 `Gateway.Execute`의 단일 `return` 문을 그대로 유지한다.
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: `internal/domain`(`Budget`, `TokenClaims.Budget`, Reason 2종), `internal/authn/budget` 신규 (`BudgetLedger`), `internal/authn/token`(`IssueToken` 원장 초기화, `VerifyToken` 다회성 예산 토큰 분기), `internal/authn/exchange`(정적·동적 예산 축소 검증 및 예약), `internal/authz/pip`·`pdp`·`pep`(배선), `internal/app`(`BuildStack` 자동 경로 파생), `internal/harness/catalog`(G11 `E2E-50`~`E2E-54`).
+- **변경**: `internal/domain`(`Budget`, `TokenClaims.Budget`, Reason 2종), `internal/authz/state` 신규 (`BudgetLedger`), `internal/authn/token`(`IssueToken` 원장 초기화, `VerifyToken` 다회성 예산 토큰 분기), `internal/authn/exchange`(정적·동적 예산 축소 검증 및 예약), `internal/authz/pip`·`pdp`·`pep`(배선), `internal/app`(`BuildStack` 자동 경로 파생), `internal/harness/catalog`(G11 `E2E-50`~`E2E-54`).
 - **무영향**: 예산 클레임이 **없는 토큰(`Budget == nil`)**은 기존과 100% 동일하게 동작한다. 기존 49대 시나리오 판정 기준은 변하지 않으며 060에서 회귀로 증명한다.
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가
@@ -40,7 +40,7 @@ flowchart LR
 | `MaxCalls: 3`만 지정하고 바이트 한도는 `0`으로 둔 토큰이 "잔여 0바이트"로 오판되어 첫 읽기/쓰기가 거부되거나, 반대로 바이트 소진(`Remaining == 0`)이 "무제한"으로 풀림 | `BudgetEntry`에 `Initial`과 `Remaining`을 분리 저장. `MaxCalls > 0`은 필수이며, 바이트 한도는 `Initial.HasReadLimit()`(`Initial.MaxReadBytes > 0`) / `Initial.HasWriteLimit()`가 참일 때만 `Remaining` 바이트를 검사·차감 |
 | 동시 자식이 같은 잔량을 읽고 각자 차감해 총합이 초과 (TOCTOU) | 검사와 차감을 `AtomicFileStore.Update` **단일 flock 임계 구역**에서 수행. `-race` + 6개 다중 **서브프로세스** 경합 시나리오(`E2E-52`)로 총 성공 호출 == 3 증명 |
 | 자식이 크래시해 예약분이 영구 소실(누수) | 예약 엔트리에 토큰 `ExpiresAt` 기록, 다음 원장 트랜잭션 진입 시 만료된 자식 미사용분을 부모에게 자동 귀속(`reclaimExpiredLocked`, `E2E-53`) |
-| 부모와 자식 서브프로세스가 서로 다른 원장 경로를 바라봄 | `app.BuildStack`에서 `filepath.Join(filepath.Dir(StatePath), "budget_ledger.json")`으로 자동 파생하여 기존 `-state-file` 플래그만으로 부모·자식이 같은 Zone B 원장을 공유 |
+| 부모와 자식 서브프로세스가 서로 다른 원장 경로를 바라봄 | `app.BuildStack`에서 `filepath.Join(filepath.Dir(StatePath), "grants_state.json(단일 상태 원장 통합)")`으로 자동 파생하여 기존 `-state-file` 플래그만으로 부모·자식이 같은 Zone B 원장을 공유 |
 | 원장 파일 손상·롤백으로 예산이 되살아남 | 원장 갱신을 `AtomicFileStore` 원자 경로로 수행. 손상 감지 시 fail-closed(`16`) |
 | 다단계(2-Hop)에서 예산이 이중 계상됨 | 단계별 예약-정산 체인이 합계 보존(루트 잔여 + 중간 잔여 + 워커 잔여 + 소비량 == 초기 루트 예산)을 만족함을 `TC-030-04` 및 `E2E-54`로 증명 |
 

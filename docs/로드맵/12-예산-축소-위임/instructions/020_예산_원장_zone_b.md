@@ -18,9 +18,9 @@
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/authn/budget/ledger.go` [신규]: `AtomicFileStore[BudgetState]` 기반 `Ledger` 인터페이스 및 `FileLedger` 구현 (`InitBudget`, `ReserveChildBudget`, `Consume`, `Refund`, `GetEntry`, `GetRemaining`), `Update`마다 `BudgetState.Version++` 단조 증가
+  - `internal/authz/state/budget.go` [신규] 및 `internal/authz/state/store.go`: 별도 패키지나 별도 파일(`budget_ledger.json`)을 만들지 않고 기존 `GrantsState`(`grants_state.json`)에 `Budgets map[string]domain.BudgetEntry`를 통합하여 단일 `state.Store`에서 원자적 관리 ([015번 보고서](../../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md) §2.1) (`InitBudget`, `ReserveChildBudget`, `Consume`, `Refund`, `GetEntry`, `GetRemaining`), `Update`마다 `BudgetState.Version++` 단조 증가
   - `internal/authz/state/store.go`: `Update` 시 `GrantsState.Version++`가 단조 증가하도록 `normalizeState` 보강 ([011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md) 제안 4)
-  - `internal/authn/budget/ledger_test.go` [신규]: 동시 고루틴/프로세스 차감 경합 테스트, 크래시 만료 예약 자동 회수 테스트, `Initial` 바이트 한도 활성/비활성 구분 테스트, `Version++` 단조 증가 검증, 손상 파일 Fail-Closed(`ExitInternalError = 16`) 테스트
+  - `internal/authz/state/budget_test.go` [신규]: 동시 고루틴/프로세스 차감 경합 테스트, 크래시 만료 예약 자동 회수 테스트, `Initial` 바이트 한도 활성/비활성 구분 테스트, `Version++` 단조 증가 검증, 손상 파일 Fail-Closed(`ExitInternalError = 16`) 테스트
 - **무영향**:
   - 기존 `grants_state.json` 및 `replay_ledger.json`과 하위 호환되며, 직접 `syscall.Flock`을 호출하지 않고 `internal/storage.AtomicFileStore`를 사용하므로 AST 가드레일(`TC-081-01`)을 완벽히 준수한다.
 
@@ -78,8 +78,8 @@ type BudgetEntry struct {
 
 ## 5. 4층위 검증 기준
 
-1. `go test -v ./internal/authn/budget ./internal/authz/state` PASS
-2. `go test -race ./internal/authn/budget ./internal/authz/state` 데이터 레이스 0건
+1. `go test -v ./internal/authz/state` PASS
+2. `go test -race ./internal/authz/state` 데이터 레이스 0건
 3. `go test -v ./internal/harness -run TestArchitectureGuardrails/TC-081-01` PASS
 4. `go test ./...` 전체 회귀 0건
 

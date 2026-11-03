@@ -22,7 +22,7 @@
     - `BuildStack`에서 `cfg.BudgetPath == ""`이고 `cfg.StatePath != ""`이면 `filepath.Join(filepath.Dir(cfg.StatePath), "budget_ledger.json")`으로 자동 파생하여 부모와 자식 워커(`subagent worker -state-file ...`)가 자동으로 동일 원장 파일을 바라보게 함
     - `AppStack`에 `BudgetLedger budget.Ledger` 필드 추가 및 `TokenIssuer`, `PIP`, `PEP`에 자동 주입
   - `internal/authz/pip/service.go`:
-    - Layer 2A(`internal/authn/budget`) 수평 import 없이 `domain.BudgetSnapshotReader` 포트를 옵션(`pip.WithBudgetReader(...)`)으로 주입받고, `SubjectSnapshot`에 단일 정본 필드명인 **`BudgetEntries map[string]domain.BudgetEntry`** (`json:"budget_entries,omitempty"`) 추가 ([012번 보고서](../../../보고서/012-타에이전트_구현이관대비_전체설계정합성_및_코어구조_위험요소_검증보고서.md) §3.2)
+    - [015번 보고서](../../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md) §2.1에 따라 예산 상태가 `state.GrantsState.Budgets`에 통합되었으므로, 별도 포트 주입 없이 기존 `s.store.Load()` 단 1회 호출만으로 `SubjectSnapshot.BudgetEntries`(`st.Budgets`)를 즉시 채움 (가교 인터페이스 및 다중 파일 로드 완전 제거)
   - `internal/authz/pdp/service.go`:
     - `pdp.Request`에 `TokenJTI string`, `TokenBudget *domain.Budget`, `WriteBytes int64` 추가
     - `Evaluate(req, snapshot)` 순수 함수에서 **활성 Grant 매칭 직후(후속 로드맵 15의 `RequiresApproval` 검사보다 반드시 앞선 Stage 2-6 단계)**에 `req.TokenBudget != nil`일 때 `entry, ok := snapshot.BudgetEntries[req.TokenJTI]`를 조회하여 `!ok || entry.Remaining.MaxCalls < 1`이거나 쓰기 요청 시 `entry.Initial.HasWriteLimit() && req.WriteBytes > entry.Remaining.MaxWriteBytes`이면 즉시 `DecisionDeny` + `ReasonBudgetExhausted(12)` 반환 (`os`나 `storage` import 0건 유지)

@@ -17,7 +17,7 @@
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/observe/port.go` [신규]: `Observer` 인터페이스, `Attr` 구조체, `NoopObserver`, `SafeObserver`(panic 복구 래퍼), 원시 JWT 마스킹 필터 `SanitizeAttrs` 구현
+  - `internal/observe/port.go` [신규] ([015번 보고서](../../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md) §2.2 — 외부 OTel SDK(`060`) 폐기에 따라 Zero Leakage 민감 속성 마스킹 필터 `SanitizeFields`를 포트 계층에 직접 내장): `Observer` 인터페이스, `Attr` 구조체, `NoopObserver`, `SafeObserver`(panic 복구 래퍼), 원시 JWT 마스킹 필터 `SanitizeAttrs` 구현
   - `internal/observe/slogadapter/adapter.go` [신규]: `*slog.Logger`를 감싸 `observe.Observer`를 구현하는 어댑터
   - `internal/authz/pep/gateway.go`: `Config.Logger *slog.Logger` 필드를 **완전히 제거**하고 `Config.Observer observe.Observer`로 교체하여 `internal/authz/pep`에서 `"log/slog"` import를 0건으로 만든다 (`020` 단계의 `TC-140-01` AST 가드레일 충족 필수 조건)
   - `internal/authz/pep/gateway_test.go`: `TC-060-05-6`(`gateway_test.go:1274`)에서 `Logger: testLogger` 대신 `Observer: slogadapter.New(testLogger)`를 주입하도록 갱신

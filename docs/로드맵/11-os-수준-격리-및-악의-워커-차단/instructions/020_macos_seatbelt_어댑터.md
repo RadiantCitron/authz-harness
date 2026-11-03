@@ -52,7 +52,6 @@ macOS(`darwin`) 환경에서 서브프로세스 워커에 커널 수준 격리�
    - `policy.ReadOnlyPaths`(`grants_state.json`, `jwks.json`) 파일에 대해서는 현재 파일 모드를 저장한 뒤 `os.Chmod(p, 0400)`(읽기 전용)으로 잠그어, 워커가 `zone_b` 내 `.lock` 및 실행 원장(`replay`, `budget`, `approvals`)은 갱신할 수 있으면서도 정책·공개키 원장 본파일은 절대 덮어쓸 수 없게 보호한다.
    - 외부 쓰기 금지 대상 디렉터리(또는 `DenyPaths` 내 쓰기 금지 디렉터리)가 존재하면 `0500`(읽기·탐색만 허용, 쓰기 불가) 또는 `0000`으로 잠근다.
    - `CanApplySeatbelt() == true`이면 `cmd`를 `/usr/bin/sandbox-exec -p <profile>`로 추가 래핑한다.
-   - `CanApplySeatbelt() == false`(상위 Seatbelt 샌드박스 내부에서 실행 중)이고 `!policy.AllowNetwork`이면 `cmd.Env`에 커널 소켓 차단 정책 지시자(`AUTHZ_CONFINED_NO_NET=1` + 워커 시작 시 `RLIMIT` 또는 커널 가드 적용)를 함께 주입한다.
 2. `cleanup()` 호출 시:
    - `Prepare`에서 변경한 모든 디렉터리 모드를 원래 모드(`0700` 등)로 즉시 복원한다 (`defer cleanup()`으로 스포너에서 100% 호출 보장).
 
