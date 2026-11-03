@@ -42,9 +42,37 @@
      - `errOutputLimitExceeded` 에러를 반환하여 파이프 복사 루프를 즉시 중단시킨다.
 3. `Exceeded() bool`, `Len() int`, `String() string`, `Bytes() []byte` 메서드를 제공한다.
 
-### 3.2 `SubprocessSpawner` 출력 초과 판정 우선순위 (`internal/orchestrator/spawner.go`)
-- `stdoutBuf.Exceeded() || stderrBuf.Exceeded()`가 참이면:
-  - `onExceed`(`cancel()`)에 의해 컨텍스트가 취소되었더라도 타임아웃보다 **출력 상한 초과가 원인이므로** 최우선으로 `result.OutputExceeded = true`, `result.TimedOut = false`, `result.ExitCode = int(domain.ExitResourceLimit)`(`17`), `result.Reason = domain.ReasonResourceOutputLimit`으로 판정한다.
+### 3.2 `SubprocessSpawner` 5단 종료 판정 단일 `if / else if` 우선순위 (`internal/orchestrator/spawner.go` — [017번 보고서](../../../보고서/017-10번로드맵_반복결함_원인분석_및_검토방법론_메타위험_진단보고서.md) `C-02`)
+- `stdoutBuf` 또는 `stderrBuf`가 상한을 초과해 `onExceed`(`cancel()`)를 호출하면 `cmd.Cancel`(`KillProcessGroup` → `SIGKILL`)이 동작하여 `wasSignaled(runErr)`도 동시에 `true`가 된다. 따라서 `spawner.go`의 종료 사유 분류는 반드시 아래 **5단 단일 `if / else if` 우선순위 블록**으로 작성하여 상태 중첩으로 인한 오분류를 원천 차단한다:
+  ```go
+  if stdoutBuf.Exceeded() || stderrBuf.Exceeded() {
+      // 1순위: 출력 바이트 상한 초과 (cancel() 호출로 인한 시그널 종료보다 우선)
+      result.OutputExceeded = true
+      result.TimedOut = false
+      result.ExitCode = int(domain.ExitResourceLimit) // 17
+      result.Reason = domain.ReasonResourceOutputLimit
+  } else if errors.Is(execCtx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+      // 2순위: 실행 시간 상한(Timeout) 초과
+      result.TimedOut = true
+      result.ExitCode = int(domain.ExitResourceLimit) // 17
+      result.Reason = domain.ReasonResourceTimeout
+  } else if wasSignaled(runErr) {
+      // 3순위: 타임아웃·출력 초과가 아닌 외부 시그널(SIGTERM/SIGKILL 등)에 의한 종료
+      result.ExitCode = int(domain.ExitResourceLimit) // 17
+      result.Reason = domain.ReasonResourceSignalKilled
+  } else if runErr != nil {
+      // 4순위: 일반 비정상 종료 코드(11~16 등) 수거
+      var exitErr *exec.ExitError
+      if errors.As(runErr, &exitErr) {
+          result.ExitCode = exitErr.ExitCode()
+      } else {
+          result.ExitCode = 1
+      }
+  } else {
+      // 5순위: 정상 종료(0)
+      result.ExitCode = 0
+  }
+  ```
 
 ---
 

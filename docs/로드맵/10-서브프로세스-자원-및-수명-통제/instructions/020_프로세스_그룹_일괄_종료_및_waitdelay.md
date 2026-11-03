@@ -27,7 +27,8 @@
     - `SpawnResult`에 `Reason domain.Reason` 필드 추가
     - 프로세스 그룹 설정·`WaitDelay` 배선, 타임아웃/시그널 종료 시 `ExitResourceLimit(17)` 및 `ReasonResourceTimeout` / `ReasonResourceSignalKilled` 판정 반영
   - `internal/orchestrator/multi_hop.go`: `MultiHopConfig`에 `Limits domain.Limits` 전달 지원
-  - `internal/orchestrator/spawner_group_test.go` [신규]: 멈춘 워커, 손자 프로세스 생성 워커(`CHILD_PID=<pid>` 파싱 후 `WaitForProcessGone` 확인), 외부 시그널 종료 검증 테스트
+  - `internal/orchestrator/spawner_test.go`: `TestHelperProcess` 스위치에 `case "hang", "flood", "spawn_child_hang", "self_term": os.Exit(int(subagent.RunTestFaultMode(context.Background(), mode, os.Stdout, os.Stderr)))` 위임 분기를 추가하여, `orchestrator.test` 바이너리(`os.Executable()`)를 사용하는 단위 테스트에서도 별도 CLI 빌드 없이 테스트 워커 모드를 즉시 호출할 수 있게 배선 ([017번 보고서](../../../보고서/017-10번로드맵_반복결함_원인분석_및_검토방법론_메타위험_진단보고서.md) `C-05`)
+  - `internal/orchestrator/spawner_group_test.go` [신규]: 멈춘 워커(`hang`), 손자 프로세스 생성 워커(`spawn_child_hang`, `CHILD_PID=<pid>` 파싱 후 `WaitForProcessGone` 확인), 시그널 종료(`self_term`) 검증 테스트
 - **무영향**:
   - 정상 종료(`ExitCode == 0`) 및 인가 거부(`11`~`16`) 워커는 만료 전에 스스로 종료하므로 기존 동작과 100% 동일하다.
   - 기존 [`spawner_test.go`](../../../../internal/orchestrator/spawner_test.go)의 `TestTC01`~`TestTC10`(`TestTC09_TimeoutKill`은 `res.TimedOut == true && res.ExitCode != 0`만 검사함)과 100% 호환된다.
@@ -68,8 +69,8 @@
 | ID | 입력 | 기대 결과 |
 |:---:|---|---|
 | **TC-020-01** | `hang` 워커 기동 + `Timeout: 100ms` | 약 100ms 내 종료, `ExitCode == 17`, `Reason == RESOURCE_TIMEOUT`, `TimedOut == true` |
-| **TC-020-02** | `spawn_child_hang` 워커 기동(`CHILD_PID=<pid>` 출력 후 대기) + `Timeout: 150ms` | `ExitCode == 17`, `Reason == RESOURCE_TIMEOUT`, `WaitForProcessGone(childPID, 1s) == true` (손자 프로세스 생존 0) |
-| **TC-020-03** | 기동된 워커 프로세스에 외부 `SIGTERM` 전송 | `ExitCode == 17`, `Reason == RESOURCE_SIGNAL_KILLED` |
+| **TC-020-02** | `spawn_child_hang` 워커 기동(`CHILD_PID=<pid>` 출력 후 대기) + `Timeout: 300ms` (`-race` 기동 마진 확보, `C-07`) | `ExitCode == 17`, `Reason == RESOURCE_TIMEOUT`, `WaitForProcessGone(childPID, 1s) == true` (손자 프로세스 생존 0) |
+| **TC-020-03** | `self_term` 워커 기동(`syscall.Kill(os.Getpid(), syscall.SIGTERM)`으로 시그널 종료 유발, `C-05`) | `ExitCode == 17`, `Reason == RESOURCE_SIGNAL_KILLED`, `TimedOut == false` |
 | **TC-020-04** | 기존 `spawner_test.go` (`TestTC01`~`TestTC10`) 전체 실행 | 전수 `PASS` |
 
 ---

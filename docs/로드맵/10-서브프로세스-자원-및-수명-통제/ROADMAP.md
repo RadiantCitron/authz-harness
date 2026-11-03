@@ -35,7 +35,7 @@ flowchart LR
 
 | 위험 | 방어책 |
 |---|---|
-| macOS에서 `RLIMIT_AS` 등 일부 rlimit이 동작하지 않아 "제한했다"는 허위 증명이 됨 | rlimit은 `RLIMIT_NOFILE`·`RLIMIT_CPU` 대상 best-effort로 명시. 적용 결과(`RLimitResult`)를 감사에 기록하고, 보증 근거는 그룹 종료와 출력 상한으로 한정 |
+| Go `os/exec`에서 부모가 자식에 `rlimit`을 직접 강제할 수 없어 "제한했다"는 플라시보(허위 증명) 위험이 생김 | 플라시보 `rlimit` 코드를 일절 배제하고, 부모 스포너가 100% 외부 강제하는 프로세스 그룹 종료(`-pgid`), `WaitDelay`, 출력 상한(`MaxOutputBytes`) 3요소만 유지 ([016번 보고서](../../보고서/016-다중로드맵_일괄설계_안티패턴_진단_및_10번로드맵_단독집중_구조정제_보고서.md) `R10-01`) |
 | 손자 프로세스 시나리오가 타이밍에 의존해 플레이키함 | 대기는 시간 추측이 아니라 **PID 생존 확인(`syscall.Kill(pid, 0)` → `ESRCH`) 재시도 루프**로 판정. 고정 sleep 금지 |
 | 기존 종료 코드 표 파손으로 MCP 매핑·UI·시나리오가 깨짐 | 신규 `17`은 추가만. 010 단계에서 `ExitCodeForReason` 매핑을 추가하고, 040 단계에서 `Reason→ExitCode→JSON-RPC` 매핑 표 테스트로 전수 확인 |
 | 테스트 전용 워커(멈춤·대량 출력)가 프로덕션 바이너리에 섞여 공격면이 됨 | `//go:build testworker` 빌드 태그로 격리, 기본 빌드에서 `go tool nm`으로 심볼 부재를 테스트로 증명 ([ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-7) |
@@ -62,7 +62,7 @@ flowchart LR
 |:---:|---|---|---|---|
 | **010** | [010_자원_한계_도메인_모델_및_테스트_전용_워커.md](instructions/010_자원_한계_도메인_모델_및_테스트_전용_워커.md) | `Limits`, Reason 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`), `ExitResourceLimit=17`, `ExitCodeForReason` 매핑, 빌드 태그 테스트 워커 | 도메인 단위 테스트 통과, 심볼 부재 테스트 통과, 마스터 §13 종료 코드 표 개정, 기존 테스트 무변화 | 영값 `Limits` → 기본 10초·1MiB 적용. 음수 값 → `*domain.Error`(`ExitBadInput=14`). 릴리스 빌드 → 테스트 워커 심볼 0건 |
 | **020** | [020_프로세스_그룹_일괄_종료_및_waitdelay.md](instructions/020_프로세스_그룹_일괄_종료_및_waitdelay.md) | 새 프로세스 그룹(`Setpgid`) spawn, 만료 시 그룹 종료(`-pgid`), `WaitDelay` | 멈춘 워커와 손자를 모두 정리 | 손자를 남기고 멈추는 워커 + 짧은 타임아웃 → 종료 코드 `17`, Reason `RESOURCE_TIMEOUT`, 손자 PID 생존 0(`ESRCH`) |
-| **030** | [030_출력_상한_리더_및_rlimit_적용.md](instructions/030_출력_상한_리더_및_rlimit_적용.md) | 출력 바이트 상한(`limitedBuffer`)(`RLimitResult`) | 상한 초과 즉시 종료, rlimit 적용 결과가 구조화됨 | 대량 출력 워커 + 64KiB 상한 → `17`, `RESOURCE_OUTPUT_LIMIT`, 부모 보관량 `<= 64KiB` |
+| **030** | [030_출력_상한_리더_및_rlimit_적용.md](instructions/030_출력_상한_리더_및_rlimit_적용.md) | 출력 바이트 상한(`limitedBuffer`) 및 단일 취소 트리거(`onExceed=cancel`) | 상한 초과 즉시 `cancel()`→`cmd.Cancel` 그룹 종료, 5단 종료 판정 우선순위 확립 | 대량 출력 워커 + 16KiB 상한 → `17`, `RESOURCE_OUTPUT_LIMIT`, 부모 보관량 `<= 16KiB` |
 | **040** | [040_감사_이벤트_ui_및_mcp_오류_매핑.md](instructions/040_감사_이벤트_ui_및_mcp_오류_매핑.md) | 감사 이벤트 `agent.limit_exceeded`, UI 표시, MCP JSON-RPC 오류 매핑 | 매핑 표 table-driven 테스트 전수 통과, 원시 토큰 비노출 유지 | MCP `tools/call`이 멈춘 워커를 부름 → JSON-RPC 오류에 `[RESOURCE_TIMEOUT]` 및 코드 `17`, 감사에 이벤트, 응답에 토큰 문자열 없음 |
 | **050** | [050_g9_e2e_시나리오.md](instructions/050_g9_e2e_시나리오.md) | G9 시나리오 5대(`E2E-40`~`E2E-44`: 시간 초과, 손자 잔존 0, 출력 초과, MCP 경로, 정상 워커 비회귀) Quad-Assertion | 5대 시나리오 `PASS`, 거부·한계 종료 후 workspace 0바이트 변화 | `run --scenario E2E-40..44` 실행 → 4중 검증 통과 |
 | **060** | [060_전체_회귀_검증_및_마감.md](instructions/060_전체_회귀_검증_및_마감.md) | 전체 회귀, 문서 동기화 | `go test -race ./...` 통과, 기존 39대 + G9(총 44대) 완주, 마스터 §13·README 색인 동기화 | `authz-harness run --scenario all` → 44/44 `PASS`, 종료 코드 `0` |
@@ -72,7 +72,7 @@ flowchart LR
 - **선행 조건**: [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) `Accepted` (C-5, C-7).
 - **확정 사항** ([README.md §4 결정 표](README.md) 동기화 완료):
   1. **기본 출력 상한 값**: `DefaultMaxOutputBytes = 1 MiB (1,048,576 bytes)` (`DefaultSpawnTimeout = 10s`, `DefaultWaitDelay = 500ms`).
-  2. **rlimit 대상 항목**: `RLIMIT_NOFILE`(기본 64), `RLIMIT_CPU`(기본 10초)를 best-effort로 적용하고, macOS 등에서 지원되지 않는 `RLIMIT_AS` 등은 `RLimitResult.Skipped`에 사유를 명시하여 감사 메타데이터로 기록한다.
+  2. **부모 강제 3요소 원칙 (플라시보 `rlimit` 배제)**: 부모에서 자식에 직접 강제할 수 없는 `rlimit` 코드는 배제하고, 부모 `SubprocessSpawner`가 100% 통제하는 `Timeout`·`WaitDelay`·`MaxOutputBytes` 3요소로 `domain.Limits`를 고정한다.
   3. **종료 코드 및 사유 매핑**: 프로세스 종료 코드는 `17`(`ExitResourceLimit`) 하나로 통일하고, 구체적 원인은 `Reason` 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`)으로 분리하여 감사 로그와 MCP JSON-RPC 응답에서 정밀하게 식별한다.
 
 ## 9. 인수인계 (다음 에이전트용)
