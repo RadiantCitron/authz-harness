@@ -218,7 +218,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | **`EXIT_BAD_INPUT`** | `14` | **Stage 0** 입력/컨텍스트 누락 오류 | `MISSING_TRACE_CONTEXT`, `UNSUPPORTED_ACTION`, `MALFORMED_CLI_ARGS` |
 | **`EXIT_AUDIT_FAILURE`** | `15` | **Stage 4/5** 감사 기록 실패 또는 무결성 파손 | `AUDIT_WRITE_FAILED`, `AUDIT_INTEGRITY_BROKEN`, `AUDIT_TRUNCATION_DETECTED` |
 | **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 및 격리 불가 | `INTERNAL_RUNTIME_ERROR`, `STATE_LOCK_TIMEOUT`, `CONFINEMENT_UNAVAILABLE` |
-| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 서브프로세스 자원·수명 한계 초과 | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_EXCEEDED`, `RESOURCE_SIGNAL_KILLED` |
+| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 서브프로세스 자원·수명 한계 초과 | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED` |
 | **`EXIT_APPROVAL_REQUIRED`** | `18` | **Phase 15** Gate 2 사람 승인 필요(`ask`) 및 승인 불일치/만료 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED`, `APPROVAL_MISMATCH` |
 
 ## 14) 파일 접근 모델 (Workspace Jail, Read/Write, 경로 규칙)

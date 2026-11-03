@@ -23,7 +23,7 @@
     - `WaitForProcessGone(pid int, timeout time.Duration) bool` (`syscall.Kill(pid, 0) == syscall.ESRCH` 폴링)
     - ` wasSignaled(err error) bool` (`syscall.WaitStatus.Signaled()` 판별)
   - `internal/orchestrator/spawner.go`:
-    - `SpawnConfig`에 `Limits domain.Limits` 추가 (기존 `Timeout` 필드가 설정되어 있고 `Limits.Timeout == 0`이면 `Limits.Timeout = cfg.Timeout`으로 승계 후 `Limits.Normalize()` 수행)
+    - `SpawnConfig`에 `Limits domain.Limits` 추가. 생성자 `NewSubprocessSpawner(cfg)`에서 1회 정규화 수행: `cfg.Limits.Timeout == 0 && cfg.Timeout > 0`이면 `cfg.Limits.Timeout = cfg.Timeout`으로 병합한 뒤 `normLimits, err := cfg.Limits.Normalize()`를 호출(음수 값이면 생성자에서 즉시 에러 반환)하고 `cfg.Limits = normLimits`, `cfg.Timeout = normLimits.Timeout`으로 일원화 ([016번 보고서](../../../보고서/016-다중로드맵_일괄설계_안티패턴_진단_및_10번로드맵_단독집중_구조정제_보고서.md) `R10-03`)
     - `SpawnResult`에 `Reason domain.Reason` 필드 추가
     - 프로세스 그룹 설정·`WaitDelay` 배선, 타임아웃/시그널 종료 시 `ExitResourceLimit(17)` 및 `ReasonResourceTimeout` / `ReasonResourceSignalKilled` 판정 반영
   - `internal/orchestrator/multi_hop.go`: `MultiHopConfig`에 `Limits domain.Limits` 전달 지원

@@ -8,7 +8,6 @@
 |---|---|---|
 | 수명 통제 | [`spawner.go`](../../../internal/orchestrator/spawner.go)의 `context.WithTimeout`(기본 10초)과 `CommandContext`만 사용. 종료 대상은 자식 프로세스 1개 | 자식을 **새 프로세스 그룹**(`Setpgid: true`)으로 띄우고 만료 시 **그룹 전체**(`-pgid`)에 종료 신호. `WaitDelay`(기본 500ms)로 파이프 대기 상한 부여 |
 | 출력 통제 | 자식 stdout/stderr를 버퍼에 수집, 크기 상한 없음 | 바이트 상한 리더(`DefaultMaxOutputBytes = 1 MiB`). 초과 시 즉시 그룹 종료·차단 |
-| 자원 한계 | 없음 | `RLIMIT_NOFILE`·`RLIMIT_CPU`를 best-effort 적용, 적용/미지원 결과(`RLimitResult`)를 감사에 기록 |
 | 종료 사유 | 종료 코드 `0`, `11`~`16`만 존재 | 신규 `17`(`ExitResourceLimit`)과 Reason 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`) 및 `ExitCodeForReason` 매핑 |
 | 다단계 위임 | [`multi_hop.go`](../../../internal/orchestrator/multi_hop.go)에 `Timeout` 전달 | `Limits` 전달 및 중간 프로세스가 만든 손자까지 그룹 종료로 정리 |
 | 시나리오 | 39대(G1~G8, `E2E-01`~`E2E-39`) | 신규 G9 그룹 5대(`E2E-40`~`E2E-44`, 총 44대) |
@@ -24,12 +23,12 @@ flowchart LR
 ```
 
 - 통제 주체는 **부모(스포너)** 하나뿐이다. 자식은 자기 한계를 스스로 푸는 수단이 없다.
-- 한계 값(`Limits`)은 순수 도메인 값이다. OS 호출(Setpgid, kill, setrlimit)은 `orchestrator` 안의 플랫폼 파일(빌드 태그)로 격리한다.
+- 한계 값(`Limits`)은 순수 도메인 값이다. OS 호출(`Setpgid`, `Kill(-pgid)`)은 `orchestrator` 안의 플랫폼 파일(빌드 태그)로 격리한다.
 - 감사는 기존 경로(`audit.Writer`)로만 기록한다. 감사 실패 시 fail-closed 원칙(`ExitAuditFailure = 15`)은 변경하지 않는다.
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: `internal/domain`(Reason, ExitCode, `ExitCodeForReason`, `Limits`), `internal/orchestrator`(그룹 종료, 출력 상한 리더, rlimit best-effort), `internal/mcp`(종료 코드 `17` 오류 매핑 확장), `internal/ui`(G9 및 종료 코드 `17` 사유 표시), `internal/harness/catalog`(G9 `E2E-40`~`E2E-44`), 테스트 전용 워커(`//go:build testworker`).
+- **변경**: `internal/domain`(Reason, ExitCode, `ExitCodeForReason`, `Limits`), `internal/orchestrator`(그룹 종료, 출력 상한 리더), `internal/mcp`(종료 코드 `17` 오류 매핑 확장), `internal/ui`(G9 및 종료 코드 `17` 사유 표시), `internal/harness/catalog`(G9 `E2E-40`~`E2E-44`), 테스트 전용 워커(`//go:build testworker`).
 - **무영향**: PDP, PEP 판정 로직, 토큰 발급·검증, jail, 기존 종료 코드 `11`~`16`의 의미와 기존 `E2E-01`~`E2E-39` 판정 기준. 060 단계의 전체 회귀로 증명한다.
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가
@@ -63,7 +62,7 @@ flowchart LR
 |:---:|---|---|---|---|
 | **010** | [010_자원_한계_도메인_모델_및_테스트_전용_워커.md](instructions/010_자원_한계_도메인_모델_및_테스트_전용_워커.md) | `Limits`, Reason 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`), `ExitResourceLimit=17`, `ExitCodeForReason` 매핑, 빌드 태그 테스트 워커 | 도메인 단위 테스트 통과, 심볼 부재 테스트 통과, 마스터 §13 종료 코드 표 개정, 기존 테스트 무변화 | 영값 `Limits` → 기본 10초·1MiB 적용. 음수 값 → `*domain.Error`(`ExitBadInput=14`). 릴리스 빌드 → 테스트 워커 심볼 0건 |
 | **020** | [020_프로세스_그룹_일괄_종료_및_waitdelay.md](instructions/020_프로세스_그룹_일괄_종료_및_waitdelay.md) | 새 프로세스 그룹(`Setpgid`) spawn, 만료 시 그룹 종료(`-pgid`), `WaitDelay` | 멈춘 워커와 손자를 모두 정리 | 손자를 남기고 멈추는 워커 + 짧은 타임아웃 → 종료 코드 `17`, Reason `RESOURCE_TIMEOUT`, 손자 PID 생존 0(`ESRCH`) |
-| **030** | [030_출력_상한_리더_및_rlimit_적용.md](instructions/030_출력_상한_리더_및_rlimit_적용.md) | 출력 바이트 상한(`limitedBuffer`), rlimit best-effort(`RLimitResult`) | 상한 초과 즉시 종료, rlimit 적용 결과가 구조화됨 | 대량 출력 워커 + 64KiB 상한 → `17`, `RESOURCE_OUTPUT_LIMIT`, 부모 보관량 `<= 64KiB` |
+| **030** | [030_출력_상한_리더_및_rlimit_적용.md](instructions/030_출력_상한_리더_및_rlimit_적용.md) | 출력 바이트 상한(`limitedBuffer`)(`RLimitResult`) | 상한 초과 즉시 종료, rlimit 적용 결과가 구조화됨 | 대량 출력 워커 + 64KiB 상한 → `17`, `RESOURCE_OUTPUT_LIMIT`, 부모 보관량 `<= 64KiB` |
 | **040** | [040_감사_이벤트_ui_및_mcp_오류_매핑.md](instructions/040_감사_이벤트_ui_및_mcp_오류_매핑.md) | 감사 이벤트 `agent.limit_exceeded`, UI 표시, MCP JSON-RPC 오류 매핑 | 매핑 표 table-driven 테스트 전수 통과, 원시 토큰 비노출 유지 | MCP `tools/call`이 멈춘 워커를 부름 → JSON-RPC 오류에 `[RESOURCE_TIMEOUT]` 및 코드 `17`, 감사에 이벤트, 응답에 토큰 문자열 없음 |
 | **050** | [050_g9_e2e_시나리오.md](instructions/050_g9_e2e_시나리오.md) | G9 시나리오 5대(`E2E-40`~`E2E-44`: 시간 초과, 손자 잔존 0, 출력 초과, MCP 경로, 정상 워커 비회귀) Quad-Assertion | 5대 시나리오 `PASS`, 거부·한계 종료 후 workspace 0바이트 변화 | `run --scenario E2E-40..44` 실행 → 4중 검증 통과 |
 | **060** | [060_전체_회귀_검증_및_마감.md](instructions/060_전체_회귀_검증_및_마감.md) | 전체 회귀, 문서 동기화 | `go test -race ./...` 통과, 기존 39대 + G9(총 44대) 완주, 마스터 §13·README 색인 동기화 | `authz-harness run --scenario all` → 44/44 `PASS`, 종료 코드 `0` |

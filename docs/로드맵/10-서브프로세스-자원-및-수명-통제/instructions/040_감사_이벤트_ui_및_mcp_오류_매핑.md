@@ -9,7 +9,7 @@
 
 ## 1. 목적 및 배경
 
-`020`과 `030`에서 구현한 프로세스 그룹 종료 및 출력 상한 차단이 발생했을 때, ① 감사 원장(`audit.jsonl`)에 `Action: "agent.limit_exceeded"` 이벤트와 구체적 `Reason`·`RLimitStatus`가 기록되어 하네스 Quad-Assertion(`DefaultEvaluator`)이 정확히 매칭할 수 있게 하고, ② MCP 어댑터(`internal/mcp`)가 종료 코드 `17`과 `SpawnResult.Reason`을 누락 없이 JSON-RPC 에러 응답으로 전달하며, ③ 하네스 UI(`internal/ui`)가 자원 한계 차단 관문과 해설을 표시하도록 전 구간 배선을 완성한다.
+`020`과 `030`에서 구현한 프로세스 그룹 종료 및 출력 상한 차단이 발생했을 때, ① 감사 원장(`audit.jsonl`)에 `Action: "agent.limit_exceeded"` 이벤트와 구체적 `Reason`(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`)이 기록되어 하네스 Quad-Assertion(`DefaultEvaluator`)이 정확히 매칭할 수 있게 하고, ② MCP 어댑터(`internal/mcp`)가 종료 코드 `17`과 `SpawnResult.Reason`을 누락 없이 JSON-RPC 에러 응답으로 전달하며, ③ 하네스 UI(`internal/ui`)가 자원 한계 차단 관문과 해설을 표시하도록 전 구간 배선을 완성한다.
 
 ---
 
@@ -18,7 +18,7 @@
 - **변경**:
   - `internal/orchestrator/spawner.go`:
     - 정상/기존 종료(`ExitCode != 17`) 시에는 기존 `ORCHESTRATE_COLLECT` 감사 이벤트를 그대로 유지(`TestTC08_AuditChain` 2개 이벤트 불변식 보존)
-    - 자원 한계 종료(`result.ExitCode == int(domain.ExitResourceLimit)`, `17`) 시에는 사후 감사 이벤트의 `Action`을 `domain.AuditActionAgentLimitExceeded`(`"agent.limit_exceeded"`), `Step`을 `"ORCHESTRATE_LIMIT_EXCEEDED"`, `Decision`을 `"deny"`, `Reason`을 `string(result.Reason)`, `Success`를 `false`로 기록하고 메타데이터에 `rlimit` 상태와 `output_exceeded`, `timed_out`을 포함한다. 감사 기록 실패 시 `ExitAuditFailure(15)`로 Fail-Closed 수렴한다.
+    - 자원 한계 종료(`result.ExitCode == int(domain.ExitResourceLimit)`, `17`) 시에는 사후 감사 이벤트의 `Action`을 `domain.AuditActionAgentLimitExceeded`(`"agent.limit_exceeded"`), `Step`을 `"ORCHESTRATE_LIMIT_EXCEEDED"`, `Decision`을 `"deny"`, `Reason`을 `string(result.Reason)`, `Success`를 `false`로 기록하고 메타데이터에 `output_exceeded`, `timed_out`을 포함하며, 단일 `postEvent` 구조체를 조립해 `s.cfg.Audit.Log(postEvent)` 호출은 함수 말미 단 1곳에서만 수행한다 ([016번 보고서](../../../보고서/016-다중로드맵_일괄설계_안티패턴_진단_및_10번로드맵_단독집중_구조정제_보고서.md) `R10-03`). 감사 기록 실패 시 `ExitAuditFailure(15)`로 Fail-Closed 수렴한다.
   - `internal/mcp/executor.go`:
     - 70행의 `MapSubprocessError(spawnRes.ExitCode, "", spawnRes.StderrRaw)` 호출을 `MapSubprocessError(spawnRes.ExitCode, string(spawnRes.Reason), spawnRes.StderrRaw)`로 수정하여, 자식 JSON 프레임이 없는 타임아웃·출력 초과 시에도 `spawnRes.Reason`(`RESOURCE_TIMEOUT` 등)이 손실되지 않고 전달되게 한다.
   - `internal/mcp/errors.go`:
