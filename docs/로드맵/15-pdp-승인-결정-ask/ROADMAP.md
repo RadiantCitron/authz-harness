@@ -32,9 +32,9 @@ sequenceDiagram
   W->>L: Stage 4 직전 승인 원자 소비 (ConsumeMatching)
 ```
 
-- **PDP 순수성 유지**: 승인 존재 여부는 PIP가 `SubjectSnapshot.Approvals`로 공급하고, 평가 시각(`Now`)과 `TokenJTI`는 `pdp.Request`로 전달한다. PDP는 원장·파일·OS 시계를 직접 열지 않는다(AST 가드 `TC-060-01` 유지).
-- **승인 바인딩**: 승인은 `(sub, action, resource, token_jti)` 4요소에 묶인다. 다른 주체·액션·리소스·토큰의 승인은 무효(`ReasonApprovalMismatch`)다.
-- **소비는 원자적**: 승인 확인과 소비(`ConsumeMatching`)는 하나의 `AtomicFileStore` flock 임계 구역에서 수행한다. 승인은 소비 후 재사용 불가다.
+- **PDP 순수성 유지**: 승인 존재 여부는 PIP가 `SubjectSnapshot.Approvals`(및 `StateVersion`)로 공급하고, 평가 시각(`Now`), `TokenJTI`, `ArgHash`(`sha256(req.Data)`)는 `pdp.Request`로 전달한다. PDP는 원장·파일·OS 시계를 직접 열지 않는다(AST 가드 `TC-060-01` 유지).
+- **승인 바인딩 (AI 에이전트 Confused Deputy 방어)**: 승인은 `(sub, action, resource, token_jti)` 4요소에 묶이며, `approval.ArgHash != ""`인 경우 5번째 요소인 실행 인자 해시(`ArgHash`)까지 일치해야 한다. 다른 주체·액션·리소스·토큰 또는 승인 후 변조된 실행 인자 페이로드의 승인은 무효(`ReasonApprovalMismatch`)다.
+- **소비는 원자적 + `StateVersion` 단조 증가**: 승인 생성·소비는 하나의 `AtomicFileStore` flock 임계 구역에서 수행하며 `ApprovalsState.Version++`을 단조 증가시킨다. 승인은 소비 후 재사용 불가다.
 - **`ask` 반환 시 토큰 `jti`/예산 미소진**: `Gate 2(PDP)`에서 `DecisionAsk(18)`로 멈춘 요청은 아직 실행되지 않았으므로, 사람이 해당 `jti`에 승인을 발급한 뒤 워커가 동일 토큰으로 재시도할 수 있도록 `ask` 시점에는 단회성 토큰 `jti`나 호출 예산을 소진하지 않는다.
 - **ask는 fail-closed**: 승인이 없으면 deny와 동일하게 파일을 건드리지 않는다. 종료 코드만 `18`로 구분해 호출자가 승인을 요청할 수 있게 한다.
 - **승인 원장 쓰기 주체**: PAP 경로(`approval` 명령)와 PEP의 소비 경로뿐. 워커(`internal/subagent`)는 승인 발급 권한이 없다(`TC-060-02` 자기 승인 금지).
