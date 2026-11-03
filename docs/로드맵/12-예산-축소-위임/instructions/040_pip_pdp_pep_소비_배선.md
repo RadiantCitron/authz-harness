@@ -26,8 +26,9 @@
   - `internal/authz/pdp/service.go`:
     - `pdp.Request`에 `TokenJTI string`, `TokenBudget *domain.Budget`, `WriteBytes int64` 추가
     - `Evaluate(req, snapshot)` 순수 함수에서 **활성 Grant 매칭 직후(후속 로드맵 15의 `RequiresApproval` 검사보다 반드시 앞선 Stage 2-6 단계)**에 `req.TokenBudget != nil`일 때 `entry, ok := snapshot.BudgetEntries[req.TokenJTI]`를 조회하여 `!ok || entry.Remaining.MaxCalls < 1`이거나 쓰기 요청 시 `entry.Initial.HasWriteLimit() && req.WriteBytes > entry.Remaining.MaxWriteBytes`이면 즉시 `DecisionDeny` + `ReasonBudgetExhausted(12)` 반환 (`os`나 `storage` import 0건 유지)
-  - `internal/authz/pep/gateway.go`:
-    - `Config`에 `BudgetLedger budget.Ledger` 선택 필드 추가
+  - `internal/authz/pep/gateway.go` ([014번 보고서](../../../보고서/014-모듈레벨_아키텍처원칙_및_내부구현패턴_안티패턴_집중진단_보고서.md) `ARCH-03`, `ARCH-05`):
+    - 구체 `internal/authn/budget` 패키지를 import하지 않고 `Config`에 소비자 포트 `BudgetConsumer domain.BudgetConsumer` 선택 필드 추가
+    - `runPipeline` 비대화(God Method) 방지를 위해 Stage 3.5 원장 차감 메서드 `stage3PreCommitLedgers(ctx, req, state) (rollback func(), err error)`를 분리하고, Stage 4(감사) 또는 Stage 5(I/O) 실패 시 반환된 `rollback()` 클로저 한 줄로 `BudgetConsumer.Refund`가 결정론적으로 호출되도록 구조화
     - `runPipeline` 내부에서 `verifiedClaims.Claims.Budget != nil`일 때 원자적 `BudgetLedger.Consume` 및 실패 시 `Refund` 수행 (`Execute` 함수 내 `return` 문 1개 유지)
 - **무영향**:
   - `Budget == nil`인 토큰은 PIP/PDP/PEP 예산 차감 로직을 그대로 통과하므로 기존 시나리오(`E2E-01`~`E2E-49`)에 영향을 주지 않는다.
