@@ -29,7 +29,7 @@ flowchart LR
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: `internal/domain`(`Budget`, `TokenClaims.Budget`, Reason 2종), `internal/authn/budget` [신규](`BudgetLedger`), `internal/authn/token`(`IssueToken` 원장 초기화, `VerifyToken` 다회성 예산 토큰 분기), `internal/authn/exchange`(정적·동적 예산 축소 검증 및 예약), `internal/authz/pip`·`pdp`·`pep`(배선), `internal/app`(`BuildStack` 자동 경로 파생), `internal/harness/catalog`(G11 `E2E-50`~`E2E-54`).
+- **변경**: `internal/domain`(`Budget`, `TokenClaims.Budget`, Reason 2종), `internal/authn/budget` 신규 (`BudgetLedger`), `internal/authn/token`(`IssueToken` 원장 초기화, `VerifyToken` 다회성 예산 토큰 분기), `internal/authn/exchange`(정적·동적 예산 축소 검증 및 예약), `internal/authz/pip`·`pdp`·`pep`(배선), `internal/app`(`BuildStack` 자동 경로 파생), `internal/harness/catalog`(G11 `E2E-50`~`E2E-54`).
 - **무영향**: 예산 클레임이 **없는 토큰(`Budget == nil`)**은 기존과 100% 동일하게 동작한다. 기존 49대 시나리오 판정 기준은 변하지 않으며 060에서 회귀로 증명한다.
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가
