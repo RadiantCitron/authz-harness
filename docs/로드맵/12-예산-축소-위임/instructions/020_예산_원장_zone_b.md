@@ -61,6 +61,10 @@ type BudgetEntry struct {
 
 ---
 
+> **Coffman 교착 상태 방지를 위한 중첩 파일 락 금지 불변식 ([013번 보고서](../../../보고서/013-5대_표준공학검증기법_기반_잔여로드맵_전수정밀진단_및_교정_보고서.md) `DEF-05`)**: `AtomicFileStore.Update(fn)`(또는 `WithFileLock`) 콜백 `fn` 내부에서는 인메모리 상태 구조체만 변이하고 즉시 반환해야 하며, 락을 쥔 채로 `auditWriter.Log(...)`나 다른 `AtomicFileStore`를 중첩 호출하지 않는다(감사 기록 등은 반드시 `Update` 반환 직후 수행).
+
+---
+
 ## 4. 인수 테스트 시나리오
 
 | ID | 입력 | 기대 결과 |
