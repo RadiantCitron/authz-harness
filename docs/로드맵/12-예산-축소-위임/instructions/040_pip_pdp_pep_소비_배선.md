@@ -1,4 +1,4 @@
-# [구현지시서 040] PIP/PDP/PEP 예산 소비·정산 배선 (SESE 및 PDP 순수성 보존)
+# [구현지시서 040] PIP/PDP/PEP 예산 소비·정산 및 단일 합성 루트 자동 경로 배선
 
 > **문서 상태**: `Draft`
 > **상위 대시보드**: [12번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
@@ -9,31 +9,40 @@
 
 ## 1. 목적 및 배경
 
-서브에이전트 워커가 도구를 실행할 때 PIP가 잔여 예산을 조회해 공급하고, PDP가 순수 함수로 예산 충분 여부를 1차 판정한 뒤, PEP가 파일 I/O 직전에 원자적으로 예산을 차감·정산하도록 배선한다.
-이 과정에서 **① PDP의 파일/원장 무의존성(`TC-060-01`)**과 **② PEP `Gateway.Execute`의 단일 출구(`TC-060-04`, `return g.finalize(...)` 단 1개)** 불변식을 100% 보존한다 ([006번 보고서](../../../보고서/006-차기로드맵_10_16_타당성_및_단계분할_정밀검토_보고서.md) §3.3).
+서브에이전트 워커가 도구를 실행할 때 PIP가 토큰별 예산 엔트리를 조회해 공급하고, PDP가 순수 함수로 예산 충분 여부를 판정한 뒤, PEP가 실제 파일 I/O와 맞물려 원자적으로 예산을 차감·정산하도록 배선한다.
+특히 부모 프로세스와 자식 서브프로세스 워커(`authz-harness subagent worker`)가 추가 CLI 플래그 변경 없이도 동일한 Zone B 예산 원장(`zone_b/budget_ledger.json`)을 공유하도록 [`internal/app/builder.go`](../../../../internal/app/builder.go)에서 경로를 자동 파생하고, **① PDP의 파일/원장 무의존성(`TC-060-01`)**과 **② PEP `Gateway.Execute`의 단일 출구(`TC-060-04`, `return g.finalize(...)` 단 1개)** 불변식을 100% 보존한다.
 
 ---
 
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/authz/pip/service.go`: `DecisionEnvironment`에 `RemainingBudget *domain.Budget` 공급 필드 추가
-  - `internal/authz/pdp/service.go`: 토큰에 `Budget != nil`이 있을 때 요청 액션(`file:read`/`file:write`)과 데이터 크기를 `RemainingBudget`과 비교하여 부족 시 `ReasonBudgetExhausted` 거부 반환 (파일 I/O 일절 없음)
-  - `internal/authz/pep/gateway.go`: `runPipeline` 내부에서 Stage 4(사전 감사) 직전에 원장 원자 차감(`Consume`)을 수행하고, Stage 5 I/O 실패 시 `finalize`에서 차감분을 환급(`Refund`)하도록 배선 (`Execute` 함수 내 `return` 문 1개 유지)
-  - `internal/app/builder.go`: `AppStack`에 `BudgetLedger` 조립 연결
+  - `internal/harness/sandbox.go` 및 `internal/app/builder.go`:
+    - `SandboxEnvironment`와 `AppConfig`에 `BudgetPath string` 추가
+    - `BuildStack`에서 `cfg.BudgetPath == ""`이고 `cfg.StatePath != ""`이면 `filepath.Join(filepath.Dir(cfg.StatePath), "budget_ledger.json")`으로 자동 파생하여 부모와 자식 워커(`subagent worker -state-file ...`)가 자동으로 동일 원장 파일을 바라보게 함
+    - `AppStack`에 `BudgetLedger budget.Ledger` 필드 추가 및 `TokenIssuer`, `PIP`, `PEP`에 자동 주입
+  - `internal/authz/pip/service.go`:
+    - `SubjectSnapshot`에 `BudgetEntries map[string]domain.Budget` (또는 `BudgetRemaining *domain.Budget`, `BudgetInitial *domain.Budget`) 추가
+  - `internal/authz/pdp/service.go`:
+    - `pdp.Request`에 `TokenJTI string`, `TokenBudget *domain.Budget`, `WriteBytes int64` 추가
+    - `Evaluate(req, snapshot)` 순수 함수에서 `req.TokenBudget != nil`일 때 `snapshot`의 잔여 예산(`MaxCalls < 1` 또는 쓰기 요청 시 `Initial.HasWriteLimit() && WriteBytes > Remaining.MaxWriteBytes`)을 검사하여 부족하면 `DecisionDeny` + `ReasonBudgetExhausted` 반환 (`os`나 `storage` import 0건 유지)
+  - `internal/authz/pep/gateway.go`:
+    - `Config`에 `BudgetLedger budget.Ledger` 선택 필드 추가
+    - `runPipeline` 내부에서 `verifiedClaims.Claims.Budget != nil`일 때 원자적 `BudgetLedger.Consume` 및 실패 시 `Refund` 수행 (`Execute` 함수 내 `return` 문 1개 유지)
 - **무영향**:
-  - `Budget == nil`인 토큰은 PIP/PDP/PEP 예산 차감 단계를 그대로 통과하므로 기존 시나리오에 영향을 주지 않는다.
+  - `Budget == nil`인 토큰은 PIP/PDP/PEP 예산 차감 로직을 그대로 통과하므로 기존 시나리오(`E2E-01`~`E2E-49`)에 영향을 주지 않는다.
 
 ---
 
 ## 3. 세부 명세
 
-1. **PDP 순수 판정 (`internal/authz/pdp/service.go`)**:
-   - `claims.Budget != nil`일 때 PIP가 공급한 `env.RemainingBudget`에서 `MaxCalls < 1`이거나, 쓰기 요청 시 `int64(len(req.Data)) > env.RemainingBudget.MaxWriteBytes`이면 즉시 `DecisionDeny`와 `ReasonBudgetExhausted`를 반환한다.
-2. **PEP 원자 차감 및 정산 (`internal/authz/pep/gateway.go`)**:
-   - 동시 프로세스 경합(TOCTOU)을 막기 위해 실제 원자적 보증은 PEP의 `runPipeline` 내부에서 수행하는 `budgetLedger.Consume(...)`이 담당한다.
-   - `file:read`의 경우: 읽기 수행 후 읽힌 바이트(`len(data)`)에 대해 `Consume(jti, 1, int64(len(data)), 0, now)`를 수행하고, 만약 `ReasonBudgetExhausted`가 반환되면 읽은 데이터를 즉시 폐기(`res.Data = nil`)하고 `ExitAuthzDenied(12)`로 거부한다.
-   - `file:write`의 경우: 파일 쓰기 전에 `Consume(jti, 1, 0, int64(len(req.Data)), now)`를 먼저 수행하여 예산 초과 시 파일이 단 1바이트도 쓰이지 않게 하고, 만약 이후 감사 실패나 디스크 오류로 쓰기가 실패하면 `finalize`에서 예약분을 반환한다.
+### 3.1 PEP 단일 입출구(`TC-060-04`) 내부의 원자적 차감·정산 순서 (`internal/authz/pep/gateway.go`)
+1. `verifiedClaims.Claims.Budget != nil && g.cfg.BudgetLedger != nil`인 경우:
+   - **`file:write` 요청**: `Stage4Audit` 직전(또는 `Stage5FileIO` 시작 시점)에 `g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, 0, int64(len(req.Data)), now)`를 먼저 호출한다.
+     - 만약 동시 서브프로세스 경합으로 인해 잔여 예산이 소진되었다면 `Consume`이 `ReasonBudgetExhausted`(`ExitAuthzDenied = 12`) 에러를 반환하며, 파일은 단 1바이트도 쓰이지 않는다.
+     - 만약 `Consume` 성공 후 `Stage4Audit`(예: `InjectAuditFailure`)이나 디스크 쓰기 오류로 실패하면 `g.cfg.BudgetLedger.Refund(state.tokenJTI, 1, 0, int64(len(req.Data)))`로 차감분을 즉시 복원한다.
+   - **`file:read` 요청**: `Stage5FileIO`에서 `Jail.ReadFile`로 읽은 바이트 길이(`int64(len(data))`)를 가지고 `g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, int64(len(data)), 0, now)`를 호출한다.
+     - 만약 호출 횟수나 읽기 바이트 한도를 초과하여 `Consume`이 `ReasonBudgetExhausted`를 반환하면, 읽은 `data`를 결과에 담지 않고 폐기한 뒤 즉시 해당 에러를 반환하여 `finalize`가 `ExitAuthzDenied(12)` + `ReasonBudgetExhausted`로 차단하게 한다.
 
 ---
 
@@ -41,10 +50,10 @@
 
 | ID | 입력 | 기대 결과 |
 |:---:|---|---|
-| **TC-040-01** | `MaxCalls: 1`인 토큰으로 `pep.Execute` 2회 연속 호출 | 1회차 `ExitSuccess(0)`, 2회차 `ExitAuthzDenied(12)` + `ReasonBudgetExhausted` |
-| **TC-040-02** | `MaxWriteBytes: 10`인 토큰으로 11바이트 `file:write` 호출 | `ExitAuthzDenied(12)` + `ReasonBudgetExhausted`, 대상 파일 무변화(0바이트) |
-| **TC-040-03** | `MaxReadBytes: 5`인 토큰으로 20바이트 파일 `file:read` 호출 | `ExitAuthzDenied(12)` + `ReasonBudgetExhausted`, 응답 데이터 비노출(`Output == ""`) |
-| **TC-040-04** | `TestArchitectureGuardrails` (`TC-060-01`, `TC-060-04`) 실행 | PDP 파일 무의존성 및 PEP 단일 `return` 100% 통과 |
+| **TC-040-01** | `MaxCalls: 1`인 토큰으로 `pep.Execute` 2회 연속 호출 | 1회차 `ExitSuccess(0)`, 2회차 `ExitAuthzDenied(12)` + `ReasonBudgetExhausted` (`TOKEN_REPLAY_DETECTED`가 아님 확인) |
+| **TC-040-02** | `MaxCalls: 5, MaxWriteBytes: 10`인 토큰으로 11바이트 `file:write` 호출 | `ExitAuthzDenied(12)` + `ReasonBudgetExhausted`, 대상 파일 무변화(0바이트) |
+| **TC-040-03** | `MaxCalls: 5, MaxReadBytes: 5`인 토큰으로 20바이트 파일 `file:read` 호출 | `ExitAuthzDenied(12)` + `ReasonBudgetExhausted`, 응답 데이터 비노출(` len(res.Data) == 0`) |
+| **TC-040-04** | `TestArchitectureGuardrails` (`TC-060-01`, `TC-060-04`, `TC-081-01`) 실행 | PDP 순수성, PEP 단일 `return`, `AtomicFileStore` 일원화 100% `PASS` |
 
 ---
 
@@ -59,6 +68,6 @@
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] PIP/PDP/PEP 예산 배선 완료 (`TC-060-01`, `TC-060-04` 가드 통과)
-- [ ] 호출 횟수·읽기 바이트·쓰기 바이트 초과 차단 및 파일 무변화 검증 완료
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [ ] `BuildStack` 내 `budget_ledger.json` 자동 경로 파생 및 PIP/PDP/PEP 배선 완료
+- [ ] `TC-060-01`, `TC-060-04`, `TC-081-01` 가드레일 통과 확인
+- [ ] 호출 횟수·읽기 바이트·쓰기 바이트 초과 차단 및 파일 무변화 검증 완료 후 단독 커밋
