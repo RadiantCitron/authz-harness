@@ -9,45 +9,47 @@
 
 ## 1. 목적 및 배경
 
-`020`과 `030`에서 구현한 프로세스 그룹 종료 및 출력 상한 차단이 발생했을 때, ① 감사 원장(`audit.jsonl`)에 전용 이벤트(`agent.limit_exceeded`)와 구체적 `Reason`·`RLimitResult`가 기록되고, ② MCP 어댑터(`internal/mcp`)가 종료 코드 `17`과 `Reason` 3종을 누락 없이 JSON-RPC 에러 응답으로 매핑하며, ③ 하네스 UI(`internal/ui`)가 자원 한계 차단 관문과 해설을 명확히 표시하도록 전 구간 배선을 완성한다.
+`020`과 `030`에서 구현한 프로세스 그룹 종료 및 출력 상한 차단이 발생했을 때, ① 감사 원장(`audit.jsonl`)에 `Action: "agent.limit_exceeded"` 이벤트와 구체적 `Reason`·`RLimitStatus`가 기록되어 하네스 Quad-Assertion(`DefaultEvaluator`)이 정확히 매칭할 수 있게 하고, ② MCP 어댑터(`internal/mcp`)가 종료 코드 `17`과 `SpawnResult.Reason`을 누락 없이 JSON-RPC 에러 응답으로 전달하며, ③ 하네스 UI(`internal/ui`)가 자원 한계 차단 관문과 해설을 표시하도록 전 구간 배선을 완성한다.
 
 ---
 
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/domain/event.go`: `EventAgentLimitExceeded EventType = "agent.limit_exceeded"` 상수 추가
-  - `internal/orchestrator/spawner.go`: 자원 한계(`ExitCode == 17`) 발생 시 `agent.limit_exceeded` 감사 이벤트(Reason, `timed_out`, `output_exceeded`, `rlimit` 상태 포함) 기록. 감사 기록 실패 시 기존 원칙대로 `ExitAuditFailure(15)`로 Fail-Closed 수렴
-  - `internal/mcp/errors.go`: `MapSubprocessError`에 `domain.ExitResourceLimit(17)` 기본 Reason 폴백(`ReasonResourceTimeout`) 및 Reason 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`) 매핑 추가
-  - `internal/mcp/errors_test.go`: `Reason → ExitCode(17) → ToolExecutionResult` 전수 매핑 Table-Driven 테스트 및 원시 JWT 비노출 검증 추가
-  - `internal/ui/pipeline.go` 및 `internal/ui/explain.go`: `ExitResourceLimit(17)` 및 `G9` 그룹 시나리오에 대한 관문 차단 표시·초보자 해설 문구 추가
+  - `internal/orchestrator/spawner.go`:
+    - 정상/기존 종료(`ExitCode != 17`) 시에는 기존 `ORCHESTRATE_COLLECT` 감사 이벤트를 그대로 유지(`TestTC08_AuditChain` 2개 이벤트 불변식 보존)
+    - 자원 한계 종료(`result.ExitCode == int(domain.ExitResourceLimit)`, `17`) 시에는 사후 감사 이벤트의 `Action`을 `domain.AuditActionAgentLimitExceeded`(`"agent.limit_exceeded"`), `Step`을 `"ORCHESTRATE_LIMIT_EXCEEDED"`, `Decision`을 `"deny"`, `Reason`을 `string(result.Reason)`, `Success`를 `false`로 기록하고 메타데이터에 `rlimit` 상태와 `output_exceeded`, `timed_out`을 포함한다. 감사 기록 실패 시 `ExitAuditFailure(15)`로 Fail-Closed 수렴한다.
+  - `internal/mcp/executor.go`:
+    - 70행의 `MapSubprocessError(spawnRes.ExitCode, "", spawnRes.StderrRaw)` 호출을 `MapSubprocessError(spawnRes.ExitCode, string(spawnRes.Reason), spawnRes.StderrRaw)`로 수정하여, 자식 JSON 프레임이 없는 타임아웃·출력 초과 시에도 `spawnRes.Reason`(`RESOURCE_TIMEOUT` 등)이 손실되지 않고 전달되게 한다.
+  - `internal/mcp/errors.go`:
+    - `MapSubprocessError`의 기본 Reason 폴백 스위치에 `case domain.ExitResourceLimit: reason = domain.ReasonResourceTimeout`을 추가한다.
+  - `internal/mcp/errors_test.go`: 종료 코드 `17` 및 Reason 3종(`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED`) 매핑 Table-Driven 테스트 및 원시 JWT 비노출 검증 추가
+  - `internal/ui/pipeline.go` 및 `internal/ui/explain.go`:
+    - `ComputePipelineGates`: `meta.Group == "G9"` 또는 `reason == domain.ReasonResourceTimeout || reason == domain.ReasonResourceOutputLimit || reason == domain.ReasonResourceSignalKilled`일 때 Gate 5(실행/자원 통제 관문)에서 차단(`GateBlocked`)으로 표시
+    - `generateExplanation`: `case "G9":` 해설 문구 추가
 - **무영향**:
-  - 기존 종료 코드 `11`~`16`의 MCP 매핑 및 `G1`~`G8` UI 출력 포맷은 변경하지 않는다.
+  - 기존 종료 코드 `11`~`16`의 감사·MCP·UI 동작과 기존 `spawner_test.go`(`TestTC08_AuditChain`)는 100% 그대로 통과한다.
 
 ---
 
 ## 3. 세부 명세
 
-### 3.1 감사 이벤트 `agent.limit_exceeded` 기록 (`internal/domain/event.go`, `internal/orchestrator/spawner.go`)
-1. `domain.EventAgentLimitExceeded EventType = "agent.limit_exceeded"` 상수를 정의한다.
-2. `SubprocessSpawner.Spawn`에서 자원 한계 초과(`result.ExitCode == int(domain.ExitResourceLimit)`)가 발생하면, 사후 감사 로그 기록 시 아래 필드를 채워 기록한다:
-   - `EventType`: `string(domain.EventAgentLimitExceeded)`
-   - `Step`: `"ORCHESTRATE_LIMIT_EXCEEDED"`
-   - `Decision`: `string(domain.DecisionDeny)`
-   - `Reason`: `string(result.Reason)` (`RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED` 중 하나)
-   - `Success`: `false`
-   - `Metadata`: `exit_code`(`17`), `duration_ms`, `timed_out`, `output_exceeded`, `max_output_bytes`, `rlimit` (`RLimitResult`)
-3. 만약 `s.cfg.Audit.Log(...)` 호출이 실패하면 에러를 무시하지 않고 즉시 `domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_limit_audit", ...)`(`ExitAuditFailure = 15`)를 반환한다.
+### 3.1 `audit.Event` 스키마 및 `assertion.go` 정합성 (`internal/orchestrator/spawner.go`)
+- [`internal/harness/assertion.go`](../../../../internal/harness/assertion.go)의 `DefaultEvaluator.Evaluate`는 `exp.Audit.ExpectedAction`을 `ev.Action`과 비교하고, `exp.Audit.ExpectedDecision`을 `ev.Decision`, `exp.Audit.ExpectedReason`을 `ev.Reason`과 비교한다.
+- 따라서 `result.ExitCode == int(domain.ExitResourceLimit)`일 때 기록되는 `audit.Event`는 다음과 같이 설정한다:
+  ```go
+  Action:   domain.AuditActionAgentLimitExceeded, // "agent.limit_exceeded"
+  Step:     "ORCHESTRATE_LIMIT_EXCEEDED",
+  Actor:    "orchestrator",
+  Resource: req.FilePath,
+  Decision: "deny",
+  Reason:   string(result.Reason), // RESOURCE_TIMEOUT | RESOURCE_OUTPUT_LIMIT | RESOURCE_SIGNAL_KILLED
+  Success:  false,
+  ```
 
-### 3.2 MCP 어댑터 오류 매핑 (`internal/mcp/errors.go`)
-1. `MapSubprocessError(exitCode int, rawReason string, rawErrMsg string)`에서:
-   - `rawReason`이 비어 있고 `domain.ExitCode(exitCode) == domain.ExitResourceLimit`인 경우 기본 Reason을 `domain.ReasonResourceTimeout`으로 지정한다.
-   - `rawReason`이 `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED` 중 하나이면 그대로 보존하여 `[<REASON>] ... (exit code 17)` 형식의 `IsError: true` 응답을 생성한다.
-   - `sanitizeMessage`를 통해 어떤 경우에도 원시 JWT 토큰이 에러 응답이나 `stderr`에 노출되지 않게 한다.
-
-### 3.3 UI 파이프라인 및 해설 확장 (`internal/ui/pipeline.go`, `internal/ui/explain.go`)
-1. `ComputePipelineGates`: `ExitResourceLimit(17)` 발생 시 실행/격리 관문에서 차단(`GateBlocked`)된 것으로 표시한다.
-2. `generateExplanation`: `meta.Group == "G9"` 또는 `actualExit == domain.ExitResourceLimit`일 때 서브프로세스 자원·수명 한계(무한 대기 그룹 종료, 출력 폭주 차단) 방어 원리를 해설한다.
+### 3.2 MCP 어댑터 Reason 전파 (`internal/mcp/executor.go`, `internal/mcp/errors.go`)
+- 워커가 타임아웃이나 출력 초과로 강제 종료되면 JSON 응답 프레임(`spawnRes.Response`)이 없으므로 `executor.go`의 마지막 분기로 진입한다.
+- 이때 `spawnRes.Reason`을 `MapSubprocessError`에 그대로 전달하여 `[RESOURCE_TIMEOUT] ... (exit code 17)` 또는 `[RESOURCE_OUTPUT_LIMIT] ... (exit code 17)`이 정확히 생성되도록 보장한다.
 
 ---
 
@@ -58,7 +60,7 @@
 | **TC-040-01** | `MapSubprocessError(17, "RESOURCE_TIMEOUT", "...")` 호출 | `IsError == true`, 응답 텍스트에 `[RESOURCE_TIMEOUT]` 및 `exit code 17` 포함 |
 | **TC-040-02** | `MapSubprocessError(17, "RESOURCE_OUTPUT_LIMIT", "...")` 및 `RESOURCE_SIGNAL_KILLED` 호출 | 각각의 Reason 코드와 `exit code 17` 정확히 매핑 |
 | **TC-040-03** | 자원 한계 에러 메시지에 원시 JWT 문자열을 섞어 `MapSubprocessError` 호출 | `[REDACTED_TOKEN]`으로 마스킹, `ContainsRawToken == false` |
-| **TC-040-04** | 스포너에서 타임아웃/출력 초과 발생 시 `audit.jsonl` 검증 | `event_type == "agent.limit_exceeded"`, `reason` 일치, 해시 체인 `VALID` |
+| **TC-040-04** | 스포너에서 타임아웃/출력 초과 발생 시 `audit.jsonl` 검증 | `action == "agent.limit_exceeded"`, `decision == "deny"`, `reason` 일치, 해시 체인 `VALID` |
 | **TC-040-05** | 자원 한계 초과 시점에 감사 파일 쓰기 실패 주입 | `ExitAuditFailure(15)` 에러 반환 (감사 누락 방치 0건) |
 
 ---
@@ -74,7 +76,7 @@
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `agent.limit_exceeded` 감사 이벤트 기록 및 감사 실패 시 `15` 수렴 검증 완료
-- [ ] MCP `Reason → ExitCode(17) → JSON-RPC` 매핑 Table-Driven 테스트 통과
-- [ ] UI `G9` / 종료 코드 `17` 표시 및 해설 반영 완료
+- [ ] `Action: "agent.limit_exceeded"` 감사 기록 및 감사 실패 시 `15` 수렴 검증 완료
+- [ ] `executor.go` `spawnRes.Reason` 전달 및 `errors.go` 매핑 테스트 통과
+- [ ] UI `G9` / 자원 한계 사유 관문 표시 및 해설 반영 완료
 - [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
