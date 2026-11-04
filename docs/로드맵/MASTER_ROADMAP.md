@@ -149,7 +149,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
   * **Layer 2A**: `internal/authn/{keys,token,exchange,budget}` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장, Phase 12 Zone B `budget_ledger.json` 예산 원장)
   * **Layer 2B**: `internal/authz/{pap,pip,pdp,state}` (인가 관리·상태 공급·순수 결정 코어 — `pdp`는 파일/OS 의존성 0% 및 Phase 17에서 `domain.SubjectSnapshot` DIP로 전이적 인프라 의존성 0% 달성 `TC-170-01`)
   * **Layer 2C**: `internal/jail` (파일 경로 격리), `internal/netguard` (Phase 16 루프백 Egress 가드), `internal/execguard` (Phase 16 Allow-List 실행 가드)
-* **Layer 1 (Persistence, Observability & Evidence)**: `internal/storage` (`AtomicFileStore[T]` 단일 `flock` 원장 엔진 `TC-081-01`), `internal/audit` (JSONL + 해시 체인 + Phase 14 v2 해시·서명 체크포인트), `internal/observe` (Phase 14 관측성 포트 및 `slogadapter`/`otel`/`noop` 어댑터 — `internal/opslog` 가칭 폐기)
+* **Layer 1 (Persistence, Observability & Evidence)**: `internal/storage` (`AtomicFileStore[T]` 단일 `flock` 원장 엔진 `TC-081-01`), `internal/audit` (JSONL + 해시 체인 + Phase 14 v2 해시·서명 체크포인트), `internal/observe` (Phase 14 관측성 포트 + `slogadapter`, OTel 어댑터는 `Dropped` — `internal/opslog` 가칭 폐기)
 * **Layer 0 (Pure Primitives & Domain Ports)**: `internal/domain` (순수 도메인 엔티티, `Clock` 가상/실제 시계 인터페이스 `TC-130-01`, `AuditContext`/`TraceID`, `*domain.Error` 및 `ExitCode` 상수, `Budget`(Phase 12), Phase 17 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter` 포트)
 
 ## 9) 핵심 원칙 (Core Architectural Principles)
@@ -401,8 +401,8 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md), `internal/harness/catalog/session_helper.go`, `G12` 시나리오(`E2E-55`~`60`).
 
 ### Phase 14: 감사 확장(v2 해시·서명 체크포인트·위임 트리) 및 관측성 포트 분리 (`G13`: `E2E-61`~`E2E-66`)
-* **목적**: 코어에서 `log/slog` 의존을 끊고 `internal/observe`(`slogadapter`/`otel`/`noop`) 포트로 분리하며(`TC-140-01`), 컨트롤 플레인 SESE 감사 단일화(`TC-080-01` 전 패키지 확대), 감사 스키마 v2(`ArgHash`, `ResultHash`), Zone A Ed25519 서명 체크포인트(꼬리 절단·전체 재작성 탐지), `audit tree` 위임 계보 시각화를 완성한다.
-* **주요 산출물**: [14-감사-확장-및-관측성-포트](14-감사-확장-및-관측성-포트/README.md), `internal/observe`, `internal/audit/checkpoint.go`, `G13` 시나리오(`E2E-61`~`66`).
+* **목적**: 코어에서 `log/slog` 의존을 끊고 `internal/observe`(포트 + `slogadapter`) 포트로 분리하며(`TC-140-01`), authn 감사 오류 무시 제거(`TC-080-01` 전 패키지 확대), 감사 스키마 v2(`ArgHash`, `ResultHash`), Zone A Ed25519 서명 체크포인트(꼬리 절단·전체 재작성 탐지), `audit tree` 위임 계보 시각화를 완성한다.
+* **주요 산출물**: [14-감사-확장-및-관측성-포트](14-감사-확장-및-관측성-포트/README.md), `internal/observe`, `internal/audit/checkpoint/` 패키지, `G13` 시나리오(`E2E-61`~`66`).
 
 ### Phase 15: PDP 3값 승인 결정(`ask`) 및 5요소 바인딩 1회용 승인 원장 (`G14`: `E2E-67`~`E2E-72`)
 * **목적**: 순수 PDP 결정을 `allow`/`deny`/`ask` 3값으로 확장하고, `(sub, action, resource, token_jti)` 4요소 및 선택적 5번째 요소 `ArgHash`(`sha256(req.Data)`, Confused Deputy 페이로드 바꿔치기 방어)에 바인딩된 Zone B 1회용 승인 원장(`approvals_state.json`)과 종료 코드 `18`(`ExitApprovalRequired`)을 증명한다.
