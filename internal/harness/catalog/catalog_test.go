@@ -8,16 +8,17 @@ import (
 
 	"time"
 
+	"authz-harness/internal/confinement"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 	"authz-harness/internal/orchestrator"
 )
 
-// TestCatalog_ScenarioCount 는 카탈로그에 44개의 고유 시나리오가 등록되어 있는지 검증한다.
+// TestCatalog_ScenarioCount 는 카탈로그에 49개의 고유 시나리오가 등록되어 있는지 검증한다.
 func TestCatalog_ScenarioCount(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 44 {
-		t.Fatalf("expected 44 scenarios, got %d", len(scenarios))
+	if len(scenarios) != 49 {
+		t.Fatalf("expected 49 scenarios, got %d", len(scenarios))
 	}
 
 	seen := make(map[string]bool)
@@ -43,7 +44,7 @@ func TestCatalog_ScenarioCount(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 44개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 49개 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -51,8 +52,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 44 {
-		t.Fatalf("expected 44 registered scenarios, got %d", len(list))
+	if len(list) != 49 {
+		t.Fatalf("expected 49 registered scenarios, got %d", len(list))
 	}
 }
 
@@ -208,7 +209,7 @@ func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 	}
 }
 
-// TestCatalog_RunAll_QuadAssertion 은 44개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
+// TestCatalog_RunAll_QuadAssertion 은 49개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -220,8 +221,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 44 {
-		t.Fatalf("expected 44 results, got %d", len(results))
+	if len(results) != 49 {
+		t.Fatalf("expected 49 results, got %d", len(results))
 	}
 
 	failedCount := 0
@@ -319,6 +320,95 @@ func TestG9_SkippedInProc(t *testing.T) {
 		_ = runner.Register(sc)
 	}
 	for _, sc := range g9Scenarios() {
+		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
+		if err != nil || !res.Skipped {
+			t.Fatalf("%s: skipped=%v err=%v", sc.Metadata().ID, res.Skipped, err)
+		}
+	}
+}
+
+// TestG10: OS 격리 대조군→실험군 (E2E-45 ~ E2E-49). 격리 불가 환경에서는 Skipped 이며 실패가 아니다.
+func TestG10_Scenarios(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	for _, sc := range g10Scenarios() {
+		_ = runner.Register(sc)
+	}
+	for _, sc := range g10Scenarios() {
+		id := sc.Metadata().ID
+		res, err := runner.RunScenario(context.Background(), id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		if res.Skipped {
+			t.Logf("%s skipped: %s", id, res.Error)
+			continue
+		}
+		if !res.Passed {
+			t.Errorf("%s FAILED: reasons=%v err=%s", id, res.Assertion.FailureReasons, res.Error)
+		}
+	}
+}
+
+func g10RunMutant(t *testing.T, sc *g10Scenario) harness.ScenarioResult {
+	t.Helper()
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	if !confinement.Platform().Available() {
+		t.Skip("confinement unavailable")
+	}
+	_ = runner.Register(sc)
+	res, err := runner.RunScenario(context.Background(), sc.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func hasInvariant(res harness.ScenarioResult) bool {
+	for _, r := range res.Assertion.FailureReasons {
+		if strings.Contains(r, "invariant violation") {
+			return true
+		}
+	}
+	return false
+}
+
+// TC-050-03: 실험군에 격리 끔(Noop)을 주입하면 canary 유출로 FAIL 이어야 한다.
+func TestG10_MutationExperimentWithoutConfinementFails(t *testing.T) {
+	res := g10RunMutant(t, &g10Scenario{id: "E2E-45", name: "mut", attack: g10Read, experimentOverride: confinement.NoopConfiner{}})
+	if res.Passed || !hasInvariant(res) {
+		t.Fatalf("must FAIL by invariant: %+v", res.Assertion.FailureReasons)
+	}
+}
+
+// TC-050-04: 대조군에 실제 격리를 주입하면 "격리가 없는데도 막힘"으로 FAIL 이어야 한다.
+func TestG10_MutationControlWithConfinementFails(t *testing.T) {
+	res := g10RunMutant(t, &g10Scenario{id: "E2E-45", name: "mut", attack: g10Read, controlOverride: confinement.Platform()})
+	if res.Passed || !hasInvariant(res) {
+		t.Fatalf("must FAIL by invariant: %+v", res.Assertion.FailureReasons)
+	}
+}
+
+// TC-050-02: 프로브가 false 이면 G10 5건 모두 Skipped.
+func TestG10_SkippedWhenProbeFalse(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithConfinementProbe(func() bool { return false }))
+	for _, sc := range g10Scenarios() {
+		_ = runner.Register(sc)
+	}
+	for _, sc := range g10Scenarios() {
+		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
+		if err != nil || !res.Skipped || res.Passed {
+			t.Fatalf("%s: skipped=%v err=%v", sc.Metadata().ID, res.Skipped, err)
+		}
+	}
+}
+
+// TC-050-05: inproc 모드에서는 G10 전부 Skipped.
+func TestG10_SkippedInProc(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
+	for _, sc := range g10Scenarios() {
+		_ = runner.Register(sc)
+	}
+	for _, sc := range g10Scenarios() {
 		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
 		if err != nil || !res.Skipped {
 			t.Fatalf("%s: skipped=%v err=%v", sc.Metadata().ID, res.Skipped, err)

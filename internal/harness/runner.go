@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"authz-harness/internal/confinement"
 	"authz-harness/internal/domain"
 )
 
@@ -59,6 +60,7 @@ type DefaultRunner struct {
 	executionMode       ExecutionMode
 	binaryProvider      BinaryProvider
 	faultWorkerProvider BinaryProvider
+	confinementProbe    func() bool
 }
 
 // RunnerOption 은 Runner 생성 옵션이다.
@@ -82,6 +84,13 @@ func WithBinaryProvider(provider BinaryProvider) RunnerOption {
 func WithFaultWorkerProvider(provider BinaryProvider) RunnerOption {
 	return func(r *DefaultRunner) {
 		r.faultWorkerProvider = provider
+	}
+}
+
+// WithConfinementProbe 는 커널 격리 적용 가능 여부 프로브를 주입한다. 기본값은 confinement.Platform().Available 이다.
+func WithConfinementProbe(probe func() bool) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.confinementProbe = probe
 	}
 }
 
@@ -109,6 +118,9 @@ func NewDefaultRunner(opts ...RunnerOption) *DefaultRunner {
 	}
 	for _, opt := range opts {
 		opt(r)
+	}
+	if r.confinementProbe == nil {
+		r.confinementProbe = confinement.Platform().Available
 	}
 	if r.executionMode == ModeSubprocess && r.binaryProvider == nil {
 		r.binaryProvider = NewCachedBinaryProvider()
@@ -177,6 +189,11 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 	// 실행 모드 선언: 실제 OS 프로세스가 필요한 시나리오는 inproc 에서 건너뛴다 (샌드박스 생성 전).
 	if meta.RequiresSubprocess && r.executionMode != ModeSubprocess {
 		return ScenarioResult{Metadata: meta, Skipped: true, Passed: false, Error: "requires subprocess mode"}, nil
+	}
+
+	// 커널 격리가 필요한 시나리오는 적용 불가 환경(중첩 샌드박스 등)에서 건너뛴다. 폴백 없음.
+	if meta.RequiresConfinement && !r.confinementProbe() {
+		return ScenarioResult{Metadata: meta, Skipped: true, Passed: false, Error: "requires kernel confinement"}, nil
 	}
 
 	// 1. 시나리오별 격리 Ephemeral Sandbox 생성

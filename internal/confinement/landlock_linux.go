@@ -198,6 +198,9 @@ type LandlockConfiner struct {
 	LauncherPath string
 }
 
+// WithLauncher 는 런처 경로가 주입된 복사본을 반환한다.
+func (c LandlockConfiner) WithLauncher(path string) Confiner { c.LauncherPath = path; return c }
+
 func (LandlockConfiner) Name() string    { return "linux-landlock" }
 func (LandlockConfiner) Available() bool { return landlockABI() >= 1 }
 

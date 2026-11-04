@@ -119,6 +119,12 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		sb.WriteString("  - 해설: 감사 기록 실패 시 기본 거부(Fail-Closed) 및 사후 위변조 탐지 원칙을 증명합니다.\n          보안 감사 추적이 불가능한 상태에서 작업을 강행하지 않고 안전하게 정지했습니다.\n")
 	case "G9":
 		sb.WriteString("  - 해설: 판정(허용/거부)과 별개로, 부모가 시간·출력 한계를 넘은 워커와 그 자식 전체를 끝냈다.\n")
+	case "G10":
+		if meta.Expected.Audit.ExpectedReason == domain.ReasonConfinementUnavailable {
+			sb.WriteString("  - 해설: 격리 필수 모드인데 OS 격리(CONFINEMENT_UNAVAILABLE)를 적용할 수 없어 부모가 자식을 기동하지 않고 거부(Fail-Closed, 16)했다.\n")
+		} else {
+			sb.WriteString("  - 해설: PEP 를 건너뛰는 악의 워커를 격리 끔(대조군: 공격 성공)과 켬(실험군: 차단)으로 쌍 대조했다.\n          차단은 앱 코드가 아니라 OS 커널이 한 것이며, 판정은 부모가 관찰한 사실(canary·파일·리스너)로만 내렸다.\n")
+		}
 	default:
 		sb.WriteString(fmt.Sprintf("  - 해설: 비인가 공격이 %s에서 탐지되어 시스템이 안전하게 거부(Fail-Closed)되었습니다.\n", gateName))
 	}

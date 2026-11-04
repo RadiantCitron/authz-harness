@@ -33,3 +33,16 @@ func (NoopConfiner) Prepare(_ *exec.Cmd, p Policy) error {
 	}
 	return nil
 }
+
+// LauncherAware 는 신뢰 런처 경로가 필요한 어댑터(Linux)가 구현하는 선택적 인터페이스다.
+type LauncherAware interface {
+	WithLauncher(path string) Confiner
+}
+
+// WithLauncher 는 c 가 LauncherAware 이면 런처 경로를 주입한 복사본을, 아니면 c 를 그대로 반환한다.
+func WithLauncher(c Confiner, path string) Confiner {
+	if la, ok := c.(LauncherAware); ok {
+		return la.WithLauncher(path)
+	}
+	return c
+}
