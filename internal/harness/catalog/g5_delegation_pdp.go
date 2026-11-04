@@ -592,6 +592,7 @@ func (s *e2e31Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		ReplayPath:   env.ReplayPath,
 		AuditPath:    env.AuditPath,
 		Audit:        stack.AuditWriter,
+		Gateway:      stack.PEP,
 	})
 	if err != nil {
 		return domain.ExitInternalError, err
@@ -679,6 +680,7 @@ func (s *e2e32Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		ReplayPath:   env.ReplayPath,
 		AuditPath:    env.AuditPath,
 		Audit:        stack.AuditWriter,
+		Gateway:      stack.PEP,
 	})
 	if err != nil {
 		return domain.ExitInternalError, err

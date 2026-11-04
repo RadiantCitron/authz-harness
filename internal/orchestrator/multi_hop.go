@@ -8,6 +8,7 @@ import (
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authn/token"
+	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
 )
@@ -22,6 +23,7 @@ type MultiHopConfig struct {
 	AuditPath    string       // 감사 파일 경로
 	Audit        audit.Writer // 부모 감사 로거
 	Limits       Limits       // 서브프로세스 자원·수명 한계
+	Gateway      pep.Gateway  // inproc 모드(BinaryPath 비어 있음)에서 워커 단계를 집행할 PEP 게이트웨이
 }
 
 // MultiHopDelegationRequest 는 루트 오케스트레이터에서 시작되는 다단계 위임 요청 파라미터다.
@@ -143,5 +145,21 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 		return domain.ExitCode(res.ExitCode), nil
 	}
 
-	return domain.ExitSuccess, nil
+	// 4. inproc 모드: 서브프로세스 대신 프로세스 내 PEP 게이트웨이로 워커 단계를 집행한다.
+	// 게이트웨이도 없으면 인가 판정 없이 성공을 반환하지 않고 Fail-Closed 로 거부한다.
+	if s.cfg.Gateway == nil {
+		return domain.ExitInternalError, fmt.Errorf("multi-hop: neither binary path nor pep gateway configured")
+	}
+	worker, err := subagent.NewWorker(s.cfg.Gateway)
+	if err != nil {
+		return domain.ExitInternalError, fmt.Errorf("failed to create inproc worker: %w", err)
+	}
+	_, exitCode := worker.Execute(ctx, subagent.SubagentRequest{
+		TraceID:  req.TraceID,
+		Token:    workerExchangeRes.TokenString,
+		Action:   string(req.Action),
+		FilePath: req.TargetFile,
+		Data:     string(req.Data),
+	})
+	return domain.ExitCode(exitCode), nil
 }
