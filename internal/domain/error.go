@@ -101,7 +101,9 @@ func ExitCodeForReason(r Reason) ExitCode {
 		ReasonDelegationTTLExceeded,
 		ReasonDelegationDepthExceeded,
 		ReasonDelegationSelfLoop,
-		ReasonDelegationScopeEmpty:
+		ReasonDelegationScopeEmpty,
+		ReasonDelegationBudgetExceeded,
+		ReasonBudgetExhausted:
 		return ExitAuthzDenied // 12
 	case ReasonPathViolation,
 		ReasonPathTraversal,

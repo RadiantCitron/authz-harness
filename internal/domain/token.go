@@ -63,6 +63,7 @@ type TokenClaims struct {
 	Epoch           Epoch       `json:"epoch"`
 	Actor           *ActorClaim `json:"act,omitempty"`
 	DelegationDepth int         `json:"delegation_depth,omitempty"`
+	Budget          *Budget     `json:"budget,omitempty"`
 }
 
 // Validate 는 필수 클레임 및 기본 유효성을 검증한다.
@@ -93,6 +94,11 @@ func (c *TokenClaims) Validate() error {
 	}
 	if c.Epoch < 1 {
 		return fmt.Errorf("epoch must be >= 1, got %d", c.Epoch)
+	}
+	if c.Budget != nil {
+		if err := c.Budget.Validate(); err != nil {
+			return fmt.Errorf("budget claim: %w", err)
+		}
 	}
 	return nil
 }

@@ -128,6 +128,12 @@ const (
 	// ReasonDelegationScopeEmpty 는 위임 요청 시 요청 스코프가 비어있음을 나타낸다.
 	ReasonDelegationScopeEmpty Reason = "DELEGATION_SCOPE_EMPTY"
 
+	// ReasonDelegationBudgetExceeded 는 자식 예산이 부모 잔여 예산을 초과하거나 부모 예산 엔트리가 없음을 나타낸다.
+	ReasonDelegationBudgetExceeded Reason = "DELEGATION_BUDGET_EXCEEDED"
+
+	// ReasonBudgetExhausted 는 토큰의 호출 횟수·읽기·쓰기 바이트 예산이 소진되었거나 소비 엔트리가 없음을 나타낸다.
+	ReasonBudgetExhausted Reason = "BUDGET_EXHAUSTED"
+
 	// ReasonInvalidArguments 는 요청 인자(Action, Resource 등)가 비어있거나 유효하지 않음을 나타낸다.
 	ReasonInvalidArguments Reason = "INVALID_ARGUMENTS"
 
