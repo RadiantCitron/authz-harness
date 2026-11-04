@@ -146,15 +146,15 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **Layer 4 (Process Coordinators & OS Confinement)**: `internal/orchestrator` (부모 스포너·세션 러너), `internal/subagent` (자식 워커 엔트리), `internal/confinement` (Phase 11 OS 커널 격리 어댑터 — 코어 패키지에서 import 금지 `TC-110-01`)
 * **Layer 3 (Enforcement Gateway)**: `internal/authz/pep` (AuthN 검증 + PDP 결정 + 도구 경계 검증 + Pre-Commit 원장/감사 + I/O 실행 SESE 단일 입출구 조율, Phase 17 `ToolHandler` 전략 포트)
 * **Layer 2 (Core Security Domains — 수평 상호 참조 금지)**:
-  * **Layer 2A**: `internal/authn/{keys,token,exchange,budget}` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장, Phase 12 예산 원장)
+  * **Layer 2A**: `internal/authn/{keys,token,exchange,budget}` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장, Phase 12 Zone B `budget_ledger.json` 예산 원장)
   * **Layer 2B**: `internal/authz/{pap,pip,pdp,state}` (인가 관리·상태 공급·순수 결정 코어 — `pdp`는 파일/OS 의존성 0% 및 Phase 17에서 `domain.SubjectSnapshot` DIP로 전이적 인프라 의존성 0% 달성 `TC-170-01`)
   * **Layer 2C**: `internal/jail` (파일 경로 격리), `internal/netguard` (Phase 16 루프백 Egress 가드), `internal/execguard` (Phase 16 Allow-List 실행 가드)
 * **Layer 1 (Persistence, Observability & Evidence)**: `internal/storage` (`AtomicFileStore[T]` 단일 `flock` 원장 엔진 `TC-081-01`), `internal/audit` (JSONL + 해시 체인 + Phase 14 v2 해시·서명 체크포인트), `internal/observe` (Phase 14 관측성 포트 및 `slogadapter`/`otel`/`noop` 어댑터 — `internal/opslog` 가칭 폐기)
-* **Layer 0 (Pure Primitives & Domain Ports)**: `internal/domain` (순수 도메인 엔티티, `Clock` 가상/실제 시계 인터페이스 `TC-130-01`, `AuditContext`/`TraceID`, `*domain.Error` 및 `ExitCode` 상수, `BudgetEntry`/`BudgetSnapshotReader`, Phase 17 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter` 포트)
+* **Layer 0 (Pure Primitives & Domain Ports)**: `internal/domain` (순수 도메인 엔티티, `Clock` 가상/실제 시계 인터페이스 `TC-130-01`, `AuditContext`/`TraceID`, `*domain.Error` 및 `ExitCode` 상수, `Budget`(Phase 12), Phase 17 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter` 포트)
 
 ## 9) 핵심 원칙 (Core Architectural Principles)
 1. **이중 관문(Dual-Gate: AuthN before AuthZ) 및 기본 거부(Fail-Closed)**: 신원 및 암호학적 무결성(Gate 1)이 검증되기 전에는 인가 정책(Gate 2)을 평가하지 않으며, 감사 기록 실패를 포함한 모든 경계 오류 시 즉시 거부하고 중단한다.
-2. **최소 권한 및 단조 축소 위임 원칙 (Least Privilege & Monotonic Downscoping)**: 위임 시 권한과 수명은 오직 단조 감소($S_{child} \subseteq S_{parent}$, $exp_{child} \le exp_{parent}$)해야 하며, 팀장이 자기보다 큰 권한을 자식에게 부여하는 것은 원천 차단된다.
+2. **최소 권한 및 단조 축소 위임 원칙 (Least Privilege & Monotonic Downscoping)**: 위임 시 권한·수명·예산은 오직 단조 감소($S_{child} \subseteq S_{parent}$, $exp_{child} \le exp_{parent}$, $B_{child} \le B_{parent\_remaining}$)해야 하며, 팀장이 자기보다 큰 권한을 자식에게 부여하는 것은 원천 차단된다.
 3. **PAP·PIP·PDP·PEP 4각 분리 ([NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf))**: 관리(PAP), 실시간 상태 조회(PIP), 순수 결정(PDP), 실제 파일 I/O 집행(PEP)은 각각의 패키지 경계를 넘지 않는다.
 4. **중앙 정책 권원과 조정자의 분리 (Authority vs. Coordinator)**: 팀장(Orchestrator)은 권한 상점의 주인이 아니라 작업을 분배하고 토큰 교환을 요청하는 조정자일 뿐이며, Zone A의 서명 키에 절대 직접 접근할 수 없다.
 5. **OS 프로세스 격리 및 클린 환경 전달**: 서브에이전트는 독립된 OS 프로세스로 실행되며, 부모 환경변수를 무분별하게 상속하지 않고 `stdin` 단일 프레임을 기본 채널로 사용한다.
@@ -175,7 +175,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]` 이상이어야 함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
 4. **Scope 포함 (Gate 2 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
 5. **실시간 활성 Grant 존재 (Gate 2)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
-6. **예산(Budget) 잔량 충분 (Gate 2 & Pre-Commit — Phase 12)**: 토큰에 `Budget`이 설정된 경우 `BudgetEntries[jti]`의 잔여 호출 횟수(`MaxCalls >= 1`) 및 읽기/쓰기 바이트 한도가 충분하고 원자적 차감(`Consume`)을 통과함.
+6. **예산(Budget) 잔량 충분 (PEP `StageBudget`·읽기 직후 — Phase 12)**: 토큰에 `Budget`이 설정된 경우 Zone B 예산 원장(`budget_ledger.json`)의 잔여 호출 횟수·읽기/쓰기 바이트가 충분하고 PEP의 원자적 차감(`Consume`: 쓰기는 사전 차감, 읽기는 `ReadFile` 직후 사후 차감)을 통과함. PDP·PIP는 예산을 판정하지 않음.
 7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (Gate 2 & Pre-Commit — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고 `ConsumeMatching` 원자적 1회 소비를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
 8. **도구별 실행 경계(Boundary) 검증 통과 (Gate 2c — Phase 03 & 16)**: `file:*`는 Workspace Jail 내부 경로(`ResolvePath`), `net:fetch`는 루프백 리터럴 및 허용 포트(`netguard`), `exec:run`은 허용 바이너리 ID 및 인자 정규식(`execguard`) 검증을 통과함.
 9. **사전 커밋 감사(Pre-Commit Audit) 기록 성공 (Stage 4)**: I/O 실행 직전 `audit.jsonl`에 사전 커밋 이벤트 기록이 성공함(실패 시 차감된 예산을 즉시 `Refund`하고 I/O 진입 없이 `ExitAuditFailure = 15`로 중단).
@@ -392,9 +392,9 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **목적**: PEP 배선을 우회해 직접 OS 시스템콜(`open`, `socket`, `fork`)을 호출하는 악의 워커가 격리를 껐을 때(대조군)는 성공하지만 커널 격리(`internal/confinement`: macOS Seatbelt, Linux Landlock + `confine-exec` 신뢰 런처, 허용 목록 정책)를 켰을 때(실험군)는 차단됨을 쌍 대조로 증명한다. 차단 판정은 부모가 관찰한 사실(canary 미유출·파일 미생성·리스너 accept 0건)로만 내리고, 시나리오가 `Exit 13`을 반환한다([020번 보고서](../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md)).
 * **주요 산출물**: [11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md), `internal/confinement`, `TC-110-01` AST 가드, `G10` 시나리오(`E2E-45`~`49`).
 
-### Phase 12: 예산(Budget) 단조 축소 위임 및 원장 정산 (`G11`: `E2E-50`~`E2E-54`)
-* **목적**: 호출 횟수(`MaxCalls`)·읽기/쓰기 바이트(`MaxReadBytes`/`MaxWriteBytes`) 예산의 단조 축소 위임($B_{child} \le B_{parent\_rem}$), Zone B 원자적 예산 원장(`budget_ledger.json`, `Version++` 단조 증가), 만료 자식 예약 자동 회수(Lazy Reclaim)를 증명한다.
-* **주요 산출물**: [12-예산-축소-위임](12-예산-축소-위임/README.md), `internal/domain/budget.go`(`Budget`, `BudgetEntry`, `BudgetSnapshotReader`), `internal/authn/budget`, `G11` 시나리오(`E2E-50`~`54`).
+### Phase 12: 예산(Budget) 단조 축소 위임 및 원장 정산 (`G11`: `E2E-50`~`E2E-54`) [완료: 2026-11-04]
+* **목적**: 호출 횟수(`MaxCalls`)·읽기/쓰기 바이트(`MaxReadBytes`/`MaxWriteBytes`) 예산의 단조 축소 위임($B_{child} \le B_{parent\_rem}$), Zone B 원자적 예산 원장(`budget_ledger.json`, `AtomicFileStore` 배타 잠금 임계 구역), 만료 자식 예약 자동 회수(Lazy Reclaim)를 증명한다.
+* **주요 산출물**: [12-예산-축소-위임](12-예산-축소-위임/README.md), `internal/domain/budget.go`(`Budget`), [ADR 0004](../adr/0004-예산-축소-위임-예약-및-정산-모델.md), `internal/authn/budget`, `G11` 시나리오(`E2E-50`~`54`).
 
 ### Phase 13: 장기 실행 세션 수명주기, `act` 계보 연쇄 회수 및 재교환 (`G12`: `E2E-55`~`E2E-60`)
 * **목적**: 다회차 장기 세션(`SessionRunner`) 중 토큰 만료·Grant 회수·서명키 폐기·상위 에이전트 Epoch 갱신(`ActorClaim.Epoch` 분리 및 `pdp.Evaluate` 조상 계보 연쇄 검증)에 따른 실시간 차단과 부모 기반 재교환(`re-exchange`), 결정론적 TOCTOU 창 측정을 증명한다. 코어 패키지 `time.Now()` 직접 호출을 전면 제거하고 `TC-130-01` AST 가드로 고정한다.
