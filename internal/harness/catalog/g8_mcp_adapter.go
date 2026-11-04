@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"authz-harness/internal/authn/token"
@@ -110,47 +109,37 @@ func executeMCPCall(
 		return domain.ExitInternalError, nil, fmt.Errorf("invalid jsonrpc response: %w", err)
 	}
 
-	// 종료 코드 결정: JSON-RPC 프로토콜 에러인 경우 ExitBadInput(14), 도구 실행 에러인 경우 자식 exit code 파싱
+	code, err := exitCodeFromResponse(&resp)
+	return code, &resp, err
+}
+
+// exitCodeFromResponse 는 JSON-RPC 응답에서 종료 코드를 구조적으로 읽는다.
+// 프로토콜 에러는 ExitBadInput, 도구 거부는 structuredContent.exit_code 를 사용하며,
+// 구조화 정보가 없거나 형식이 틀리면 fail-closed 로 ExitInternalError 를 반환한다.
+func exitCodeFromResponse(resp *mcp.JSONRPCResponse) (domain.ExitCode, error) {
 	if resp.Error != nil {
-		return domain.ExitBadInput, &resp, nil
+		return domain.ExitBadInput, nil
 	}
-
-	if resp.Result != nil {
-		resMap, ok := resp.Result.(map[string]any)
-		if ok {
-			isErr, _ := resMap["isError"].(bool)
-			if !isErr {
-				return domain.ExitSuccess, &resp, nil
-			}
-			// isError=true 인 경우 텍스트에서 exit code 파싱
-			contents, ok := resMap["content"].([]any)
-			if ok && len(contents) > 0 {
-				cMap, ok := contents[0].(map[string]any)
-				if ok {
-					text, _ := cMap["text"].(string)
-					// [REASON] ... (exit code N)
-					if strings.Contains(text, "exit code 11") {
-						return domain.ExitTokenInvalid, &resp, nil
-					}
-					if strings.Contains(text, "exit code 12") {
-						return domain.ExitAuthzDenied, &resp, nil
-					}
-					if strings.Contains(text, "exit code 13") {
-						return domain.ExitPathViolation, &resp, nil
-					}
-					if strings.Contains(text, "exit code 14") {
-						return domain.ExitBadInput, &resp, nil
-					}
-					if strings.Contains(text, "exit code 15") {
-						return domain.ExitAuditFailure, &resp, nil
-					}
-				}
-			}
-			return domain.ExitAuthzDenied, &resp, nil
+	resMap, ok := resp.Result.(map[string]any)
+	if !ok {
+		if resp.Result == nil {
+			return domain.ExitInternalError, fmt.Errorf("mcp response has neither result nor error")
 		}
+		return domain.ExitInternalError, fmt.Errorf("mcp result has unexpected type %T", resp.Result)
 	}
-
-	return domain.ExitSuccess, &resp, nil
+	isErr, _ := resMap["isError"].(bool)
+	if !isErr {
+		return domain.ExitSuccess, nil
+	}
+	sc, ok := resMap["structuredContent"].(map[string]any)
+	if !ok {
+		return domain.ExitInternalError, fmt.Errorf("mcp isError result lacks structuredContent")
+	}
+	n, ok := sc["exit_code"].(float64)
+	if !ok || n != float64(int(n)) {
+		return domain.ExitInternalError, fmt.Errorf("mcp structuredContent.exit_code is not an integer")
+	}
+	return domain.ExitCode(int(n)), nil
 }
 
 type inProcSpawnerBridge struct {

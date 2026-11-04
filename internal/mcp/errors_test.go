@@ -87,3 +87,19 @@ func TestTokenRedaction_ZeroLeakage(t *testing.T) {
 		t.Errorf("MapSubprocessError leaked raw token: %s", res.Content[0].Text)
 	}
 }
+
+// TC-010-04: 구조화 필드가 채워지고 원시 토큰이 어디에도 노출되지 않는다.
+func TestMapSubprocessError_StructuredContent(t *testing.T) {
+	raw := "bad token eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl end"
+	res := MapSubprocessError(int(domain.ExitAuthzDenied), "NO_ACTIVE_GRANT", raw)
+	sc := res.StructuredContent
+	if sc == nil {
+		t.Fatal("StructuredContent is nil")
+	}
+	if sc.ExitCode != 12 || sc.Reason != domain.Reason("NO_ACTIVE_GRANT") {
+		t.Fatalf("unexpected detail: %+v", sc)
+	}
+	if ContainsRawToken(sc.Message) || ContainsRawToken(res.Content[0].Text) {
+		t.Fatal("raw token leaked")
+	}
+}

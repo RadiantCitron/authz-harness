@@ -11,6 +11,7 @@ import (
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
+	"authz-harness/internal/mcp"
 )
 
 // TC-040-06: harnessStack.Close() 호출 시 리소스 정상 해제 검증
@@ -95,5 +96,28 @@ func TestTC_040_08_ZoneB_NoZoneAAccess(t *testing.T) {
 	}
 	if claims.Claims.Subject != "worker-zb" {
 		t.Fatalf("expected subject worker-zb, got %s", claims.Claims.Subject)
+	}
+}
+
+// TC-010-05: isError 인데 structuredContent 가 없으면 fail-closed (ExitInternalError).
+func TestExitCodeFromResponse_FailClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		resp mcp.JSONRPCResponse
+		want domain.ExitCode
+		err  bool
+	}{
+		{"structuredContent 없음", mcp.JSONRPCResponse{Result: map[string]any{"isError": true}}, domain.ExitInternalError, true},
+		{"exit_code 비숫자", mcp.JSONRPCResponse{Result: map[string]any{"isError": true, "structuredContent": map[string]any{"exit_code": "12"}}}, domain.ExitInternalError, true},
+		{"정상 구조", mcp.JSONRPCResponse{Result: map[string]any{"isError": true, "structuredContent": map[string]any{"exit_code": float64(13)}}}, domain.ExitPathViolation, false},
+		{"성공", mcp.JSONRPCResponse{Result: map[string]any{}}, domain.ExitSuccess, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := exitCodeFromResponse(&c.resp)
+			if got != c.want || (err != nil) != c.err {
+				t.Fatalf("got (%d, %v) want (%d, err=%v)", got, err, c.want, c.err)
+			}
+		})
 	}
 }

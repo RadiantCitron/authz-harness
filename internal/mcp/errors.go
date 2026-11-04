@@ -51,6 +51,11 @@ func MapSubprocessError(exitCode int, rawReason string, rawErrMsg string) *ToolE
 			{Type: "text", Text: detail},
 		},
 		IsError: true,
+		StructuredContent: &ErrorDetail{
+			ExitCode: exitCode,
+			Reason:   reason,
+			Message:  sanitizedMsg,
+		},
 	}
 }
 

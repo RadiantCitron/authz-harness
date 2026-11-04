@@ -32,6 +32,9 @@ const (
 type ToolExecutionResult struct {
 	Content []ToolContent `json:"content"`
 	IsError bool          `json:"isError,omitempty"`
+
+	// StructuredContent 는 거부 시 종료 코드·사유를 기계가 읽을 수 있게 담는다 (MCP CallToolResult 표준 선택 필드).
+	StructuredContent *ErrorDetail `json:"structuredContent,omitempty"`
 }
 
 // ToolContent 는 MCP 결과 내 개별 컨텐츠 블록이다.

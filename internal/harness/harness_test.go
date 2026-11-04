@@ -2,8 +2,10 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -565,5 +567,53 @@ func TestTC_050_03_TraceIDMismatchFails(t *testing.T) {
 	}
 	if res.AuditPassed {
 		t.Fatal("expected AuditPassed to be false")
+	}
+}
+
+// TC-010-01~03: 불변식 위반이 판정을 뒤집는지, 일반 에러는 기존 동작을 유지하는지 검증한다.
+func TestRunner_InvariantViolationJudgement(t *testing.T) {
+	tests := []struct {
+		name         string
+		code         domain.ExitCode
+		err          error
+		wantPassed   bool
+		wantInvReason bool
+	}{
+		{"TC-010-01 에러 없음", domain.ExitAuthzDenied, nil, true, false},
+		{"TC-010-02 불변식 위반", domain.ExitAuthzDenied, Invariantf("child alive"), false, true},
+		{"TC-010-03 일반 에러 + 비0 코드", domain.ExitAuthzDenied, errors.New("audit write failed"), true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := NewDefaultRunner(WithBaseDir(t.TempDir()))
+			sc := &dummyScenario{
+				meta: ScenarioMetadata{
+					ID: "E2E-TEST-INV", Group: "G0", Name: "invariant",
+					Expected: ExpectedAssertion{ExitCode: domain.ExitAuthzDenied},
+				},
+				execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
+					return tc.code, tc.err
+				},
+			}
+			if err := runner.Register(sc); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+			res, err := runner.RunScenario(context.Background(), "E2E-TEST-INV")
+			if err != nil {
+				t.Fatalf("RunScenario: %v", err)
+			}
+			if res.Passed != tc.wantPassed {
+				t.Fatalf("Passed=%v want %v (reasons=%v)", res.Passed, tc.wantPassed, res.Assertion.FailureReasons)
+			}
+			found := false
+			for _, r := range res.Assertion.FailureReasons {
+				if strings.Contains(r, "invariant violation") {
+					found = true
+				}
+			}
+			if found != tc.wantInvReason {
+				t.Fatalf("invariant reason present=%v want %v", found, tc.wantInvReason)
+			}
+		})
 	}
 }

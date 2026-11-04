@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -213,7 +214,14 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 	assertionRes := r.evaluator.Evaluate(env, actualExitCode, meta.Expected)
 	duration := time.Since(startTime)
 
-	overallPassed := assertionRes.Passed && (execErr == nil || actualExitCode != domain.ExitSuccess)
+	var iv *InvariantViolation
+	invariantBroken := errors.As(execErr, &iv)
+	if invariantBroken {
+		assertionRes.FailureReasons = append(assertionRes.FailureReasons, "invariant violation: "+iv.Detail)
+	}
+
+	overallPassed := assertionRes.Passed && !invariantBroken &&
+		(execErr == nil || actualExitCode != domain.ExitSuccess)
 
 	return ScenarioResult{
 		Metadata:  meta,
