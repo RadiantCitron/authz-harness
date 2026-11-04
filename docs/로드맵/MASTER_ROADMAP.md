@@ -41,7 +41,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 2. **상용 대규모 분산 IAM/IdP 구축**: 멀티 리전 복제, 고가용성 클러스터링, 외부 OIDC 연합(Federation), LDAP/AD 연동, 엔터프라이즈 외부 DB 서버 의존은 다루지 않는다.
 3. **브라우저 기반 UI 및 대화형 로그인 플로우**: OAuth 2.1의 Authorization Code + 브라우저 리다이렉트 + 로그인 웹 UI + 동의 화면(Consent Screen)은 하네스 목적에 불필요하므로 생략한다.
 4. **복잡한 파일/시스템 작업 (ADR 0003 C-2 조건부 해제 반영)**: 초기(Phase 0~9)에는 `file:read`와 `file:write`로만 한정하며, Phase 16([16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md))에 한해 [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-2 조건 하에서 결정론적 루프백 전용 `net:fetch`와 allow-list ID 전용 `exec:run` 가짜 도구만 PEP 단일 입출구 위로 허용한다(외부 인터넷 접속 및 임의 셸 명령 실행은 영구 금지).
-5. **컨테이너·가상머신 제품화 (ADR 0003 C-1 조건부 해제 반영)**: 전체 시스템 컨테이너 런타임이나 VM 구축은 비목표로 유지하되, Phase 11([11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md))에서 [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-1에 따라 서브프로세스 워커 한정 커널 격리 어댑터(`internal/confinement`: macOS Seatbelt/VFS DAC, Linux Landlock/seccomp)를 검증한다.
+5. **컨테이너·가상머신 제품화 (ADR 0003 C-1 조건부 해제 반영)**: 전체 시스템 컨테이너 런타임이나 VM 구축은 비목표로 유지하되, Phase 11([11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md))에서 [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-1에 따라 서브프로세스 워커 한정 커널 격리 어댑터(`internal/confinement`: macOS Seatbelt, Linux Landlock + 신뢰 런처)를 검증한다([020번 보고서](../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md)로 VFS DAC 폐기).
 6. **Refresh Token 회전 (ADR 0003 C-4 조건부 해제 반영)**: Refresh Token 발급 및 회전 메커니즘은 영구 비목표로 유지하되, Phase 13([13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md))에서 만료 임박 시 부모 토큰의 현재 유효성과 Epoch/예산을 재검증하여 새 단기 자식 토큰을 발급받는 **부모 기반 재교환(`re-exchange`)** 흐름만 허용한다.
 
 ## 5) 성공 정의 (Definition of Success) — 데모·종료 조건
@@ -389,7 +389,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [10-서브프로세스-자원-및-수명-통제](10-서브프로세스-자원-및-수명-통제/README.md), 결함 워커 별도 실행 파일(`internal/harness/faultworker`, [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-7 개정), `G9` 시나리오(`E2E-40`~`44`).
 
 ### Phase 11: OS 수준 커널 격리 및 악의 워커 차단 (`G10`: `E2E-45`~`E2E-49`)
-* **목적**: PEP 배선을 우회해 직접 OS 시스템콜(`open`, `socket`, `fork`)을 호출하는 악의 워커가 격리를 껐을 때(대조군)는 성공하지만 커널 격리(`internal/confinement`: macOS Seatbelt/VFS DAC + `ReadOnlyPaths`, Linux Landlock/seccomp)를 켰을 때(실험군)는 커널 수준에서 차단(`Exit 13`, `CONFINEMENT_VIOLATION`)됨을 쌍 대조로 증명한다.
+* **목적**: PEP 배선을 우회해 직접 OS 시스템콜(`open`, `socket`, `fork`)을 호출하는 악의 워커가 격리를 껐을 때(대조군)는 성공하지만 커널 격리(`internal/confinement`: macOS Seatbelt, Linux Landlock + `confine-exec` 신뢰 런처, 허용 목록 정책)를 켰을 때(실험군)는 차단됨을 쌍 대조로 증명한다. 차단 판정은 부모가 관찰한 사실(canary 미유출·파일 미생성·리스너 accept 0건)로만 내리고, 시나리오가 `Exit 13`을 반환한다([020번 보고서](../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md)).
 * **주요 산출물**: [11-os-수준-격리-및-악의-워커-차단](11-os-수준-격리-및-악의-워커-차단/README.md), `internal/confinement`, `TC-110-01` AST 가드, `G10` 시나리오(`E2E-45`~`49`).
 
 ### Phase 12: 예산(Budget) 단조 축소 위임 및 원장 정산 (`G11`: `E2E-50`~`E2E-54`)
