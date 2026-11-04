@@ -347,4 +347,32 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+	// TC-110-01: 코어 패키지는 OS 격리 어댑터(internal/confinement)를 import 하지 않는다.
+	t.Run("TC-110-01: 코어 패키지의 internal/confinement import 0건", func(t *testing.T) {
+		for _, rel := range []string{"domain", "authn", "authz", "jail", "audit"} {
+			dir := filepath.Join(root, "internal", rel)
+			err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+					return nil
+				}
+				f, perr := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+				if perr != nil {
+					return perr
+				}
+				for _, imp := range f.Imports {
+					if imp.Path.Value == `"authz-harness/internal/confinement"` {
+						r, _ := filepath.Rel(root, path)
+						t.Errorf("TC-110-01 violation: %s imports internal/confinement", r)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("failed to walk %s: %v", dir, err)
+			}
+		}
+	})
 }

@@ -117,7 +117,8 @@ func ExitCodeForReason(r Reason) ExitCode {
 	case ReasonResourceTimeout,
 		ReasonResourceOutputLimit:
 		return ExitResourceLimit // 17
-	case ReasonSubprocessAbnormalExit:
+	case ReasonSubprocessAbnormalExit,
+		ReasonConfinementUnavailable:
 		return ExitInternalError // 16
 	default:
 		return ExitInternalError // 16

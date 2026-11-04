@@ -151,4 +151,7 @@ const (
 
 	// ReasonSubprocessAbnormalExit 는 원인을 알 수 없는 자식 비정상 종료(외부 신호·취소·표준 밖 코드)를 나타낸다.
 	ReasonSubprocessAbnormalExit Reason = "SUBPROCESS_ABNORMAL_EXIT"
+
+	// ReasonConfinementUnavailable 은 격리 필수 모드에서 OS 격리를 적용할 수 없어 스폰이 거부되었음을 나타낸다.
+	ReasonConfinementUnavailable Reason = "CONFINEMENT_UNAVAILABLE"
 )
