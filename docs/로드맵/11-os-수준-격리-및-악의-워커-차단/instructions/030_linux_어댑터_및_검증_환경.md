@@ -1,6 +1,6 @@
 # [구현지시서 030] Linux Landlock 어댑터, 신뢰 런처(`confine-exec`) 및 검증 환경 판정
 
-> **문서 상태**: `Draft` (2026-11-04 [020번 보고서](../../../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md) 기준 교정)
+> **문서 상태**: `Done` (Linux: 교차 컴파일만 검증, 런타임 미검증) (2026-11-04 [020번 보고서](../../../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md) 기준 교정)
 > **상위 대시보드**: [11번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md) | [ADR 0003](../../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md)
 > **선행 조건**: [020_macos_seatbelt_어댑터.md](020_macos_seatbelt_어댑터.md) 완료
 > **후속 단계**: [040_스포너_배선_및_fail_closed_모드.md](040_스포너_배선_및_fail_closed_모드.md)
@@ -72,7 +72,7 @@ Linux에서 010의 `Policy`를 Landlock LSM(커널 5.13+)과 `PR_SET_NO_NEW_PRIV
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `landlock_linux.go`, `launcher.go`, `launcher_other.go`, `cli/confine_exec.go` 작성
-- [ ] 교차 컴파일 테스트 통과
-- [ ] 호스트 검증 가능 여부에 따른 정직한 상태 기록 (`Done` 허위 표기 금지)
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [x] `landlock_linux.go`, `launcher.go`, `launcher_other.go`, `cli/confine_exec.go` 작성
+- [x] 교차 컴파일 테스트 통과
+- [x] 호스트 검증 가능 여부에 따른 정직한 상태 기록 (`Done` 허위 표기 금지)
+- [x] 대시보드 상태 갱신 및 변경 파일 단독 커밋

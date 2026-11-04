@@ -116,6 +116,8 @@ func main() {
 			}
 			exitCode := subRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "confine-exec": // 숨김 하위명령: 신뢰 런처 (사용법에 노출하지 않음)
+			os.Exit(int(cli.RunConfineExec(args[1:], os.Stderr)))
 		case "run":
 			runRunner := cli.NewRunRunner(os.Stdout, os.Stderr, "")
 			exitCode := runRunner.Run(context.Background(), args[1:])
