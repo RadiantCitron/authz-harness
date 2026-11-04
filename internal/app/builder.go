@@ -200,12 +200,13 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	var pepGateway pep.Gateway
 	if pdpSvc != nil {
 		gw, err := pep.NewGateway(pep.Config{
-			Verifier:    tokenVerifier,
-			PDP:         pdpSvc,
-			Jail:        workspaceJail,
-			AuditWriter: auditWriter,
-			Clock:       cfg.Clock,
-			Logger:      cfg.Logger,
+			Verifier:     tokenVerifier,
+			PDP:          pdpSvc,
+			Jail:         workspaceJail,
+			AuditWriter:  auditWriter,
+			Clock:        cfg.Clock,
+			Logger:       cfg.Logger,
+			BudgetLedger: budgetLedger,
 		})
 		if err != nil {
 			_ = auditWriter.Close()

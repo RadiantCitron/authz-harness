@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pdp"
 	"authz-harness/internal/domain"
@@ -29,6 +30,9 @@ const (
 
 	// StageGate2cJail 은 Workspace Jail 경로 정규화 및 격리 경계 검증 단계다.
 	StageGate2cJail Stage = "gate2c_jail"
+
+	// StageBudget 은 예산 토큰의 쓰기 사전 차감 단계다 (Gate 2c 뒤, Stage 4 앞).
+	StageBudget Stage = "stage3b_budget"
 
 	// Stage4Audit 은 Fail-Closed 사전 커밋 감사 로그 기록 단계다.
 	Stage4Audit Stage = "stage4_audit"
@@ -87,12 +91,13 @@ type Gateway interface {
 
 // Config 는 Gateway 생성에 필요한 하위 컴포넌트 의존성 주입 구조체다.
 type Config struct {
-	Verifier    token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
-	PDP         pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
-	Jail        jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
-	AuditWriter audit.Writer        // Layer 1: 감사 로그 기록기
-	Clock       domain.Clock        // 결정론적 가상 시계 주입
-	Logger      *slog.Logger        // 관측성 운영 로거 주입 (미주입 시 slog.Default())
+	Verifier     token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
+	PDP          pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
+	Jail         jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
+	AuditWriter  audit.Writer        // Layer 1: 감사 로그 기록기
+	Clock        domain.Clock        // 결정론적 가상 시계 주입
+	Logger       *slog.Logger        // 관측성 운영 로거 주입 (미주입 시 slog.Default())
+	BudgetLedger budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
 }
 
 type gateway struct {
@@ -140,6 +145,11 @@ type pipelineState struct {
 	callerID    string
 	safePath    string
 	failedStage Stage
+
+	// 예산 집행 상태 (환급용). 쓰기 사전 차감 성공 시에만 refundWriteBytes 가 채워진다.
+	budgeted         bool
+	consumed         bool
+	refundWriteBytes int64
 }
 
 // Execute 는 5단계 관문 집행 파이프라인을 실행하며 단일 출구(finalize)를 보장한다.
@@ -196,7 +206,14 @@ func (g *gateway) runStage(ctx context.Context, state *pipelineState, stage Stag
 }
 
 // runPipeline 은 Gate 0부터 Stage 5까지 순차적으로 실행하며, 차단 시 표준 *domain.Error 를 반환한다.
-func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineState) (*Result, error) {
+func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineState) (res *Result, err error) {
+	// 사전 차감 이후 어느 단계든 실패하면 차감분을 환급한다. 환급 실패는 원래 거부 사유를 바꾸지 않는다.
+	defer func() {
+		if err != nil && state.consumed {
+			g.refundBudget(ctx, state)
+		}
+	}()
+
 	// 0. 기본 입력 인자 유효성 검증
 	if err := g.runStage(ctx, state, StageGate0Input, func() error {
 		if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
@@ -241,6 +258,12 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		state.tokenJTI = verifiedClaims.Claims.JWTID
 		if verifiedClaims.Claims.Actor != nil && verifiedClaims.Claims.Actor.Subject != "" {
 			state.callerID = verifiedClaims.Claims.Actor.Subject
+		}
+		if verifiedClaims.Claims.Budget != nil {
+			state.budgeted = true
+			if g.cfg.BudgetLedger == nil {
+				return domain.NewError(domain.ReasonInternalError, string(StageGate1AuthN), "budget token presented but no budget ledger is configured (fail-closed)", nil)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -292,6 +315,21 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		return nil, err
 	}
 
+	// Stage 3b: Budget - 쓰기 사전 차감 (예산 토큰만, 읽기는 바이트 수를 알 수 없어 Stage 5 에서 사후 차감)
+	if state.budgeted && state.normAction == domain.ActionFileWrite {
+		if err := g.runStage(ctx, state, StageBudget, func() error {
+			n := int64(len(req.Data))
+			if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, 0, n); consumeErr != nil {
+				return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(StageBudget), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
+			}
+			state.consumed = true
+			state.refundWriteBytes = n
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
 	// Stage 4: Pre-Commit Audit Verification (Fail-Closed, Zero Side-Effects on Failure)
 	if err := g.runStage(ctx, state, Stage4Audit, func() error {
 		if req.InjectAuditFailure {
@@ -326,6 +364,12 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 			if readErr != nil {
 				return domain.NewError(domain.ReasonInternalError, string(Stage5FileIO), fmt.Sprintf("pep: failed to read file in jail: %v", readErr), readErr)
 			}
+			if state.budgeted {
+				// 읽기 사후 차감: 실패하면 데이터를 결과에 담지 않고 버린다 (읽기는 부작용 없음)
+				if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, int64(len(data)), 0); consumeErr != nil {
+					return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
+				}
+			}
 			res.Data = data
 			res.BytesRead = len(data)
 
@@ -343,6 +387,17 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 	}
 
 	return finalRes, nil
+}
+
+// refundBudget 은 사전 차감된 쓰기 예산을 원장에 환급한다. 실패는 운영 로그에만 남긴다.
+func (g *gateway) refundBudget(ctx context.Context, state *pipelineState) {
+	if err := g.cfg.BudgetLedger.Refund(state.tokenJTI, 1, 0, state.refundWriteBytes); err != nil {
+		g.logger.ErrorContext(ctx, "failed to refund budget",
+			"trace_id", state.traceID,
+			"token_jti", state.tokenJTI,
+			"error", err.Error(),
+		)
+	}
 }
 
 // finalize 는 SESE 단일 출구 지점으로, 성공 및 모든 실패 경로를 정규화하고
@@ -456,4 +511,3 @@ func extractReasonFromTokenError(err error) domain.Reason {
 	}
 	return domain.ReasonFromError(err, domain.ReasonInvalidToken)
 }
-

@@ -378,8 +378,9 @@ func stageBoxStatus(targetStage pep.Stage, res *pep.Result) (string, string) {
 		pep.StageGate1AuthN: 1,
 		pep.StageGate2AuthZ: 2,
 		pep.StageGate2cJail: 3,
-		pep.Stage4Audit:     4,
-		pep.Stage5FileIO:    5,
+		pep.StageBudget:     4,
+		pep.Stage4Audit:     5,
+		pep.Stage5FileIO:    6,
 	}
 
 	targetIdx := stageOrder[targetStage]
