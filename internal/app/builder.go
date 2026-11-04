@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/budget"
+	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pap"
@@ -24,6 +26,7 @@ type AppConfig struct {
 	PrivKeyPath  string
 	PubJWKSPath  string
 	ReplayPath   string
+	BudgetPath   string // 비면 filepath.Dir(ReplayPath)/budget_ledger.json
 	AuditPath    string
 	WorkspaceDir string
 	VerifyOnly   bool // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
@@ -33,20 +36,22 @@ type AppConfig struct {
 
 // AppStack 은 단일 합성 루트(Composition Root)를 통해 생성된 일원화된 컴포넌트 집합이다.
 type AppStack struct {
-	Config        AppConfig
-	AuditWriter   audit.Writer
-	KeyStore      keys.Store
-	KeyManager    keys.KeyManager
-	TokenIssuer   token.TokenIssuer // VerifyOnly 모드에서는 nil
-	TokenVerifier token.TokenVerifier
-	ClientReg     *token.InMemoryClientRegistry // VerifyOnly 모드에서는 nil
-	ReplayLedger  token.ReplayLedger
-	StateStore    state.Store
-	PAP           pap.Service // VerifyOnly 모드에서는 nil
-	PIP           pip.Service
-	PDP           pdp.Service
-	Jail          jail.Jail
-	PEP           pep.Gateway
+	Config          AppConfig
+	AuditWriter     audit.Writer
+	KeyStore        keys.Store
+	KeyManager      keys.KeyManager
+	TokenIssuer     token.TokenIssuer // VerifyOnly 모드에서는 nil
+	TokenVerifier   token.TokenVerifier
+	ClientReg       *token.InMemoryClientRegistry // VerifyOnly 모드에서는 nil
+	ReplayLedger    token.ReplayLedger
+	BudgetLedger    budget.Ledger
+	ExchangeService exchange.Service // VerifyOnly 모드에서는 nil
+	StateStore      state.Store
+	PAP             pap.Service // VerifyOnly 모드에서는 nil
+	PIP             pip.Service
+	PDP             pdp.Service
+	Jail            jail.Jail
+	PEP             pep.Gateway
 }
 
 // Close 는 AppStack 내부의 리소스(AuditWriter 파일 디스크립터 등)를 안전하게 정리한다.
@@ -63,11 +68,16 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		cfg.Clock = domain.RealClock{}
 	}
 
+	if cfg.BudgetPath == "" {
+		cfg.BudgetPath = filepath.Join(filepath.Dir(cfg.ReplayPath), "budget_ledger.json")
+	}
+
 	// 1. 디렉터리 준비
 	pathsToEnsure := []string{
 		cfg.StatePath,
 		cfg.PubJWKSPath,
 		cfg.ReplayPath,
+		cfg.BudgetPath,
 		cfg.AuditPath,
 	}
 	if !cfg.VerifyOnly && cfg.PrivKeyPath != "" {
@@ -128,11 +138,17 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	}
 
 	// 4. 토큰 발급기 및 검증기
+	budgetLedger, err := budget.NewFileLedger(cfg.BudgetPath, cfg.Clock)
+	if err != nil {
+		_ = auditWriter.Close()
+		return nil, fmt.Errorf("app builder: budget ledger: %w", err)
+	}
+
 	var clientReg *token.InMemoryClientRegistry
 	var tokenIssuer token.TokenIssuer
 	if !cfg.VerifyOnly {
 		clientReg = token.NewInMemoryClientRegistry()
-		tokenIssuer = token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock)
+		tokenIssuer = token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock, token.WithBudgetLedger(budgetLedger))
 	}
 
 	replayLedger, err := token.NewFileReplayLedger(cfg.ReplayPath, cfg.Clock)
@@ -142,6 +158,12 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	}
 
 	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, cfg.Clock)
+
+	var exchangeSvc exchange.Service
+	if !cfg.VerifyOnly {
+		exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock,
+			exchange.WithBudgetLedger(budgetLedger))
+	}
 
 	// 5. 인가 상태 저장소 및 PAP / PIP / PDP
 	var stateStore state.Store
@@ -193,19 +215,21 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	}
 
 	return &AppStack{
-		Config:        cfg,
-		AuditWriter:   auditWriter,
-		KeyStore:      keyStore,
-		KeyManager:    keyMgr,
-		TokenIssuer:   tokenIssuer,
-		TokenVerifier: tokenVerifier,
-		ClientReg:     clientReg,
-		ReplayLedger:  replayLedger,
-		StateStore:    stateStore,
-		PAP:           papSvc,
-		PIP:           pipSvc,
-		PDP:           pdpSvc,
-		Jail:          workspaceJail,
-		PEP:           pepGateway,
+		Config:          cfg,
+		AuditWriter:     auditWriter,
+		KeyStore:        keyStore,
+		KeyManager:      keyMgr,
+		TokenIssuer:     tokenIssuer,
+		TokenVerifier:   tokenVerifier,
+		ClientReg:       clientReg,
+		ReplayLedger:    replayLedger,
+		BudgetLedger:    budgetLedger,
+		ExchangeService: exchangeSvc,
+		StateStore:      stateStore,
+		PAP:             papSvc,
+		PIP:             pipSvc,
+		PDP:             pdpSvc,
+		Jail:            workspaceJail,
+		PEP:             pepGateway,
 	}, nil
 }

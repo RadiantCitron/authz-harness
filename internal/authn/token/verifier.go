@@ -230,7 +230,8 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	}
 
 	// 9단계: Replay 원장 소비 검사
-	if opts.RecordReplay && v.replayLedger != nil {
+	// 예산 토큰(Budget != nil)은 다회 호출 토큰이므로 1회성 소비를 건너뛰고 예산 원장이 횟수를 통제한다.
+	if opts.RecordReplay && v.replayLedger != nil && claims.Budget == nil {
 		expTime := time.Unix(claims.ExpiresAt, 0).UTC()
 		if err := v.replayLedger.CheckAndConsume(claims.JWTID, expTime); err != nil {
 			v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenReplayDetected, err.Error())

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 )
@@ -21,6 +22,7 @@ type ExchangeRequest struct {
 	Scope        string
 	Audience     string
 	TTL          time.Duration
+	Budget       *domain.Budget // 자식 예산 상한. 부모 예산이 있으면 필수.
 }
 
 // ExchangeResult 는 토큰 교환 결과다.
@@ -44,6 +46,15 @@ type ExchangeService struct {
 	validator   DownscopeValidator
 	auditWriter audit.Writer
 	clock       domain.Clock
+	budgets     budget.Ledger
+}
+
+// Option 은 ExchangeService 의 선택적 의존성 주입 옵션이다.
+type Option func(*ExchangeService)
+
+// WithBudgetLedger 는 예산 예약에 쓸 원장을 주입한다. 없으면 예산 교환은 Fail-Closed 로 거부된다.
+func WithBudgetLedger(l budget.Ledger) Option {
+	return func(s *ExchangeService) { s.budgets = l }
 }
 
 // NewExchangeService 는 ExchangeService 인스턴스를 생성한다.
@@ -54,6 +65,7 @@ func NewExchangeService(
 	validator DownscopeValidator,
 	auditWriter audit.Writer,
 	clock domain.Clock,
+	opts ...Option,
 ) *ExchangeService {
 	if clock == nil {
 		clock = domain.RealClock{}
@@ -64,7 +76,7 @@ func NewExchangeService(
 	if clients == nil {
 		clients = token.NewInMemoryClientRegistry()
 	}
-	return &ExchangeService{
+	s := &ExchangeService{
 		issuer:      issuer,
 		verifier:    verifier,
 		clients:     clients,
@@ -72,6 +84,10 @@ func NewExchangeService(
 		auditWriter: auditWriter,
 		clock:       clock,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
@@ -125,6 +141,21 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		return nil, domain.NewError(reason, "exchange", "downscope validation failed", err)
 	}
 
+	// 4-1. 예산 정적 검사 및 원장 필수 확인 (예산이 관여할 때만)
+	budgetInvolved := parentClaims.Budget != nil || req.Budget != nil
+	if budgetInvolved {
+		if err := ValidateBudgetDownscope(parentClaims.Budget, req.Budget); err != nil {
+			reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
+			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
+			return nil, domain.NewError(reason, "exchange", "budget downscope validation failed", err)
+		}
+		if s.budgets == nil {
+			err := errors.New("budget ledger is not configured")
+			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, err.Error())
+			return nil, domain.NewError(domain.ReasonInternalError, "exchange", "budget exchange requires a budget ledger", err)
+		}
+	}
+
 	// 5. act 체인 구성 및 깊이 계산
 	// 부모 정보를 현재 act 로 지정하고 부모의 기존 act 체인을 중첩
 	childActor := &domain.ActorClaim{
@@ -150,12 +181,22 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		Epoch:           parentClaims.Epoch,
 		Actor:           childActor,
 		DelegationDepth: childDepth,
+		Budget:          req.Budget,
 	}
 
 	childResult, err := s.issuer.IssueToken(issueReq, token.IssueOptions{}, auditCtx)
 	if err != nil {
 		s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInvalidToken, err.Error())
 		return nil, fmt.Errorf("failed to issue child token: %w", err)
+	}
+
+	// 6-1. 원장 예약. 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
+	if budgetInvolved {
+		if err := s.budgets.Reserve(parentClaims.JWTID, childResult.Claims.JWTID, *req.Budget, childResult.Claims.ExpiresAt); err != nil {
+			reason := domain.ReasonFromError(err, domain.ReasonInternalError)
+			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
+			return nil, domain.NewError(reason, "exchange", "budget reservation failed", err)
+		}
 	}
 
 	// 7. Zero Leakage 감사 이벤트 기록: token.exchanged (원시 JWT 노출 배제)

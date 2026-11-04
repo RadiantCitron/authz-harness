@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/domain"
 )
@@ -27,6 +28,7 @@ type IssueRequest struct {
 	Epoch           domain.Epoch
 	Actor           *domain.ActorClaim
 	DelegationDepth int
+	Budget          *domain.Budget // 호출·바이트 예산 상한. 위임 체인 없는 루트면 원장에 등록된다.
 }
 
 // IssueOptions 는 결함 주입(Fault Injection) 등을 위한 발급 옵션이다.
@@ -64,17 +66,26 @@ type Service struct {
 	clock       domain.Clock
 	defaultAud  string
 	defaultTTL  time.Duration
+	budgets     budget.Ledger
+}
+
+// ServiceOption 은 Service 의 선택적 의존성 주입 옵션이다.
+type ServiceOption func(*Service)
+
+// WithBudgetLedger 는 예산 루트 토큰 등록에 쓸 예산 원장을 주입한다.
+func WithBudgetLedger(l budget.Ledger) ServiceOption {
+	return func(s *Service) { s.budgets = l }
 }
 
 // NewService 는 신규 Service 인스턴스를 생성한다.
-func NewService(keyMgr keys.KeyManager, clients ClientRegistry, auditWriter audit.Writer, clock domain.Clock) *Service {
+func NewService(keyMgr keys.KeyManager, clients ClientRegistry, auditWriter audit.Writer, clock domain.Clock, opts ...ServiceOption) *Service {
 	if clock == nil {
 		clock = domain.RealClock{}
 	}
 	if clients == nil {
 		clients = NewInMemoryClientRegistry()
 	}
-	return &Service{
+	s := &Service{
 		keyMgr:      keyMgr,
 		clients:     clients,
 		auditWriter: auditWriter,
@@ -82,6 +93,10 @@ func NewService(keyMgr keys.KeyManager, clients ClientRegistry, auditWriter audi
 		defaultAud:  domain.DefaultAudience,
 		defaultTTL:  1 * time.Hour,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // IssueToken 은 클라이언트 인증 후 RFC 9068 Bearer Access Token을 생성하고 Zone A Ed25519 개인키로 서명한다.
@@ -166,6 +181,10 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		Actor:           req.Actor,
 		DelegationDepth: req.DelegationDepth,
 	}
+	if req.Budget != nil {
+		b := *req.Budget
+		claims.Budget = &b
+	}
 
 	if opts.TamperExpired {
 		// 1시간 전 발급, 30분 전 만료
@@ -176,6 +195,12 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 
 	if err := claims.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid token claims: %w", err)
+	}
+
+	// 4-1. 예산 루트(위임 체인 없음)는 원장 필수. 없으면 Fail-Closed 로 발급하지 않는다.
+	registerBudget := claims.Budget != nil && claims.Actor == nil
+	if registerBudget && s.budgets == nil {
+		return nil, domain.NewError(domain.ReasonInternalError, "issue", "budget ledger is not configured for budget token issuance", nil)
 	}
 
 	// 5. 헤더 구성
@@ -221,6 +246,13 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 
 	tokenString := signingInput + "." + signatureB64
 
+	// 5-1. 예산 루트 등록. 실패하면 토큰을 반환하지 않는다.
+	if registerBudget {
+		if err := s.budgets.Init(claims.JWTID, *claims.Budget, claims.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("failed to register budget ledger entry: %w", err)
+		}
+	}
+
 	// 6. Zero Leakage 감사 이벤트 기록: 원시 토큰 배제, jti 및 메타데이터만 기록
 	if s.auditWriter != nil {
 		traceID := auditCtx.TraceID
@@ -240,17 +272,17 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 			Action:    "token.issued",
 			Success:   true,
 			Metadata: map[string]interface{}{
-				"token_jti":   claims.JWTID,
-				"token_kid":   header.KeyID,
-				"token_typ":   header.Type,
-				"token_alg":   header.Algorithm,
-				"client_id":   claims.ClientID,
-				"subject":     claims.Subject,
-				"audience":    claims.Audience,
-				"scope":       claims.Scope,
-				"expires_at":  claims.ExpiresAt,
-				"epoch":       int64(claims.Epoch),
-				"tampered":    opts.TamperSignature || opts.TamperAlgNone || opts.TamperTyp != "" || opts.TamperExpired,
+				"token_jti":  claims.JWTID,
+				"token_kid":  header.KeyID,
+				"token_typ":  header.Type,
+				"token_alg":  header.Algorithm,
+				"client_id":  claims.ClientID,
+				"subject":    claims.Subject,
+				"audience":   claims.Audience,
+				"scope":      claims.Scope,
+				"expires_at": claims.ExpiresAt,
+				"epoch":      int64(claims.Epoch),
+				"tampered":   opts.TamperSignature || opts.TamperAlgNone || opts.TamperTyp != "" || opts.TamperExpired,
 			},
 		}
 		if err := s.auditWriter.Log(auditEv); err != nil {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"authz-harness/internal/app"
+	"authz-harness/internal/domain"
 )
 
 type mockClock struct {
@@ -133,5 +134,49 @@ func TestBuildStack_VerifyOnlyMode(t *testing.T) {
 	}
 	if stack.PEP == nil {
 		t.Error("PEP should not be nil")
+	}
+}
+
+// TC-030-09: BudgetPath 가 비면 ReplayPath 디렉터리 기준으로 파생되고, 같은 원장을 공유한다.
+func TestBuildStack_BudgetPathDerivedFromReplayPath(t *testing.T) {
+	d := t.TempDir()
+	cfg := app.AppConfig{
+		StatePath:    filepath.Join(d, "state.json"),
+		PrivKeyPath:  filepath.Join(d, "keys_priv.json"),
+		PubJWKSPath:  filepath.Join(d, "keys_pub.json"),
+		ReplayPath:   filepath.Join(d, "sub", "replay_ledger.json"),
+		AuditPath:    filepath.Join(d, "audit.jsonl"),
+		WorkspaceDir: filepath.Join(d, "ws"),
+		Clock:        mockClock{now: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)},
+	}
+	stack, err := app.BuildStack(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stack.Close()
+	if stack.BudgetLedger == nil || stack.ExchangeService == nil {
+		t.Fatal("BudgetLedger/ExchangeService must be wired")
+	}
+	if got, want := stack.Config.BudgetPath, filepath.Join(d, "sub", "budget_ledger.json"); got != want {
+		t.Fatalf("BudgetPath=%s want %s", got, want)
+	}
+	if err := stack.BudgetLedger.Init("j1", domain.Budget{MaxCalls: 2}, 1<<40); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stack.Config.BudgetPath); err != nil {
+		t.Fatalf("ledger file not created at derived path: %v", err)
+	}
+
+	cfg.VerifyOnly = true
+	vo, err := app.BuildStack(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer vo.Close()
+	if vo.ExchangeService != nil {
+		t.Error("VerifyOnly must not build ExchangeService")
+	}
+	if _, ok, _ := vo.BudgetLedger.Get("j1"); !ok {
+		t.Error("VerifyOnly stack must see the shared ledger")
 	}
 }

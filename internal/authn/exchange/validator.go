@@ -127,3 +127,27 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 
 	return nil
 }
+
+// ValidateBudgetDownscope 는 예산 단조 축소(자식 <= 부모 클레임 상한)를 정적으로 검증한다.
+// 부모 예산 없이 자식만 예산을 요청하면 예약할 부모 엔트리가 없으므로 거부한다(예산은 루트 발급에서만 시작).
+// 부모만 예산이 있고 자식이 없으면 무제한 격상이므로 거부한다.
+func ValidateBudgetDownscope(parent, child *domain.Budget) error {
+	deny := func(msg string) error {
+		return domain.NewError(domain.ReasonDelegationBudgetExceeded, "downscope_validator", msg, nil)
+	}
+	switch {
+	case parent == nil && child == nil:
+		return nil
+	case parent == nil:
+		return deny("child budget requested but parent has no budget")
+	case child == nil:
+		return deny("child must carry a budget when parent has one")
+	}
+	if err := child.Validate(); err != nil {
+		return err
+	}
+	if !child.Within(*parent) {
+		return deny("child budget exceeds parent budget")
+	}
+	return nil
+}
