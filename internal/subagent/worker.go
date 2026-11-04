@@ -89,6 +89,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 func (w *SubagentWorker) ExecuteStream(ctx context.Context, in io.Reader, out io.Writer) int {
 	var req SubagentRequest
 	dec := json.NewDecoder(in)
+	dec.DisallowUnknownFields() // Fail-Closed: 모르는 필드(예: 제거된 결함 주입 스위치)는 조용히 무시하지 않고 거부
 	if err := dec.Decode(&req); err != nil {
 		exitCode := int(domain.ExitBadInput)
 		resp := SubagentResponse{

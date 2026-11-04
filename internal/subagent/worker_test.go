@@ -590,3 +590,53 @@ func TestTC_040_01_StrictNoStateStoreImport(t *testing.T) {
 		t.Fatalf("TC-040-01 violations found (subagent package must not import Zone B stores):\n%s", strings.Join(violations, "\n"))
 	}
 }
+
+// plan-005 AT-01·AT-02·AT-03: 프레임은 모르는 필드를 거부하고(Fail-Closed), 정상 프레임은 이전처럼 실행된다.
+func TestSubagentWorker_StrictFrameDecoding(t *testing.T) {
+	tests := []struct {
+		name       string
+		extra      string // 정상 프레임 끝에 덧붙일 JSON 조각
+		wantExit   domain.ExitCode
+		wantReason string
+		wantFile   bool
+	}{
+		{"AT-01 제거된 inject_revoke_before_io", `,"inject_revoke_before_io":true`, domain.ExitBadInput, string(domain.ReasonInvalidArguments), false},
+		{"AT-02 임의의 모르는 필드", `,"foo":1`, domain.ExitBadInput, string(domain.ReasonInvalidArguments), false},
+		{"AT-03 기존 필드만 있는 정상 프레임", ``, domain.ExitSuccess, "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := setupSubagentFixture(t)
+			sub := "worker-strict"
+			grantPolicy(t, f, sub, domain.ActionFileWrite, "strict.txt")
+			tok := issueTestToken(t, f, sub, "file:write:strict.txt")
+
+			frame := fmt.Sprintf(`{"version":"1.0","trace_id":"tr-strict","token":%q,"action":"file:write","file_path":"strict.txt","data":"x"%s}`, tok, tc.extra)
+			outBuf := new(bytes.Buffer)
+			exit := f.worker.ExecuteStream(context.Background(), bytes.NewBufferString(frame), outBuf)
+			if exit != int(tc.wantExit) {
+				t.Fatalf("exit = %d, want %d (out: %s)", exit, tc.wantExit, outBuf.String())
+			}
+			var resp subagent.SubagentResponse
+			if err := json.Unmarshal(outBuf.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if tc.wantReason != "" && resp.Reason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", resp.Reason, tc.wantReason)
+			}
+			_, statErr := os.Stat(filepath.Join(f.workspaceDir, "strict.txt"))
+			if (statErr == nil) != tc.wantFile {
+				t.Errorf("file exists = %v, want %v", statErr == nil, tc.wantFile)
+			}
+			grants, err := f.papSvc.ListGrants(context.Background(), pap.GrantFilter{})
+			if err != nil {
+				t.Fatalf("list grants: %v", err)
+			}
+			for _, g := range grants {
+				if g.Status != domain.GrantStatusActive {
+					t.Errorf("grant %s status = %s, want active", g.ID, g.Status)
+				}
+			}
+		})
+	}
+}
