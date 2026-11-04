@@ -50,6 +50,12 @@ func TestHelperProcess(t *testing.T) {
 		fmt.Fprintf(os.Stdout, "CHILD_PID=%d\n", grand.Process.Pid)
 		time.Sleep(1 * time.Hour)
 
+	case "write_marker": // 자식이 기동했음을 부모가 관찰할 표식 파일을 남긴다.
+		if err := os.WriteFile(os.Getenv("MARKER_FILE"), []byte("ok"), 0o644); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+
 	case "exit_2":
 		os.Exit(2)
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/confinement"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
 )
@@ -23,6 +24,10 @@ type SpawnConfig struct {
 	Limits     Limits       // 자원·수명 한계 (영값은 기본값으로 정규화)
 	Audit      audit.Writer // 부모 감사 로거 (선택적)
 	ExtraEnv   []string     // 추가 안전 환경변수 (선택적)
+
+	// Confiner·Confinement 의 영값(nil, Require=false)은 격리 꺼짐이며 기존 동작과 같다.
+	Confiner    confinement.Confiner // OS 격리 어댑터 (nil 이면 Require 시 NoopConfiner 로 취급해 거부)
+	Confinement confinement.Policy   // 격리 정책
 }
 
 // SpawnResult 는 자식 프로세스 실행 후 수거된 결과다.
@@ -114,6 +119,51 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 	stderrBuf := newLimitedBuffer(s.cfg.Limits.MaxOutputBytes, cancel)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
+
+	// 2-1. OS 격리 적용 (단일 지점). 부모가 아는 사실(적용했는가/못 했는가)만 감사한다.
+	// 자식의 종료 코드(13 등)는 재해석하지 않는다: 차단 여부는 부모 관찰(시나리오)이 판정한다.
+	if s.cfg.Confiner != nil || s.cfg.Confinement.Require {
+		c := s.cfg.Confiner
+		if c == nil {
+			c = confinement.NoopConfiner{}
+		}
+		perr := c.Prepare(cmd, s.cfg.Confinement)
+		if s.cfg.Audit != nil {
+			ev := audit.Event{
+				Timestamp: time.Now(),
+				TraceID:   req.TraceID,
+				Step:      "ORCHESTRATE_CONFINE",
+				Actor:     "orchestrator",
+				Action:    AuditActionAgentConfined,
+				Resource:  req.FilePath,
+				Decision:  "allow",
+				Success:   true,
+				Metadata: map[string]interface{}{
+					"confiner":       c.Name(),
+					"protected_root": s.cfg.Confinement.ProtectedRoot,
+					"write_paths":    len(s.cfg.Confinement.WritePaths),
+					"allow_network":  s.cfg.Confinement.AllowNetwork,
+				},
+			}
+			if perr != nil {
+				ev.Decision = "deny"
+				ev.Success = false
+				ev.Reason = string(domain.ReasonFromError(perr, domain.ReasonConfinementUnavailable))
+			}
+			if err := s.cfg.Audit.Log(ev); err != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_confine", "failed to record confinement audit log", err)
+			}
+		}
+		if perr != nil {
+			return &SpawnResult{
+				TraceID:     req.TraceID,
+				ExitCode:    int(domain.ExitCodeFromError(perr, domain.ExitInternalError)),
+				Reason:      domain.ReasonFromError(perr, domain.ReasonConfinementUnavailable),
+				Termination: TermExited,
+				RawExitCode: -1,
+			}, nil
+		}
+	}
 
 	startTime := time.Now()
 	_ = cmd.Run() // 종료 형태는 아래에서 관찰된 사실(버퍼·ctx·ProcessState)로만 판정한다.

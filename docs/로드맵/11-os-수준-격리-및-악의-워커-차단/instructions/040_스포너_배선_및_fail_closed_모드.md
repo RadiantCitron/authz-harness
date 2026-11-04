@@ -1,6 +1,6 @@
 # [구현지시서 040] 스포너 격리 배선, Fail-Closed 및 `agent.confined` 감사 기록
 
-> **문서 상태**: `Draft` (2026-11-04 [020번 보고서](../../../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md) 기준 교정)
+> **문서 상태**: `Done` (2026-11-04 [020번 보고서](../../../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md) 기준 교정)
 > **상위 대시보드**: [11번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **선행 조건**: [030_linux_어댑터_및_검증_환경.md](030_linux_어댑터_및_검증_환경.md) 완료
 > **후속 단계**: [050_g10_악의_워커_시나리오.md](050_g10_악의_워커_시나리오.md)
@@ -86,7 +86,7 @@ if active:
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `SpawnConfig` 필드와 격리 적용 블록 1곳 구현, `classifyExit` 무수정
-- [ ] `AuditActionAgentConfined`를 `orchestrator`에 정의
-- [ ] TC-040-01~07 통과
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [x] `SpawnConfig` 필드와 격리 적용 블록 1곳 구현, `classifyExit` 무수정
+- [x] `AuditActionAgentConfined`를 `orchestrator`에 정의
+- [x] TC-040-01~07 통과
+- [x] 대시보드 상태 갱신 및 변경 파일 단독 커밋

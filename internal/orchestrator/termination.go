@@ -5,6 +5,10 @@ import "authz-harness/internal/domain"
 // AuditActionLimitExceeded 는 부모가 강제한 한계 초과 감사 액션이다.
 const AuditActionLimitExceeded = "agent.limit_exceeded"
 
+// AuditActionAgentConfined 는 스폰 시점의 OS 격리 적용(또는 적용 불가) 감사 액션이다.
+// 커널 차단 여부는 기록하지 않는다(부모가 알 수 없음).
+const AuditActionAgentConfined = "agent.confined"
+
 // Termination 은 부모가 관찰한 자식 프로세스의 종료 형태다.
 type Termination string
 
