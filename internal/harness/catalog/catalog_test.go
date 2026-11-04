@@ -16,7 +16,7 @@ import (
 )
 
 // lastScenarioID 는 카탈로그의 마지막 시나리오 번호다. 로드맵이 시나리오를 추가할 때 이 상수만 바꾼다.
-const lastScenarioID = 60
+const lastScenarioID = 66
 
 // TestCatalog_ScenarioCount 는 카탈로그 ID 집합이 E2E-01~E2E-<lastScenarioID> 와 정확히 같은지 검증한다.
 func TestCatalog_ScenarioCount(t *testing.T) {
@@ -430,6 +430,26 @@ func TestG10_SkippedInProc(t *testing.T) {
 		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
 		if err != nil || !res.Skipped {
 			t.Fatalf("%s: skipped=%v err=%v", sc.Metadata().ID, res.Skipped, err)
+		}
+	}
+}
+
+// TestCatalog_Group_G13 은 G13 그룹 (E2E-61 ~ E2E-66) 실행 검증
+func TestCatalog_Group_G13(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	for _, sc := range g13Scenarios() {
+		if err := runner.Register(sc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, sc := range g13Scenarios() {
+		id := sc.Metadata().ID
+		res, err := runner.RunScenario(context.Background(), id)
+		if err != nil {
+			t.Fatalf("RunScenario %s error: %v", id, err)
+		}
+		if !res.Passed {
+			t.Errorf("Scenario %s FAILED: reasons=%v err=%s", id, res.Assertion.FailureReasons, res.Error)
 		}
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/observe"
 	"authz-harness/internal/orchestrator"
 	"authz-harness/internal/subagent"
 )
@@ -74,6 +75,11 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 
 // setupHarnessStackWithClock 은 같은 샌드박스 경로에 주어진 시계로 스택을 조립한다 (세션 시간 전진용).
 func setupHarnessStackWithClock(env *harness.SandboxEnvironment, clock domain.Clock) (*harnessStack, error) {
+	return setupHarnessStackWithObserver(env, clock, nil)
+}
+
+// setupHarnessStackWithObserver 는 관측성 포트 구현체를 주입해 스택을 조립한다 (nil 이면 기본 slog 어댑터).
+func setupHarnessStackWithObserver(env *harness.SandboxEnvironment, clock domain.Clock, obs observe.Observer) (*harnessStack, error) {
 	st, err := app.BuildStack(app.AppConfig{
 		StatePath:    env.StatePath,
 		PrivKeyPath:  env.PrivKeyPath,
@@ -82,6 +88,7 @@ func setupHarnessStackWithClock(env *harness.SandboxEnvironment, clock domain.Cl
 		AuditPath:    env.AuditPath,
 		WorkspaceDir: env.WorkspaceDir,
 		Clock:        clock,
+		Observer:     obs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("setup stack via app builder: %w", err)

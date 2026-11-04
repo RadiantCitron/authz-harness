@@ -131,6 +131,12 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("  - 해설: 같은 세션 안에서 시간 경과·계보 회수·키 폐기·재사용·재교환 같은 상태 변화 뒤의 호출이 %s에서 거부되었다(종료 코드 %d).\n          세션이 열려 있어도 판정은 호출마다 최신 상태로 다시 이뤄진다.\n", gateName, actualExit))
 		}
+	case "G13":
+		if meta.Expected.ExitCode == domain.ExitSuccess {
+			sb.WriteString("  - 해설: 감사는 인자·결과의 SHA-256 지문만 남기고 원문은 남기지 않았다. 관측성 포트가 고장나도 판정과 감사는 그대로였고,\n          v1 레코드 뒤에 v2 레코드가 이어져도 한 체인으로 검증된다.\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  - 해설: 해시 체인만으로는 못 잡는 꼬리 절단·전체 재작성·검증 재료 부재를 서명 체크포인트가 %s에서 적발했다(종료 코드 %d).\n          체인 자체는 유효해도 체크포인트와 어긋나면 통과가 아니라 거부(Fail-Closed)다.\n", gateName, actualExit))
+		}
 	case "G10":
 		if meta.Expected.Audit.ExpectedReason == domain.ReasonConfinementUnavailable {
 			sb.WriteString("  - 해설: 격리 필수 모드인데 OS 격리(CONFINEMENT_UNAVAILABLE)를 적용할 수 없어 부모가 자식을 기동하지 않고 거부(Fail-Closed, 16)했다.\n")
