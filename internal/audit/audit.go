@@ -18,21 +18,24 @@ import (
 // Event 는 감사 로그(audit.jsonl)에 기록되는 불변의 보안 증거 레코드 스키마를 정의한다.
 // ROADMAP.md §15 감사 모델 준수.
 type Event struct {
-	Timestamp  time.Time              `json:"timestamp"`
-	TraceID    string                 `json:"trace_id"`
-	Step       string                 `json:"step,omitempty"`
-	Actor      string                 `json:"actor"`
-	AgentID    string                 `json:"agent_id,omitempty"`
-	Action     string                 `json:"action,omitempty"`
-	Resource   string                 `json:"resource,omitempty"`
-	Decision   string                 `json:"decision,omitempty"` // allow, deny (소문자 정규화)
-	Reason     string                 `json:"reason,omitempty"`   // domain.Reason 문자열 (최상위 필수 승격)
-	TokenJTI   string                 `json:"token_jti,omitempty"`
-	Success    bool                   `json:"success"`
-	ErrorClass string                 `json:"error_class,omitempty"`
-	PrevHash   string                 `json:"prev_hash,omitempty"`
-	CurrHash   string                 `json:"curr_hash,omitempty"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	SchemaVersion int                    `json:"schema_version,omitempty"` // 0·1: 레거시 v1, 2: 확장 필드 보호
+	Timestamp     time.Time              `json:"timestamp"`
+	TraceID       string                 `json:"trace_id"`
+	Step          string                 `json:"step,omitempty"`
+	Actor         string                 `json:"actor"`
+	AgentID       string                 `json:"agent_id,omitempty"`
+	Action        string                 `json:"action,omitempty"`
+	Resource      string                 `json:"resource,omitempty"`
+	Decision      string                 `json:"decision,omitempty"` // allow, deny (소문자 정규화)
+	Reason        string                 `json:"reason,omitempty"`   // domain.Reason 문자열 (최상위 필수 승격)
+	TokenJTI      string                 `json:"token_jti,omitempty"`
+	ArgHash       string                 `json:"arg_hash,omitempty"`    // v2: 도구 인자 지문(domain.DataDigest)
+	ResultHash    string                 `json:"result_hash,omitempty"` // v2: 도구 결과 지문(domain.DataDigest)
+	Success       bool                   `json:"success"`
+	ErrorClass    string                 `json:"error_class,omitempty"`
+	PrevHash      string                 `json:"prev_hash,omitempty"`
+	CurrHash      string                 `json:"curr_hash,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ComputeEventHash 는 prevHash 와 이벤트의 불변 핵심 필드들을 결정론적으로 결합하여 SHA-256 해시를 계산한다.
@@ -51,9 +54,15 @@ func ComputeEventHash(prevHash string, ev Event) string {
 		ev.Reason,
 		ev.Success,
 	)
+	if ev.SchemaVersion == 2 {
+		raw += fmt.Sprintf("|v2|%s|%s|%s|%s", ev.TokenJTI, ev.AgentID, ev.ArgHash, ev.ResultHash)
+	}
 	h := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(h[:])
 }
+
+// CurrentSchemaVersion 은 JSONLWriter 가 새로 쓰는 레코드의 스키마 버전이다.
+const CurrentSchemaVersion = 2
 
 // NormalizeEvent 는 감사 이벤트의 최상위 필드를 정규화한다.
 func NormalizeEvent(ev *Event) {
@@ -214,6 +223,7 @@ func (w *JSONLWriter) Log(event Event) error {
 
 	// 1. 이벤트 최상위 필드 정규화
 	NormalizeEvent(&event)
+	event.SchemaVersion = CurrentSchemaVersion // 호출자 값은 덮어쓴다
 
 	// 2. syscall.Flock 배타 락 획득 (다중 프로세스 원자적 동기화)
 	lockPath := w.path + ".lock"
@@ -309,6 +319,7 @@ func VerifyHashChain(path string) error {
 
 	var expectedPrevHash string
 	lineNum := 0
+	prevVersion := 0
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -326,6 +337,17 @@ func VerifyHashChain(path string) error {
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d is not valid JSON: %v", lineNum, err), err)
 		}
+
+		// 다운그레이드·주입 규칙
+		switch {
+		case ev.SchemaVersion < 0 || ev.SchemaVersion > 2:
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has unknown schema_version %d", lineNum, ev.SchemaVersion), nil)
+		case ev.SchemaVersion < 2 && (ev.ArgHash != "" || ev.ResultHash != ""):
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has v2 fields without schema_version 2", lineNum), nil)
+		case prevVersion == 2 && ev.SchemaVersion < 2:
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d downgrades schema version after v2", lineNum), nil)
+		}
+		prevVersion = ev.SchemaVersion
 
 		evPrevHash := ev.PrevHash
 		if evPrevHash == "" && ev.Metadata != nil {

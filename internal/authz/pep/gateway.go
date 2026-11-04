@@ -135,6 +135,7 @@ func NewGateway(cfg Config) (Gateway, error) {
 type pipelineState struct {
 	traceID     string
 	resource    string
+	argHash     string // 요청 데이터 지문(domain.DataDigest), 원문은 기록하지 않는다
 	normAction  domain.Action
 	subject     string
 	tokenJTI    string
@@ -158,6 +159,7 @@ func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 	state := &pipelineState{
 		traceID:  traceID,
 		resource: strings.TrimSpace(req.Resource),
+		argHash:  domain.DataDigest(req.Data),
 	}
 
 	res, err := g.runPipeline(ctx, req, state)
@@ -328,7 +330,7 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		if req.InjectAuditFailure {
 			return domain.NewError(domain.ReasonAuditLogFailed, string(Stage4Audit), "injected audit failure simulation (fail-closed)", nil)
 		}
-		auditErr := g.logEvent(state, Stage4Audit, true, domain.ReasonAuthorized, "pre-commit audit check passed")
+		auditErr := g.logEvent(state, Stage4Audit, true, domain.ReasonAuthorized, "pre-commit audit check passed", "")
 		if auditErr != nil {
 			return domain.NewError(domain.ReasonAuditLogFailed, string(Stage4Audit), fmt.Sprintf("audit writer failure (fail-closed): %v", auditErr), auditErr)
 		}
@@ -404,7 +406,7 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 		// 감사 없이 거부를 끝내지 않는다: 기록 실패 시 AUDIT_LOG_FAILED(15)로 마감하되 거부 결론은 유지한다.
 		details := runErr.Error()
 		if failedStage != Stage4Audit {
-			if auditErr := g.logEvent(state, failedStage, false, reason, runErr.Error()); auditErr != nil {
+			if auditErr := g.logEvent(state, failedStage, false, reason, runErr.Error(), ""); auditErr != nil {
 				g.obs.OnError(ctx, state.traceID, "failed to record block audit event",
 					observe.Attr{Key: "error", Value: auditErr.Error()},
 				)
@@ -436,7 +438,7 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 	}
 
 	// 정상 실행 완료 감사 기록
-	if auditErr := g.logEvent(state, Stage5FileIO, true, domain.ReasonAuthorized, "file I/O execution completed"); auditErr != nil {
+	if auditErr := g.logEvent(state, Stage5FileIO, true, domain.ReasonAuthorized, "file I/O execution completed", domain.DataDigest(res.Data)); auditErr != nil {
 		g.obs.OnError(ctx, state.traceID, "failed to record completion audit event",
 			observe.Attr{Key: "error", Value: auditErr.Error()},
 		)
@@ -456,7 +458,7 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 
 // logEvent 는 Zero Leakage 원칙에 따라 서명된 Bearer 원본 토큰은 일체 기록하지 않고,
 // TokenJTI, Subject(AgentID), CallerID(위임 계보), 경로, 액션, 성공 여부만 감사 로그에 기록한다.
-func (g *gateway) logEvent(state *pipelineState, stage Stage, success bool, reason domain.Reason, details string) error {
+func (g *gateway) logEvent(state *pipelineState, stage Stage, success bool, reason domain.Reason, details, resultHash string) error {
 	if g.cfg.AuditWriter == nil {
 		return fmt.Errorf("pep: nil audit writer")
 	}
@@ -471,17 +473,19 @@ func (g *gateway) logEvent(state *pipelineState, stage Stage, success bool, reas
 	}
 
 	event := audit.Event{
-		Timestamp: g.clock.Now().UTC(),
-		TraceID:   state.traceID,
-		Step:      stepName,
-		Actor:     state.subject,
-		AgentID:   state.subject,
-		Action:    actionName,
-		Resource:  state.resource,
-		Decision:  map[bool]string{true: "allow", false: "deny"}[success],
-		Reason:    string(reason),
-		TokenJTI:  state.tokenJTI,
-		Success:   success,
+		Timestamp:  g.clock.Now().UTC(),
+		TraceID:    state.traceID,
+		Step:       stepName,
+		Actor:      state.subject,
+		AgentID:    state.subject,
+		Action:     actionName,
+		Resource:   state.resource,
+		Decision:   map[bool]string{true: "allow", false: "deny"}[success],
+		Reason:     string(reason),
+		TokenJTI:   state.tokenJTI,
+		ArgHash:    state.argHash,
+		ResultHash: resultHash,
+		Success:    success,
 		Metadata: map[string]interface{}{
 			"stage":            string(stage),
 			"requested_action": string(state.normAction),

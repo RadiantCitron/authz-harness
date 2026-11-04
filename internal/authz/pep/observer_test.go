@@ -2,7 +2,10 @@ package pep_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -154,5 +157,47 @@ func TestFinalize_CompletionAuditFailureUnchanged(t *testing.T) { // TC-020-06
 	}
 	if n != 1 {
 		t.Fatalf("errors=%v", rec.errors)
+	}
+}
+
+func TestAudit_NoPlaintextOnlyDigests(t *testing.T) { // TC-030-06
+	v, p, j, _ := obsStubs(false)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	w, err := audit.NewJSONLWriter(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: w})
+	secret := []byte("TOP_SECRET_PAYLOAD")
+	ctx := context.Background()
+	if r, _ := gw.Execute(ctx, pep.Request{Token: "t", Action: domain.ActionFileWrite, Resource: "s.txt", Data: secret}); !r.Allowed {
+		t.Fatalf("write: %+v", r)
+	}
+	j.files["s.txt"] = secret
+	if r, _ := gw.Execute(ctx, pep.Request{Token: "t", Action: domain.ActionFileRead, Resource: "s.txt"}); !r.Allowed {
+		t.Fatalf("read: %+v", r)
+	}
+	b, _ := os.ReadFile(path)
+	if strings.Contains(string(b), "TOP_SECRET_PAYLOAD") {
+		t.Fatal("plaintext leaked into audit")
+	}
+	want := domain.DataDigest(secret)
+	var writeArg, readResult, stage4Result int
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var e audit.Event
+		_ = json.Unmarshal([]byte(line), &e)
+		if e.ArgHash == want {
+			writeArg++
+		}
+		if e.ResultHash == want {
+			readResult++
+		}
+		if e.Metadata["details"] == "pre-commit audit check passed" && e.ResultHash != "" {
+			stage4Result++
+		}
+	}
+	if writeArg < 1 || readResult != 1 || stage4Result != 0 {
+		t.Fatalf("writeArg=%d readResult=%d stage4Result=%d\n%s", writeArg, readResult, stage4Result, b)
 	}
 }
