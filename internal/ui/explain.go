@@ -125,6 +125,12 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("  - 해설: 예산 한도를 넘는 위임 또는 호출이 %s에서 거부되었다(종료 코드 %d).\n          예산 소진(BUDGET_EXHAUSTED)과 위임 초과(DELEGATION_BUDGET_EXCEEDED)는 모두 인가 거부(12)이며, 파일은 한 바이트도 바뀌지 않았다.\n", gateName, actualExit))
 		}
+	case "G12":
+		if meta.Expected.ExitCode == domain.ExitSuccess {
+			sb.WriteString("  - 해설: 만료된 자식 토큰은 거부됐지만, 유효한 부모 토큰으로 새 자식을 재교환해 같은 세션이 작업을 이어갔다.\n          Refresh Token 없이도 자식 수명은 부모 수명 안에 묶인다.\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("  - 해설: 같은 세션 안에서 시간 경과·계보 회수·키 폐기·재사용·재교환 같은 상태 변화 뒤의 호출이 %s에서 거부되었다(종료 코드 %d).\n          세션이 열려 있어도 판정은 호출마다 최신 상태로 다시 이뤄진다.\n", gateName, actualExit))
+		}
 	case "G10":
 		if meta.Expected.Audit.ExpectedReason == domain.ReasonConfinementUnavailable {
 			sb.WriteString("  - 해설: 격리 필수 모드인데 OS 격리(CONFINEMENT_UNAVAILABLE)를 적용할 수 없어 부모가 자식을 기동하지 않고 거부(Fail-Closed, 16)했다.\n")

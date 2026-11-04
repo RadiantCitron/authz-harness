@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/harness/catalog"
 	"authz-harness/internal/ui"
 )
 
@@ -93,8 +94,8 @@ func TestRunCLI_AT_CLI_04_JSONOutput(t *testing.T) {
 		t.Fatalf("failed to parse json output: %v", err)
 	}
 
-	if report.Total != 54 {
-		t.Errorf("expected 54 total scenarios in json, got %d", report.Total)
+	if want := len(catalog.AllScenarios()); report.Total != want {
+		t.Errorf("expected %d total scenarios in json, got %d", want, report.Total)
 	}
 	// 격리 불가 환경에서는 G10 이 Skipped 이므로 Passed = Total - Skipped 로 기대한다.
 	if report.Passed != report.Total-report.Skipped {

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -14,11 +15,28 @@ import (
 	"authz-harness/internal/orchestrator"
 )
 
-// TestCatalog_ScenarioCount 는 카탈로그에 54개의 고유 시나리오가 등록되어 있는지 검증한다.
+// lastScenarioID 는 카탈로그의 마지막 시나리오 번호다. 로드맵이 시나리오를 추가할 때 이 상수만 바꾼다.
+const lastScenarioID = 60
+
+// TestCatalog_ScenarioCount 는 카탈로그 ID 집합이 E2E-01~E2E-<lastScenarioID> 와 정확히 같은지 검증한다.
 func TestCatalog_ScenarioCount(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 54 {
-		t.Fatalf("expected 54 scenarios, got %d", len(scenarios))
+	got := map[string]int{}
+	for _, sc := range scenarios {
+		got[sc.Metadata().ID]++
+	}
+	for i := 1; i <= lastScenarioID; i++ {
+		id := fmt.Sprintf("E2E-%02d", i)
+		switch n := got[id]; {
+		case n == 0:
+			t.Errorf("missing: %s", id)
+		case n > 1:
+			t.Errorf("duplicate: %s (x%d)", id, n)
+		}
+		delete(got, id)
+	}
+	for id := range got {
+		t.Errorf("unexpected (out of range): %s", id)
 	}
 
 	seen := make(map[string]bool)
@@ -44,7 +62,7 @@ func TestCatalog_ScenarioCount(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 54개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 전체 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -52,8 +70,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 54 {
-		t.Fatalf("expected 54 registered scenarios, got %d", len(list))
+	if want := len(AllScenarios()); len(list) != want {
+		t.Fatalf("expected %d registered scenarios, got %d", want, len(list))
 	}
 }
 
@@ -221,8 +239,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 54 {
-		t.Fatalf("expected 54 results, got %d", len(results))
+	if want := len(AllScenarios()); len(results) != want {
+		t.Fatalf("expected %d results, got %d", want, len(results))
 	}
 
 	failedCount := 0
