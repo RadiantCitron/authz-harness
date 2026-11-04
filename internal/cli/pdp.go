@@ -77,7 +77,7 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	var sub, act, res, scope string
 	var epoch int64
 	fs.StringVar(&sub, "sub", "", "인가 대상 주체 (Subject)")
-	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write)")
+	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write, net:fetch, exec:run)")
 	fs.StringVar(&res, "resource", "", "요청 대상 리소스 경로")
 	fs.StringVar(&scope, "scope", "", "제시된 토큰 스코프 (선택)")
 	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
@@ -92,8 +92,8 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	}
 
 	action := domain.Action(act)
-	if action != domain.ActionFileRead && action != domain.ActionFileWrite {
-		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read or file:write)\n", act)
+	if !domain.IsValidAction(action) {
+		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read, file:write, net:fetch or exec:run)\n", act)
 		return domain.ExitBadInput
 	}
 
@@ -131,7 +131,7 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	var sub, act, res, scope string
 	var epoch int64
 	fs.StringVar(&sub, "sub", "", "인가 대상 주체 (Subject)")
-	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write)")
+	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write, net:fetch, exec:run)")
 	fs.StringVar(&res, "resource", "", "요청 대상 리소스 경로")
 	fs.StringVar(&scope, "scope", "", "제시된 토큰 스코프 (선택)")
 	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
@@ -146,8 +146,8 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	}
 
 	action := domain.Action(act)
-	if action != domain.ActionFileRead && action != domain.ActionFileWrite {
-		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read or file:write)\n", act)
+	if !domain.IsValidAction(action) {
+		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read, file:write, net:fetch or exec:run)\n", act)
 		return domain.ExitBadInput
 	}
 

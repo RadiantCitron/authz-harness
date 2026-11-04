@@ -134,3 +134,16 @@ func TestGrantRunner_List(t *testing.T) {
 		t.Fatalf("expected grant in list, got: %s", out.String())
 	}
 }
+
+// 로드맵 16 / 010 TC-010-06
+func TestGrantRunner_NewToolActions(t *testing.T) {
+	ctx := context.Background()
+	runner, _, _ := setupTestGrantRunner(t)
+
+	if c := runner.Run(ctx, []string{"create", "--sub", "w", "--action", "net:fetch", "--resource", "127.0.0.1:18080"}); c != domain.ExitSuccess {
+		t.Errorf("net:fetch: expected 0, got %d", c)
+	}
+	if c := runner.Run(ctx, []string{"create", "--sub", "w", "--action", "net:post", "--resource", "127.0.0.1:18080"}); c != domain.ExitBadInput {
+		t.Errorf("net:post: expected 14, got %d", c)
+	}
+}

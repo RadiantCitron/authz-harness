@@ -165,6 +165,18 @@ const (
 	// ReasonApprovalMismatch 는 같은 주체의 승인이 있으나 액션·리소스·jti·인자 지문이 맞지 않음을 나타낸다.
 	ReasonApprovalMismatch Reason = "APPROVAL_MISMATCH"
 
+	// ReasonEgressDenied 는 루프백 allow-list 밖 URL·우회 표기·리다이렉트 등 egress 거부를 나타낸다.
+	ReasonEgressDenied Reason = "EGRESS_DENIED"
+
+	// ReasonExecNotAllowed 는 등록되지 않았거나 형식이 틀린 실행 ID 를 나타낸다.
+	ReasonExecNotAllowed Reason = "EXEC_NOT_ALLOWED"
+
+	// ReasonExecArgRejected 는 실행 인자 형식 위반을 나타낸다.
+	ReasonExecArgRejected Reason = "EXEC_ARG_REJECTED"
+
+	// ReasonToolLimitExceeded 는 가드 자체의 응답·출력·시간 상한 초과를 나타낸다(부모가 끊는 17과 다르다).
+	ReasonToolLimitExceeded Reason = "TOOL_LIMIT_EXCEEDED"
+
 	// ReasonInternalError 는 시스템 예외, I/O 실패 등 내부 복구 불가능 오류를 나타낸다.
 	ReasonInternalError Reason = "INTERNAL_ERROR"
 

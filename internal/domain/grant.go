@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -26,7 +27,37 @@ const (
 
 	// ActionFileWrite 는 파일 쓰기 또는 수정 행위다.
 	ActionFileWrite Action = "file:write"
+
+	// ActionNetFetch 는 루프백 전용 HTTP GET 행위다.
+	ActionNetFetch Action = "net:fetch"
+
+	// ActionExecRun 은 코드에 고정한 allow-list 실행 파일 실행 행위다.
+	ActionExecRun Action = "exec:run"
 )
+
+// IsValidAction 은 a 가 정식 액션 4종과 정확히 같을 때만 true 를 반환한다.
+func IsValidAction(a Action) bool {
+	switch a {
+	case ActionFileRead, ActionFileWrite, ActionNetFetch, ActionExecRun:
+		return true
+	}
+	return false
+}
+
+// ParseAction 은 사용자 입력을 정식 액션으로 해석한다(공백 제거·소문자화, read/write 별칭 허용).
+func ParseAction(s string) (Action, error) {
+	switch v := strings.ToLower(strings.TrimSpace(s)); v {
+	case "read":
+		return ActionFileRead, nil
+	case "write":
+		return ActionFileWrite, nil
+	default:
+		if a := Action(v); IsValidAction(a) {
+			return a, nil
+		}
+		return "", fmt.Errorf("invalid action: %q (must be file:read, file:write, net:fetch or exec:run)", s)
+	}
+}
 
 var (
 	ErrEmptyGrantID   = errors.New("grant: id is required")

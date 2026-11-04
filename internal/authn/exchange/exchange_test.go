@@ -717,3 +717,30 @@ func TestTC_030_10_ExchangeDenyStandardAction(t *testing.T) {
 		t.Errorf("expected Reason %s, got %s", domain.ReasonDelegationScopeExceeded, lastEv.Reason)
 	}
 }
+
+// 로드맵 16 / 010 TC-010-03: 교환 검증은 완전 일치 유지(D-08)
+func TestExchange_Deny_NoPrefixCoverage(t *testing.T) {
+	cases := []struct{ parent, child string }{
+		{"file:read", "file:read:docs/a.txt"},
+		{"net:fetch:127.0.0.1:18080", "net:fetch"},
+	}
+	for _, c := range cases {
+		baseTime := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+		svc, issuer, _, _, _, _, _ := setupTestHarness(t, baseTime)
+		parentRes, err := issuer.IssueToken(token.IssueRequest{
+			ClientID: "client-orchestrator", ClientSecret: "orchestrator-secret-key-01",
+			Subject: "orchestrator-main", Scope: c.parent, TTL: time.Hour,
+		}, token.IssueOptions{}, domain.AuditContext{})
+		if err != nil {
+			t.Fatalf("parent IssueToken(%q): %v", c.parent, err)
+		}
+		_, err = svc.Exchange(context.Background(), exchange.ExchangeRequest{
+			ClientID: "client-subagent", ClientSecret: "subagent-secret-key-02",
+			ParentToken: parentRes.TokenString, ChildSubject: "worker-01",
+			Scope: c.child, TTL: 30 * time.Minute,
+		}, domain.AuditContext{})
+		if err == nil || domain.ReasonFromError(err, "") != domain.ReasonDelegationScopeExceeded {
+			t.Errorf("%q -> %q: expected DELEGATION_SCOPE_EXCEEDED, got %v", c.parent, c.child, err)
+		}
+	}
+}

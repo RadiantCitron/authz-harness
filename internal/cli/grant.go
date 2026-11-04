@@ -79,7 +79,7 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 	var requiresApproval bool
 	fs.BoolVar(&requiresApproval, "requires-approval", false, "이 Grant 로 허용되는 요청에 사람 승인을 요구한다")
 	fs.StringVar(&sub, "sub", "", "권한 부여 대상 주체 (Subject)")
-	fs.StringVar(&act, "action", "", "허용할 액션 (file:read, file:write)")
+	fs.StringVar(&act, "action", "", "허용할 액션 (file:read, file:write, net:fetch, exec:run)")
 	fs.StringVar(&res, "resource", "", "허용할 리소스 경로")
 
 	if err := fs.Parse(args); err != nil {
@@ -92,8 +92,8 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 	}
 
 	action := domain.Action(act)
-	if action != domain.ActionFileRead && action != domain.ActionFileWrite {
-		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read or file:write)\n", act)
+	if !domain.IsValidAction(action) {
+		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read, file:write, net:fetch or exec:run)\n", act)
 		return domain.ExitBadInput
 	}
 
