@@ -5,12 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
 	"authz-harness/internal/app"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/netguard"
+	"authz-harness/internal/observe"
+	"authz-harness/internal/observe/slogadapter"
 	"authz-harness/internal/subagent"
 )
 
@@ -72,6 +75,7 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		replayFlag    string
 		auditFlag     string
 		netAllowFlag  string
+		verboseFlag   bool
 	)
 
 	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
@@ -81,6 +85,8 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 	fs.StringVar(&auditFlag, "audit-file", r.auditPath, "감사 로그 저장 파일 경로")
 
 	fs.StringVar(&netAllowFlag, "net-allow", "", "net:fetch 허용 host:port 목록 (쉼표 구분, 예: 127.0.0.1:18080). 비면 전부 거부")
+
+	fs.BoolVar(&verboseFlag, "verbose", false, "PEP 관측 Debug 로그를 stderr 로 출력")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		return domain.ExitBadInput
@@ -97,6 +103,15 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		}
 	}
 
+	// -verbose: 전역 로거는 건드리지 않고 이 worker 의 PEP 관측자만 Debug 로 주입한다.
+	var obs observe.Observer
+	if verboseFlag {
+		obs = slogadapter.New(slog.New(slog.NewTextHandler(r.stderr, &slog.HandlerOptions{
+			Level:       slog.LevelDebug,
+			ReplaceAttr: slogadapter.RedactReplaceAttr,
+		})))
+	}
+
 	// 1. 단일 합성 루트(AppStack)를 통한 검증 전용 컴포넌트 조립
 	stack, err := app.BuildStack(app.AppConfig{
 		WorkspaceDir: workspaceFlag,
@@ -105,6 +120,7 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		ReplayPath:   replayFlag,
 		AuditPath:    auditFlag,
 		NetAllowList: netAllow,
+		Observer:     obs,
 		VerifyOnly:   true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
 	})
 	if err != nil {

@@ -54,12 +54,12 @@ func TestMCPRunner_InvalidCommand(t *testing.T) {
 
 // 로드맵 16 / 050 TC-050-04
 func TestMCPWorkerArgs_NetAllowPassthrough(t *testing.T) {
-	with := mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080")
+	with := mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080", false)
 	n := len(with)
 	if with[n-2] != "-net-allow" || with[n-1] != "127.0.0.1:18080" {
 		t.Fatalf("expected trailing -net-allow, got %v", with)
 	}
-	for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "") {
+	for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "", false) {
 		if a == "-net-allow" {
 			t.Fatal("-net-allow must be absent when flag is empty")
 		}
@@ -93,6 +93,33 @@ func TestMCPRunner_LogLevelFollowsGlobalLogger(t *testing.T) {
 			}
 			if got := strings.Contains(errOut.String(), debugMsg); got != tc.wantDebug {
 				t.Errorf("debug log present=%v, want %v (stderr: %q)", got, tc.wantDebug, errOut.String())
+			}
+		})
+	}
+}
+
+// 보고서 029 P-1: verbose 일 때만 worker 에 -verbose 를 넘기고, -net-allow 와 독립이다.
+func TestMCPWorkerArgs_VerbosePassthrough(t *testing.T) {
+	tests := []struct {
+		name    string
+		netAllo string
+		verbose bool
+	}{
+		{"verbose 아님", "", false},
+		{"verbose", "", true},
+		{"verbose + net-allow", "127.0.0.1:18080", true},
+		{"net-allow 만", "127.0.0.1:18080", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := false
+			for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", tc.netAllo, tc.verbose) {
+				if a == "-verbose" {
+					got = true
+				}
+			}
+			if got != tc.verbose {
+				t.Fatalf("-verbose present=%v, want %v", got, tc.verbose)
 			}
 		})
 	}
