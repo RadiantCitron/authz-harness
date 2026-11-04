@@ -69,6 +69,11 @@ func (s *harnessStack) Close() error {
 
 // setupHarnessStack 은 주어진 SandboxEnvironment 경로를 바탕으로 전체 스택을 초기화한다.
 func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
+	return setupHarnessStackWithClock(env, env.MockClock)
+}
+
+// setupHarnessStackWithClock 은 같은 샌드박스 경로에 주어진 시계로 스택을 조립한다 (세션 시간 전진용).
+func setupHarnessStackWithClock(env *harness.SandboxEnvironment, clock domain.Clock) (*harnessStack, error) {
 	st, err := app.BuildStack(app.AppConfig{
 		StatePath:    env.StatePath,
 		PrivKeyPath:  env.PrivKeyPath,
@@ -76,7 +81,7 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 		ReplayPath:   env.ReplayPath,
 		AuditPath:    env.AuditPath,
 		WorkspaceDir: env.WorkspaceDir,
-		Clock:        env.MockClock,
+		Clock:        clock,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("setup stack via app builder: %w", err)
