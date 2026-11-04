@@ -384,7 +384,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [09-mcp-tool-call-보안-게이트웨이-어댑터](09-mcp-tool-call-보안-게이트웨이-어댑터/README.md), `internal/mcp`, `internal/cli/mcp.go`, `internal/harness/catalog/g8_mcp.go`.
 * **데모 한 줄**: `"표준 MCP 프로토콜 도구 호출 요청이 격리된 서브프로세스 보안 게이트웨이를 거치며 권한 축소와 감사 해시 체인이 완결된다."`
 
-### Phase 10: 서브프로세스 자원·수명 통제 (`G9`: `E2E-40`~`E2E-44`)
+### Phase 10: 서브프로세스 자원·수명 통제 (`G9`: `E2E-40`~`E2E-44`) [완료]
 * **목적**: 허가받은 워커가 무한 루프에 빠지거나 손자 프로세스를 남기거나 대량 출력을 쏟아낼 때, 프로세스 그룹(`Setpgid`, `-pgid` 시그널) 일괄 소멸, `WaitDelay` 파이프 대기 상한, `limitedBuffer` 출력 바이트 상한(`onExceed=cancel`) 및 전용 종료 코드 `17`(`ExitResourceLimit`)로 통제함을 증명한다.
 * **주요 산출물**: [10-서브프로세스-자원-및-수명-통제](10-서브프로세스-자원-및-수명-통제/README.md), 결함 워커 별도 실행 파일(`internal/harness/faultworker`, [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-7 개정), `G9` 시나리오(`E2E-40`~`44`).
 
