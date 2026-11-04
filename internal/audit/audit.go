@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,7 +28,13 @@ const MaxRecordBytes = 1 << 20
 // [결정론적 정규화 공식]:
 // Go json.Marshal 의 Metadata 역직렬화 시 타입 변환 및 time.Time 나노초 표기 차이로 인한
 // False Positive(가짜 변조 탐지)를 원천 차단하기 위해, 해시 입력은 불변 핵심 필드의 고정 구분자(|) 파이프 문자열로 표준화한다.
+//
+// 스키마 v3 부터는 구분자 대신 필드마다 「<바이트 길이>:<값>」을 이어 붙이는 길이 접두 인코딩을 쓴다
+// (필드 경계를 옮겨도 해시가 같아지는 모호성 제거, ADR 0006). v0~v2 공식은 기존 파일 검증을 위해 바꾸지 않는다.
 func ComputeEventHash(prevHash string, ev Event) string {
+	if ev.SchemaVersion >= 3 {
+		return computeHashV3(prevHash, ev)
+	}
 	raw := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%t",
 		prevHash,
 		ev.Timestamp.UTC().Format(time.RFC3339Nano),
@@ -46,8 +53,34 @@ func ComputeEventHash(prevHash string, ev Event) string {
 	return hex.EncodeToString(h[:])
 }
 
+func computeHashV3(prevHash string, ev Event) string {
+	var b strings.Builder
+	b.WriteString("authz-audit-v3")
+	for _, f := range []string{
+		prevHash,
+		ev.Timestamp.UTC().Format(time.RFC3339Nano),
+		ev.TraceID,
+		ev.Actor,
+		ev.Action,
+		ev.Resource,
+		ev.Decision,
+		ev.Reason,
+		strconv.FormatBool(ev.Success),
+		ev.TokenJTI,
+		ev.AgentID,
+		ev.ArgHash,
+		ev.ResultHash,
+	} {
+		b.WriteString(strconv.Itoa(len(f)))
+		b.WriteByte(':')
+		b.WriteString(f)
+	}
+	h := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(h[:])
+}
+
 // CurrentSchemaVersion 은 JSONLWriter 가 새로 쓰는 레코드의 스키마 버전이다.
-const CurrentSchemaVersion = 2
+const CurrentSchemaVersion = 3
 
 // NormalizeEvent 는 감사 이벤트의 최상위 필드를 정규화한다.
 func NormalizeEvent(ev *Event) {
@@ -336,12 +369,12 @@ func VerifyHashChain(path string) error {
 
 		// 다운그레이드·주입 규칙
 		switch {
-		case ev.SchemaVersion < 0 || ev.SchemaVersion > 2:
+		case ev.SchemaVersion < 0 || ev.SchemaVersion > CurrentSchemaVersion:
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has unknown schema_version %d", lineNum, ev.SchemaVersion), nil)
 		case ev.SchemaVersion < 2 && (ev.ArgHash != "" || ev.ResultHash != ""):
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has v2 fields without schema_version 2", lineNum), nil)
-		case prevVersion == 2 && ev.SchemaVersion < 2:
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d downgrades schema version after v2", lineNum), nil)
+		case prevVersion >= 2 && ev.SchemaVersion < prevVersion:
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d downgrades schema version from v%d to v%d", lineNum, prevVersion, ev.SchemaVersion), nil)
 		}
 		prevVersion = ev.SchemaVersion
 

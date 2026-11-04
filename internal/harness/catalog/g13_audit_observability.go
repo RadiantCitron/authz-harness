@@ -351,7 +351,7 @@ func (s *g13Mixed) Execute(ctx context.Context, env *harness.SandboxEnvironment)
 	var first, last audit.Event
 	_ = json.Unmarshal([]byte(lines[0]), &first)
 	_ = json.Unmarshal([]byte(lines[len(lines)-1]), &last)
-	if first.SchemaVersion >= 2 || last.SchemaVersion != 2 {
+	if first.SchemaVersion >= 2 || last.SchemaVersion != audit.CurrentSchemaVersion {
 		return domain.ExitInternalError, fmt.Errorf("unexpected versions first=%d last=%d", first.SchemaVersion, last.SchemaVersion)
 	}
 	return res.ExitCode, nil
