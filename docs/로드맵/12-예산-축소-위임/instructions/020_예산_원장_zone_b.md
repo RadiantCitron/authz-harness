@@ -1,7 +1,7 @@
-# [구현지시서 020] Zone B 원자적 예산 원장(`BudgetLedger`) 및 상태 원장 버전(`Version++`) 단조 증가 구현
+# [구현지시서 020] Zone B 예산 원장(`internal/authn/budget`) 구현
 
 > **문서 상태**: `Draft`
-> **상위 대시보드**: [12번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
+> **상위 대시보드**: [12번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md) | 교정 근거: [021번 보고서](../../../보고서/021-12번로드맵_구조결함_및_진행가능성_검증보고서.md) B-1·B-6·B-7
 > **선행 조건**: [010_예산_모델_adr_및_도메인_정의.md](010_예산_모델_adr_및_도메인_정의.md) 완료
 > **후속 단계**: [030_교환_서비스_단조_축소_검증.md](030_교환_서비스_단조_축소_검증.md)
 
@@ -9,59 +9,75 @@
 
 ## 1. 목적 및 배경
 
-토큰 자체는 불변이므로 실제 예산 잔량과 소비 내역은 Zone B의 공유 원장(`budget_ledger.json`)에서 관리해야 한다.
-다중 서브프로세스가 동시에 예산을 차감하더라도 총 소비량이 부모 예산을 절대 초과하지 않도록, [`internal/storage/atomic.go`](../../../../internal/storage/atomic.go)의 `AtomicFileStore[T]` 배타 잠금(`syscall.Flock`) 임계 구역 안에서 **만료 자식 예약 회수(Lazy Reclaim) + 잔량 확인 + 차감/예약**을 단일 원자 연산으로 수행하는 `BudgetLedger`를 구현한다.
-아울러 [011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md) 제안 4에 따라, [`internal/authz/state/store.go`](../../../../internal/authz/state/store.go)의 `GrantsState`와 신규 `BudgetState`가 `Update` 시마다 `Version`을 `1, 2, 3...`으로 **단조 증가(`Version++`)**시키도록 활성화하여 감사 로그의 정책 버전 추적과 향후 분산 환경(CAS/캐시 무효화) 적응력을 함께 확보한다.
+토큰은 불변이므로 실제 잔량은 Zone B의 원장 파일 `budget_ledger.json`에 둔다. 여러 서브프로세스가 동시에 차감해도 합계가 넘지 않도록, [`internal/storage/atomic.go`](../../../../internal/storage/atomic.go)의 `AtomicFileStore[T]` 배타 잠금 임계 구역 하나 안에서 **만료 회수 → 잔량 확인 → 차감/예약**을 한 번에 수행한다.
+
+구조는 기존 Replay 원장([`authn/token/replay.go`](../../../../internal/authn/token/replay.go) `FileReplayLedger`)을 그대로 따른다: Zone B 파일 하나, `AtomicFileStore` 사용, 생성자에 시계 주입. 정책 파일 `grants_state.json`과는 **합치지 않는다**(소비 카운터가 쓰일 때마다 정책 파일 전체를 다시 쓰지 않기 위해, 그리고 PIP·PDP를 바꾸지 않기 위해).
+
+정책 버전 `Version++` 활성화(011 제안 4)는 예산과 무관하므로 본 단계와 12번 로드맵 범위에서 제외한다.
 
 ---
 
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/authz/state/budget.go` [신규] 및 `internal/authz/state/store.go`: 별도 패키지나 별도 파일(`budget_ledger.json`)을 만들지 않고 기존 `GrantsState`(`grants_state.json`)에 `Budgets map[string]domain.BudgetEntry`를 통합하여 단일 `state.Store`에서 원자적 관리 ([015번 보고서](../../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md) §2.1) (`InitBudget`, `ReserveChildBudget`, `Consume`, `Refund`, `GetEntry`, `GetRemaining`), `Update`마다 `BudgetState.Version++` 단조 증가
-  - `internal/authz/state/store.go`: `Update` 시 `GrantsState.Version++`가 단조 증가하도록 `normalizeState` 보강 ([011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md) 제안 4)
-  - `internal/authz/state/budget_test.go` [신규]: 동시 고루틴/프로세스 차감 경합 테스트, 크래시 만료 예약 자동 회수 테스트, `Initial` 바이트 한도 활성/비활성 구분 테스트, `Version++` 단조 증가 검증, 손상 파일 Fail-Closed(`ExitInternalError = 16`) 테스트
-- **무영향**:
-  - 기존 `grants_state.json` 및 `replay_ledger.json`과 하위 호환되며, 직접 `syscall.Flock`을 호출하지 않고 `internal/storage.AtomicFileStore`를 사용하므로 AST 가드레일(`TC-081-01`)을 완벽히 준수한다.
+  - `internal/authn/budget/ledger.go` [신규]: `Entry`, `LedgerState`, `Ledger` 인터페이스, `FileLedger` 구현
+  - `internal/authn/budget/ledger_test.go` [신규]: 동시 고루틴·다중 프로세스 경합, 만료 회수, 바이트 한도 활성/비활성, 손상 파일 Fail-Closed
+- **무영향**: 새 패키지만 추가한다. 아직 누구도 호출하지 않는다(030부터 배선). `internal/authn` 아래이므로 `TC-081-01`(직접 `syscall.Flock` 금지)이 자동 적용된다.
 
 ---
 
 ## 3. 세부 명세
 
-### 3.1 원장 엔트리 구조 (`domain.BudgetEntry` 재사용 및 `domain.BudgetSnapshotReader` 구현) 및 상태 버전 단조 증가
-- `010`에서 `internal/domain/budget.go`에 정의한 `domain.BudgetEntry`를 그대로 사용하여 중복 구조체 정의를 방지하고, `FileLedger`가 `domain.BudgetSnapshotReader`(`ListEntries(now time.Time) (map[string]domain.BudgetEntry, error)`)를 구현하여 `internal/authz/pip`(Layer 2B)가 `internal/authn/budget`(Layer 2A)을 직접 import하지 않고도 예산 스냅샷을 조회할 수 있게 한다.
+### 3.1 자료 구조
+
 ```go
-type BudgetEntry struct {
+// Entry 는 토큰 하나의 예산 장부 줄이다.
+type Entry struct {
     TokenJTI  string        `json:"token_jti"`
-    ParentJTI string        `json:"parent_jti,omitempty"`
-    Initial   domain.Budget `json:"initial"`
+    ParentJTI string        `json:"parent_jti,omitempty"` // 루트는 빈 값
+    Initial   domain.Budget `json:"initial"`              // 바이트 한도 활성 여부 판별용 (불변)
     Remaining domain.Budget `json:"remaining"`
-    ExpiresAt int64         `json:"expires_at"`
-    Reclaimed bool          `json:"reclaimed,omitempty"`
+    ExpiresAt int64         `json:"expires_at"`           // 토큰 exp (Unix 초)
+    Reclaimed bool          `json:"reclaimed,omitempty"`  // 만료 회수 완료 표시
 }
+
+type LedgerState struct {
+    Entries map[string]Entry `json:"entries"`
+}
+
+type Ledger interface {
+    Init(jti string, b domain.Budget, exp int64) error
+    Reserve(parentJTI, childJTI string, req domain.Budget, childExp int64) error
+    Consume(jti string, calls, readBytes, writeBytes int64) error
+    Refund(jti string, calls, readBytes, writeBytes int64) error
+    Get(jti string) (Entry, bool, error)
+}
+
+func NewFileLedger(path string, clock domain.Clock) (*FileLedger, error)
 ```
-- `Initial`을 함께 보존하여 해당 토큰이 읽기 바이트 한도(`Initial.HasReadLimit()`)나 쓰기 바이트 한도(`Initial.HasWriteLimit()`)를 설정했는지 판별한다.
-- `GrantsState`와 `BudgetState` 모두 `Update` 트랜잭션이 성공할 때마다 `state.Version++`로 단조 증가시킨다.
 
-### 3.2 원자적 만료 회수 (`reclaimExpiredLocked(st *BudgetState, now time.Time)`)
-- 모든 쓰기 트랜잭션(`ReserveChildBudget`, `Consume`, `GetRemaining`) 내부에서 `nowUnix := now.UTC().Unix()` 기준으로 `e.ParentJTI != "" && !e.Reclaimed && e.ExpiresAt <= nowUnix`인 자식 엔트리를 탐색한다.
-- 위임 체인 깊은 곳(Depth 2 → Depth 1 → Depth 0)부터 부모에게 미사용분이 귀속되도록 처리하며, `parent.Remaining.MaxCalls += child.Remaining.MaxCalls` (바이트 한도 활성 시 바이트도 합산, 단 `parent.Initial` 상한 이하로 클램핑), `child.Remaining = domain.Budget{}`, `child.Reclaimed = true`로 갱신한다.
+- 시각은 인자가 아니라 생성자에 주입한 `clock.Now()`로 얻는다(Replay 원장과 같은 방식). 테스트는 시계를 바꾼 두 번째 `FileLedger`를 같은 경로로 만들어 시간 경과를 흉내낸다.
+- 파일 권한·디렉터리 생성은 `state.NewFileStore`·`NewFileReplayLedger`와 같게 한다.
 
-### 3.3 예약(`ReserveChildBudget`) 및 소비(`Consume`) 규칙
-1. `ReserveChildBudget(parentJTI, childJTI string, reqBudget domain.Budget, childExp int64, now time.Time) error`:
-   - `reclaimExpiredLocked` 수행 후 `parent` 엔트리를 조회한다.
-   - `reqBudget.MaxCalls > parent.Remaining.MaxCalls`이면 `domain.NewError(domain.ReasonDelegationBudgetExceeded, "budget_ledger", "...", nil)`(`ExitAuthzDenied = 12`)을 반환한다.
-   - `parent.Initial.HasReadLimit()`인데 `!reqBudget.HasReadLimit() || reqBudget.MaxReadBytes > parent.Remaining.MaxReadBytes`이면 `ReasonDelegationBudgetExceeded`를 반환한다 (`Write`도 동일).
-   - 통과 시 `parent.Remaining`에서 `reqBudget`만큼 차감하고 `childJTI` 엔트리를 등록한다.
-2. `Consume(jti string, calls, readBytes, writeBytes int64, now time.Time) error`:
-   - `entry.Remaining.MaxCalls < calls`이면 `ReasonBudgetExhausted`(`12`) 반환.
-   - `entry.Initial.HasReadLimit() && entry.Remaining.MaxReadBytes < readBytes`이면 `ReasonBudgetExhausted`(`12`) 반환.
-   - `entry.Initial.HasWriteLimit() && entry.Remaining.MaxWriteBytes < writeBytes`이면 `ReasonBudgetExhausted`(`12`) 반환.
-   - 통과 시 `entry.Remaining`에서 해당 수치를 차감한다.
+### 3.2 만료 회수 (`reclaimExpiredLocked(st *LedgerState, nowUnix int64)`)
+- `Reserve`·`Consume`·`Refund` 트랜잭션의 맨 앞에서 호출한다. `Get`은 읽기 전용(`Read`)이며 회수하지 않는다.
+- 대상: `e.ParentJTI != "" && !e.Reclaimed && e.ExpiresAt <= nowUnix`.
+- **깊은 엔트리부터** 처리한다(체인 깊이 = 부모를 따라 올라간 횟수, 큰 것부터). 그래야 손자 → 자식 → 루트로 미사용분이 한 트랜잭션 안에서 끝까지 올라간다.
+- 처리: 부모 엔트리가 있으면 `parent.Remaining.MaxCalls += child.Remaining.MaxCalls`, 활성 바이트 한도도 합산하되 각 값은 `parent.Initial` 이하로 자른다. 그다음 `child.Remaining = domain.Budget{}`, `child.Reclaimed = true`. 부모 엔트리가 없으면(손상 이외 정상 경로에서는 생기지 않음) 회수하지 않고 `Reclaimed = true`만 표시한다.
 
----
+### 3.3 연산 규칙
 
-> **Coffman 교착 상태 방지를 위한 중첩 파일 락 금지 불변식 ([013번 보고서](../../../보고서/013-5대_표준공학검증기법_기반_잔여로드맵_전수정밀진단_및_교정_보고서.md) `DEF-05`)**: `AtomicFileStore.Update(fn)`(또는 `WithFileLock`) 콜백 `fn` 내부에서는 인메모리 상태 구조체만 변이하고 즉시 반환해야 하며, 락을 쥔 채로 `auditWriter.Log(...)`나 다른 `AtomicFileStore`를 중첩 호출하지 않는다(감사 기록 등은 반드시 `Update` 반환 직후 수행).
+| 연산 | 규칙 | 실패 |
+|---|---|---|
+| `Init` | `b.Validate()` 통과, 같은 jti가 이미 있으면 거부(재등록으로 예산 부활 방지). `Initial = Remaining = b`. | 무효 예산 `ReasonInvalidArguments`(14), 중복 `ReasonDelegationBudgetExceeded`(12) |
+| `Reserve` | 회수 → 부모 조회 → `req.Validate()` → `req.Within(parent.Remaining)`처럼 비교(호출 수, 그리고 `parent.Initial`의 활성 바이트 한도마다 `req`도 한도가 있어야 하고 `parent.Remaining` 이하) → `parent.Remaining`에서 차감 → 자식 엔트리 등록(`Initial = Remaining = req`, `ParentJTI = parentJTI`). 자식 jti가 이미 있으면 거부. | 부모 없음·부족·자식 중복 `ReasonDelegationBudgetExceeded`(12) |
+| `Consume` | 회수 → 엔트리 조회 → `Reclaimed`면 거부 → `Remaining.MaxCalls < calls`, 또는 `Initial.HasReadLimit() && Remaining.MaxReadBytes < readBytes`, 또는 쓰기 동일이면 거부 → 차감. 비활성 바이트 한도는 검사·차감하지 않는다. | 엔트리 없음·회수됨·부족 `ReasonBudgetExhausted`(12) |
+| `Refund` | 회수 → 엔트리 조회 → `Remaining`에 더하되 `Initial` 이하로 자른다. 회수된 엔트리는 아무것도 하지 않는다(이미 부모로 돌아갔으므로 이중 계상 방지). | 엔트리 없음 `ReasonInternalError`(16) |
+| `Get` | 공유 잠금 읽기. | — |
+
+- 원장 파일 손상(JSON 파싱 실패)은 모든 연산에서 `ReasonInternalError`(`16`)로 끝난다. 빈 원장으로 다시 시작하지 않는다.
+
+> **중첩 잠금 금지 불변식** ([013번 보고서](../../../보고서/013-5대_표준공학검증기법_기반_잔여로드맵_전수정밀진단_및_교정_보고서.md) `DEF-05`): `AtomicFileStore.Update(fn)`의 `fn` 안에서는 메모리 상태만 바꾸고 즉시 반환한다. 감사 기록이나 다른 `AtomicFileStore` 호출은 `Update`가 끝난 뒤에 한다.
 
 ---
 
@@ -69,24 +85,28 @@ type BudgetEntry struct {
 
 | ID | 입력 | 기대 결과 |
 |:---:|---|---|
-| **TC-020-01** | 잔량 `MaxCalls: 3`인 원장에 10개 고루틴이 동시에 `Consume(calls: 1)` 호출 | 정확히 3건만 `nil` 반환, 7건은 `ReasonBudgetExhausted(12)` 반환, 최종 잔량 `0`, `Version` 단조 증가 확인 |
-| **TC-020-02** | 부모(`Calls: 10`)에서 자식(`Calls: 4`, TTL 1분) 예약 후 자식이 1회만 쓰고 크래시 → 가상 시계 +2분 전진 후 부모에서 새 자식(`Calls: 8`) 예약 | 만료된 자식의 미사용분(`3`)이 자동 회수되어 부모 잔량 `9`(`6 + 3`)가 되고 새 자식(`8`) 예약 성공 |
-| **TC-020-03** | 깨진 JSON이 적힌 원장 파일에서 `Consume` 호출 | Fail-Closed 에러 반환 (`ExitInternalError = 16`) |
-| **TC-020-04** | `TC-081-01` AST 가드레일 실행 | `internal/authn/budget`이 직접 `syscall.Flock`을 부르지 않고 `internal/storage`만 사용함 확인 |
+| **TC-020-01** | 루트 `Init(MaxCalls: 3)` 후 10개 고루틴이 동시에 `Consume(1,0,0)` | 정확히 3건 `nil`, 7건 `ReasonBudgetExhausted(12)`, 최종 `Remaining.MaxCalls == 0` |
+| **TC-020-02** | 같은 원장 파일을 연 **별도 프로세스** 6개(테스트 바이너리 재실행 `TestHelperProcess` 방식)가 각 1회 `Consume`, 루트 `MaxCalls: 3` | 성공 프로세스 정확히 3개, 최종 잔량 `0` |
+| **TC-020-03** | 부모 `Calls: 10` → 자식(`Calls: 4`, exp = 기준 + 60초) 예약 → 자식 `Consume` 1회 → 기준 + 120초 시계의 원장으로 새 자식(`Calls: 8`) 예약 | 회수로 부모 잔량 `6 + 3 = 9`, 새 자식 예약 성공(부모 잔량 `1`), 첫 자식 `Reclaimed == true` |
+| **TC-020-04** | `Initial{MaxCalls: 5}`(바이트 한도 없음)에 `Consume(1, 1000, 1000)` / `Initial{MaxCalls: 5, MaxWriteBytes: 20}`에 `Consume(1,0,10)` 2회 후 `Consume(1,0,1)` | 앞은 성공 / 뒤는 3회차 `ReasonBudgetExhausted` |
+| **TC-020-05** | 쓰기 한도가 있는 부모에서 쓰기 한도가 없는 자식 예약 | `ReasonDelegationBudgetExceeded(12)` |
+| **TC-020-06** | 원장에 없는 부모 jti로 `Reserve` / 없는 jti로 `Consume` | 각각 `ReasonDelegationBudgetExceeded(12)` / `ReasonBudgetExhausted(12)` |
+| **TC-020-07** | 깨진 JSON이 적힌 원장 파일에서 `Consume` | `ReasonInternalError(16)`, 파일 내용 그대로 |
+| **TC-020-08** | `Consume(1,0,10)` 후 `Refund(1,0,10)` / 회수된 엔트리에 `Refund` | 잔량 원복 / 잔량 변화 없음 |
 
 ---
 
 ## 5. 4층위 검증 기준
 
-1. `go test -v ./internal/authz/state` PASS
-2. `go test -race ./internal/authz/state` 데이터 레이스 0건
-3. `go test -v ./internal/harness -run TestArchitectureGuardrails/TC-081-01` PASS
+1. `go test -v ./internal/authn/budget` PASS
+2. `go test -race ./internal/authn/budget` 레이스 0건
+3. `go test -v ./internal/harness -run TestArchitectureGuardrails` PASS (`TC-081-01` 포함)
 4. `go test ./...` 전체 회귀 0건
 
 ---
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `AtomicFileStore` 기반 `BudgetLedger` 및 `GrantsState`/`BudgetState` `Version++` 단조 증가 구현 완료
-- [ ] 동시 차감 경합 및 만료 크래시 회수 단위 테스트 통과
+- [ ] `internal/authn/budget` `FileLedger`(`Init`/`Reserve`/`Consume`/`Refund`/`Get`, 만료 회수) 구현
+- [ ] 고루틴·다중 프로세스 경합, 만료 회수, 손상 Fail-Closed 테스트 통과
 - [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
