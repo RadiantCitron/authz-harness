@@ -1,6 +1,6 @@
 # [구현지시서 040] 위임 계보(`act` 사슬) 연쇄 `Epoch` 회수와 TOCTOU 창 구간별 실측
 
-> **문서 상태**: `Draft`
+> **문서 상태**: `Done`
 > **상위 대시보드**: [13번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **교정 기준**: [022번 보고서](../../../보고서/022-13번로드맵_구조결함_및_진행가능성_검증보고서.md) T-6, T-7, T-8
 > **선행 조건**: [030_재교환_흐름_검증.md](030_재교환_흐름_검증.md) 완료
@@ -75,6 +75,6 @@
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] PIP `SubjectEpochs`, PDP `act` 사슬 동등 비교(Fail-Closed) 구현
-- [ ] `Config.StageObserver` 추가 및 Window A/B/C 시험 통과
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [x] PIP `SubjectEpochs`, PDP `act` 사슬 동등 비교(Fail-Closed) 구현
+- [x] `Config.StageObserver` 추가 및 Window A/B/C 시험 통과
+- [x] 대시보드 상태 갱신 및 변경 파일 단독 커밋

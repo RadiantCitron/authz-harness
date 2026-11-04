@@ -70,6 +70,25 @@ func Evaluate(req Request, snapshot *pip.SubjectSnapshot) Decision {
 		}
 	}
 
+	// 2b. 위임 계보(act 사슬) 연쇄 Epoch 검증: 모든 조상 고리를 동등 비교한다 (Fail-Closed).
+	if req.Actor != nil && snapshot.SubjectEpochs == nil {
+		return Decision{
+			Decision: DecisionDeny,
+			Reason:   domain.ReasonSubjectEpochRevoked,
+			Details:  "위임 계보 Epoch 정보가 공급되지 않아 조상 Epoch를 검증할 수 없습니다.",
+		}
+	}
+	for a := req.Actor; a != nil; a = a.Actor {
+		if a.Epoch < 1 || snapshot.SubjectEpochs.Get(a.Subject) != a.Epoch {
+			return Decision{
+				Decision: DecisionDeny,
+				Reason:   domain.ReasonSubjectEpochRevoked,
+				Details: fmt.Sprintf("위임 조상 %q의 제시 Epoch(%d)가 현재 Epoch(%d)와 일치하지 않아 하위 위임 토큰이 무효화되었습니다.",
+					a.Subject, a.Epoch, snapshot.SubjectEpochs.Get(a.Subject)),
+			}
+		}
+	}
+
 	// 3. 토큰 Scope 검증 (Scope가 요구되거나 전달된 경우)
 	if req.RequireScope || strings.TrimSpace(req.TokenScope) != "" {
 		if !domain.ScopeMatches(req.TokenScope, req.Action, cleanRes) {

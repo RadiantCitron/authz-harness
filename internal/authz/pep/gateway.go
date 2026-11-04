@@ -91,13 +91,14 @@ type Gateway interface {
 
 // Config 는 Gateway 생성에 필요한 하위 컴포넌트 의존성 주입 구조체다.
 type Config struct {
-	Verifier     token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
-	PDP          pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
-	Jail         jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
-	AuditWriter  audit.Writer        // Layer 1: 감사 로그 기록기
-	Clock        domain.Clock        // 결정론적 가상 시계 주입
-	Logger       *slog.Logger        // 관측성 운영 로거 주입 (미주입 시 slog.Default())
-	BudgetLedger budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
+	Verifier      token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
+	PDP           pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
+	Jail          jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
+	AuditWriter   audit.Writer        // Layer 1: 감사 로그 기록기
+	Clock         domain.Clock        // 결정론적 가상 시계 주입
+	Logger        *slog.Logger        // 관측성 운영 로거 주입 (미주입 시 slog.Default())
+	StageObserver func(Stage)         // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
+	BudgetLedger  budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
 }
 
 type gateway struct {
@@ -179,6 +180,9 @@ func (g *gateway) runStage(ctx context.Context, state *pipelineState, stage Stag
 	)
 
 	err := fn()
+	if err == nil && g.cfg.StageObserver != nil {
+		g.cfg.StageObserver(stage)
+	}
 	durationMs := g.clock.Now().Sub(start).Milliseconds()
 
 	if err != nil {

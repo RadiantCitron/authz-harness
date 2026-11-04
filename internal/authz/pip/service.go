@@ -17,6 +17,8 @@ type SubjectSnapshot struct {
 	ActiveGrants  []domain.Grant `json:"active_grants"`
 	RevokedGrants []domain.Grant `json:"revoked_grants,omitempty"`
 	Timestamp     time.Time      `json:"timestamp"`
+	// SubjectEpochs 는 모든 주체의 현재 Epoch 사본이다(위임 계보 연쇄 회수 검사용, 호출자가 원본을 바꾸지 못하도록 복사).
+	SubjectEpochs domain.SecurityEpochs `json:"subject_epochs,omitempty"`
 }
 
 // Service 는 정책 정보점(PIP)의 읽기 전용 조회 규약이다.
@@ -74,6 +76,10 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 	}
 
 	epoch := st.Epochs.Get(cleanSub)
+	epochsCopy := make(domain.SecurityEpochs, len(st.Epochs))
+	for k, v := range st.Epochs {
+		epochsCopy[k] = v
+	}
 	activeGrants := make([]domain.Grant, 0)
 	revokedGrants := make([]domain.Grant, 0)
 
@@ -92,6 +98,7 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 		CurrentEpoch:  epoch,
 		ActiveGrants:  activeGrants,
 		RevokedGrants: revokedGrants,
+		SubjectEpochs: epochsCopy,
 		Timestamp:     s.clock.Now().UTC(),
 	}, nil
 }
