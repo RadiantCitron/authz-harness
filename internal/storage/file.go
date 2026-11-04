@@ -66,5 +66,27 @@ func AtomicWriteFile(dstPath string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("storage: failed to atomic rename %s to %s: %w", tmpName, dstPath, err)
 	}
 
+	// 이름 교체(디렉터리 엔트리 변경)는 부모 디렉터리를 fsync 해야 전원 차단 뒤에도 남는다.
+	// 실패하면 교체는 이미 일어났지만 내구성을 보장할 수 없으므로 호출자에게 실패를 알린다(Fail-Closed, 계획 008 D-04).
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("storage: failed to sync dir %s after rename: %w", dir, err)
+	}
+
+	return nil
+}
+
+// syncDir 는 디렉터리를 열어 fsync 한다. darwin 에서 os.File.Sync 는 F_FULLFSYNC 를 쓴다.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return fmt.Errorf("storage: failed to open dir %s: %w", dir, err)
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return fmt.Errorf("storage: failed to fsync dir %s: %w", dir, err)
+	}
+	if err := d.Close(); err != nil {
+		return fmt.Errorf("storage: failed to close dir %s: %w", dir, err)
+	}
 	return nil
 }
