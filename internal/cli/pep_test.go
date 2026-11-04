@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -88,6 +89,26 @@ func setupPEPCLITestRig(t *testing.T) *pepCLITestRig {
 	}
 }
 
+// tokenJTIForLog 는 서명 검증 없이 토큰 페이로드에서 jti 만 꺼낸다(시험 로그 전용).
+// 꺼내지 못하면 토큰 내용을 노출하지 않는 자리표시자를 돌려준다.
+func tokenJTIForLog(tok string) string {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return "<unparsable>"
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "<unparsable>"
+	}
+	var claims struct {
+		JTI string `json:"jti"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.JTI == "" {
+		return "<unparsable>"
+	}
+	return claims.JTI
+}
+
 // issueToken 은 테스트 헬퍼로 토큰을 발급받아 반환한다.
 func (rig *pepCLITestRig) issueToken(t *testing.T, sub, scope, aud string) string {
 	t.Helper()
@@ -110,7 +131,8 @@ func (rig *pepCLITestRig) issueToken(t *testing.T, sub, scope, aud string) strin
 
 	lines := strings.Split(strings.TrimSpace(rig.out.String()), "\n")
 	tok := strings.TrimSpace(lines[len(lines)-1])
-	t.Logf("issued token for %s (%s): %s", sub, scope, tok)
+	// 원시 토큰은 로그에 남기지 않고 jti 만 기록한다 (AGENTS.md §3 Zero Leakage)
+	t.Logf("issued token for %s (%s): jti=%s", sub, scope, tokenJTIForLog(tok))
 
 	rig.out.Reset()
 	rig.errOut.Reset()
