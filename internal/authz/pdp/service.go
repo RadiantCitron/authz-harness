@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"authz-harness/internal/audit"
-	"authz-harness/internal/authz/pip"
 	"authz-harness/internal/domain"
 )
 
@@ -50,8 +48,8 @@ type Decision struct {
 }
 
 // Evaluate 는 일체의 부작용 없이 순수 인자만을 대조하여 인가 여부를 결정하는 순수 함수다.
-// Layer 2B의 pip.SubjectSnapshot과 요청(Request)만을 대조하며 파일 I/O나 OS 호출을 일체 수행하지 않는다.
-func Evaluate(req Request, snapshot *pip.SubjectSnapshot) Decision {
+// 도메인 SubjectSnapshot과 요청(Request)만을 대조하며 파일 I/O나 OS 호출을 일체 수행하지 않는다.
+func Evaluate(req Request, snapshot *domain.SubjectSnapshot) Decision {
 	cleanSub := strings.TrimSpace(req.Subject)
 	cleanRes := strings.TrimSpace(req.Resource)
 
@@ -186,8 +184,8 @@ type Service interface {
 
 // pdpService 는 Service의 표준 구현체다.
 type pdpService struct {
-	pipSvc pip.Service
-	audit  audit.Writer
+	pipSvc domain.SnapshotProvider
+	audit  domain.AuditWriter
 	clock  domain.Clock
 }
 
@@ -204,7 +202,7 @@ func WithClock(c domain.Clock) ServiceOption {
 }
 
 // NewService 는 PIP와 Audit Writer를 주입받아 PDP 서비스를 생성한다.
-func NewService(pipSvc pip.Service, audit audit.Writer, opts ...ServiceOption) Service {
+func NewService(pipSvc domain.SnapshotProvider, audit domain.AuditWriter, opts ...ServiceOption) Service {
 	s := &pdpService{
 		pipSvc: pipSvc,
 		audit:  audit,
@@ -256,7 +254,7 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 
 	// 감사 이벤트 기록
 	if s.audit != nil {
-		event := audit.Event{
+		event := domain.AuditEvent{
 			Timestamp: now,
 			TraceID:   traceID,
 			Step:      "pdp.decide",

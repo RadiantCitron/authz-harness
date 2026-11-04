@@ -4,24 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 )
 
-// SubjectSnapshot 은 PDP 인가 결정을 위해 PIP가 제공하는 주체별 권한 상태 스냅샷이다.
-type SubjectSnapshot struct {
-	Subject       string         `json:"subject"`
-	CurrentEpoch  domain.Epoch   `json:"current_epoch"`
-	ActiveGrants  []domain.Grant `json:"active_grants"`
-	RevokedGrants []domain.Grant `json:"revoked_grants,omitempty"`
-	Timestamp     time.Time      `json:"timestamp"`
-	// SubjectEpochs 는 모든 주체의 현재 Epoch 사본이다(위임 계보 연쇄 회수 검사용, 호출자가 원본을 바꾸지 못하도록 복사).
-	SubjectEpochs domain.SecurityEpochs `json:"subject_epochs,omitempty"`
-	// Approvals 는 이 주체의 승인 사본이다(같은 Load 에서 공급, 호출자가 원장을 바꾸지 못하도록 복사).
-	Approvals []domain.Approval `json:"approvals,omitempty"`
-}
+// SubjectSnapshot 은 domain.SubjectSnapshot 의 별칭이다(DIP: 정의는 도메인에 있다).
+type SubjectSnapshot = domain.SubjectSnapshot
 
 // Service 는 정책 정보점(PIP)의 읽기 전용 조회 규약이다.
 type Service interface {
