@@ -617,3 +617,54 @@ func TestRunner_InvariantViolationJudgement(t *testing.T) {
 		})
 	}
 }
+
+type stubProvider struct{ path string }
+
+func (s stubProvider) GetBinaryPath() (string, error) { return s.path, nil }
+
+// TC-040-04: inproc 러너는 RequiresSubprocess 시나리오를 건너뛴다.
+func TestRunner_RequiresSubprocessSkippedInProc(t *testing.T) {
+	calls := 0
+	sc := &dummyScenario{
+		meta:    ScenarioMetadata{ID: "E2E-SUB", Group: "G9", RequiresSubprocess: true},
+		setupFn: func(ctx context.Context, env *SandboxEnvironment) error { calls++; return nil },
+		execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
+			calls++
+			return domain.ExitSuccess, nil
+		},
+	}
+	runner := NewDefaultRunner(WithBaseDir(t.TempDir()), WithExecutionMode(ModeInProc))
+	_ = runner.Register(sc)
+	res, err := runner.RunScenario(context.Background(), "E2E-SUB")
+	if err != nil || !res.Skipped || res.Passed || calls != 0 {
+		t.Fatalf("res=%+v err=%v calls=%d", res, err, calls)
+	}
+}
+
+// TC-040-05: 서브프로세스 러너는 RequiresSubprocess 시나리오에만 FaultWorkerPath 를 주입한다.
+func TestRunner_InjectsFaultWorkerPath(t *testing.T) {
+	var got, gotPlain string
+	mk := func(id string, req bool, dst *string) *dummyScenario {
+		return &dummyScenario{
+			meta: ScenarioMetadata{ID: id, Group: "G9", RequiresSubprocess: req,
+				Expected: ExpectedAssertion{ExitCode: domain.ExitSuccess}},
+			execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
+				*dst = env.FaultWorkerPath
+				return domain.ExitSuccess, nil
+			},
+		}
+	}
+	runner := NewDefaultRunner(WithBaseDir(t.TempDir()),
+		WithBinaryProvider(stubProvider{"/bin/true"}),
+		WithFaultWorkerProvider(stubProvider{"/bin/fw"}))
+	_ = runner.Register(mk("E2E-A", true, &got))
+	_ = runner.Register(mk("E2E-B", false, &gotPlain))
+	for _, id := range []string{"E2E-A", "E2E-B"} {
+		if _, err := runner.RunScenario(context.Background(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got != "/bin/fw" || gotPlain != "" {
+		t.Fatalf("got=%q plain=%q", got, gotPlain)
+	}
+}

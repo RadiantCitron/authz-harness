@@ -326,4 +326,25 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+
+	// TC-040-AG: 결함 워커는 프로덕션 패키지를 하나도 import 하지 않는다 (ADR 0003 C-7).
+	t.Run("TC-040-AG: faultworker 의 authz-harness/ import 0건", func(t *testing.T) {
+		dir := filepath.Join(root, "internal", "harness", "faultworker")
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
+			return !strings.HasSuffix(fi.Name(), "_test.go")
+		}, parser.ImportsOnly)
+		if err != nil || len(pkgs) == 0 {
+			t.Fatalf("failed to parse faultworker dir: %v", err)
+		}
+		for _, pkg := range pkgs {
+			for fname, file := range pkg.Files {
+				for _, imp := range file.Imports {
+					if strings.HasPrefix(imp.Path.Value, `"authz-harness/`) {
+						t.Errorf("faultworker must be standalone: %s imports %s", fname, imp.Path.Value)
+					}
+				}
+			}
+		}
+	})
 }

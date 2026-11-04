@@ -12,6 +12,7 @@ type JSONReport struct {
 	Version       string                   `json:"version"`
 	Total         int                      `json:"total"`
 	Passed        int                      `json:"passed"`
+	Skipped       int                      `json:"skipped"`
 	Failed        int                      `json:"failed"`
 	TotalDuration string                   `json:"total_duration"`
 	Results       []harness.ScenarioResult `json:"results"`
@@ -21,11 +22,14 @@ type JSONReport struct {
 func (f *JSONFormatter) Format(results []harness.ScenarioResult) error {
 	total := len(results)
 	passed := 0
+	skipped := 0
 	var totalDuration time.Duration
 
 	for _, r := range results {
 		totalDuration += r.Duration
-		if r.Passed {
+		if r.Skipped {
+			skipped++
+		} else if r.Passed {
 			passed++
 		}
 	}
@@ -34,7 +38,8 @@ func (f *JSONFormatter) Format(results []harness.ScenarioResult) error {
 		Version:       "0.1.0",
 		Total:         total,
 		Passed:        passed,
-		Failed:        total - passed,
+		Skipped:       skipped,
+		Failed:        total - passed - skipped,
 		TotalDuration: totalDuration.String(),
 		Results:       results,
 	}

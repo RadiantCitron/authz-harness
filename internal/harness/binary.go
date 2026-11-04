@@ -21,11 +21,17 @@ type CachedBinaryProvider struct {
 	binaryPath string
 	buildErr   error
 	tempDir    string
+	pkg        string // go build 대상 패키지 경로 (태그 없음)
 }
 
 // NewCachedBinaryProvider 는 새 CachedBinaryProvider 를 생성한다.
 func NewCachedBinaryProvider() *CachedBinaryProvider {
-	return &CachedBinaryProvider{}
+	return &CachedBinaryProvider{pkg: "./cmd/authz-harness"}
+}
+
+// NewFaultWorkerProvider 는 G9 시험 전용 결함 워커 실행 파일을 빌드하는 프로바이더를 생성한다.
+func NewFaultWorkerProvider() *CachedBinaryProvider {
+	return &CachedBinaryProvider{pkg: "./internal/harness/faultworker"}
 }
 
 // locateRepoRoot 는 go.mod 파일이 있는 레포지토리 루트 디렉터리를 탐색한다.
@@ -64,10 +70,10 @@ func (p *CachedBinaryProvider) GetBinaryPath() (string, error) {
 		}
 		p.tempDir = tmpDir
 
-		targetBin := filepath.Join(tmpDir, "authz-harness")
+		targetBin := filepath.Join(tmpDir, filepath.Base(p.pkg))
 
 		// 2. repoRoot 기준 go build 수행
-		cmd := exec.Command("go", "build", "-o", targetBin, "./cmd/authz-harness")
+		cmd := exec.Command("go", "build", "-o", targetBin, p.pkg)
 		cmd.Dir = repoRoot
 		output, err := cmd.CombinedOutput()
 		if err != nil {

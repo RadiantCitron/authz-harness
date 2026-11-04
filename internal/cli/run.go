@@ -144,7 +144,7 @@ func (r *RunRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		}
 
 		results = append(results, res)
-		if !res.Passed {
+		if !res.Passed && !res.Skipped {
 			hasFailure = true
 			if cfg.FailFast {
 				break

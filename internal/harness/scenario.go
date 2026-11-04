@@ -8,13 +8,14 @@ import (
 
 // ScenarioMetadata 는 시나리오의 정적 설명 및 카탈로그 정보이다.
 type ScenarioMetadata struct {
-	ID                 string            `json:"id"`                  // "E2E-01" ~ "E2E-30"
-	Group              string            `json:"group"`               // "G1" ~ "G7"
-	Name               string            `json:"name"`                // 시나리오 명칭
-	Description        string            `json:"description"`         // 시나리오 설명
-	AttackClass        string            `json:"attack_class"`        // 정상 또는 공격 유형
-	ParadoxExplanation string            `json:"paradox_explanation"` // 초보자용 역설 해설
-	Expected           ExpectedAssertion `json:"expected"`            // 기대 4중 검증 스펙
+	ID                 string            `json:"id"`                            // "E2E-01" ~ "E2E-30"
+	Group              string            `json:"group"`                         // "G1" ~ "G7"
+	Name               string            `json:"name"`                          // 시나리오 명칭
+	Description        string            `json:"description"`                   // 시나리오 설명
+	AttackClass        string            `json:"attack_class"`                  // 정상 또는 공격 유형
+	ParadoxExplanation string            `json:"paradox_explanation"`           // 초보자용 역설 해설
+	Expected           ExpectedAssertion `json:"expected"`                      // 기대 4중 검증 스펙
+	RequiresSubprocess bool              `json:"requires_subprocess,omitempty"` // 실제 OS 서브프로세스 모드가 필요한 시나리오
 }
 
 // Scenario 는 하네스가 독립적으로 실행하고 검증할 수 있는 단위 시나리오 규약이다.

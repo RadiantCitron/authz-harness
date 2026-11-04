@@ -28,6 +28,7 @@ func RenderSummaryTable(results []harness.ScenarioResult) string {
 
 	total := len(results)
 	passedCount := 0
+	skippedCount := 0
 	var totalDuration time.Duration
 
 	for _, res := range results {
@@ -35,7 +36,9 @@ func RenderSummaryTable(results []harness.ScenarioResult) string {
 		assertion := res.Assertion
 		totalDuration += res.Duration
 
-		if res.Passed {
+		if res.Skipped {
+			skippedCount++
+		} else if res.Passed {
 			passedCount++
 		}
 
@@ -59,7 +62,9 @@ func RenderSummaryTable(results []harness.ScenarioResult) string {
 		quadChecks := fmt.Sprintf("[%2s /%2s /%2s /%2s ]", exitCheck, fileCheck, auditCheck, hashCheck)
 
 		verdict := "PASS"
-		if !res.Passed {
+		if res.Skipped {
+			verdict = "SKIP"
+		} else if !res.Passed {
 			verdict = "FAIL"
 		}
 
@@ -79,9 +84,13 @@ func RenderSummaryTable(results []harness.ScenarioResult) string {
 	}
 
 	sb.WriteString("------------------------------------------------------------------------------------------------------------------------\n")
-	failedCount := total - passedCount
-	sb.WriteString(fmt.Sprintf(" [종합 결산] 총 시나리오: %d건 | 통과(PASS): %d건 | 실패(FAIL): %d건 | 총 소요시간: %.1fms\n",
-		total, passedCount, failedCount, float64(totalDuration.Microseconds())/1000.0))
+	failedCount := total - passedCount - skippedCount
+	skipNote := ""
+	if skippedCount > 0 {
+		skipNote = fmt.Sprintf(" | 건너뜀(SKIP): %d건", skippedCount)
+	}
+	sb.WriteString(fmt.Sprintf(" [종합 결산] 총 시나리오: %d건 | 통과(PASS): %d건 | 실패(FAIL): %d건%s | 총 소요시간: %.1fms\n",
+		total, passedCount, failedCount, skipNote, float64(totalDuration.Microseconds())/1000.0))
 
 	if failedCount == 0 {
 		sb.WriteString(" >> 최종 판정: ALL SCENARIOS PASSED (보안 불변식 100% 사수 증명 완료)\n")

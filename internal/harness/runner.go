@@ -28,6 +28,7 @@ type ScenarioResult struct {
 	Duration  time.Duration    `json:"duration"`
 	Assertion AssertionResult  `json:"assertion"`
 	Error     string           `json:"error,omitempty"`
+	Skipped   bool             `json:"skipped,omitempty"`
 }
 
 // Runner 는 시나리오들을 등록하고 독립 샌드박스에서 실행하는 오케스트레이터다.
@@ -50,13 +51,14 @@ type Runner interface {
 
 // DefaultRunner 는 Runner 인터페이스의 표준 구현체다.
 type DefaultRunner struct {
-	mu             sync.RWMutex
-	scenarios      map[string]Scenario
-	order          []string
-	evaluator      Evaluator
-	baseDir        string
-	executionMode  ExecutionMode
-	binaryProvider BinaryProvider
+	mu                  sync.RWMutex
+	scenarios           map[string]Scenario
+	order               []string
+	evaluator           Evaluator
+	baseDir             string
+	executionMode       ExecutionMode
+	binaryProvider      BinaryProvider
+	faultWorkerProvider BinaryProvider
 }
 
 // RunnerOption 은 Runner 생성 옵션이다.
@@ -73,6 +75,13 @@ func WithExecutionMode(mode ExecutionMode) RunnerOption {
 func WithBinaryProvider(provider BinaryProvider) RunnerOption {
 	return func(r *DefaultRunner) {
 		r.binaryProvider = provider
+	}
+}
+
+// WithFaultWorkerProvider 는 결함 워커 프로바이더를 주입하는 옵션이다.
+func WithFaultWorkerProvider(provider BinaryProvider) RunnerOption {
+	return func(r *DefaultRunner) {
+		r.faultWorkerProvider = provider
 	}
 }
 
@@ -103,6 +112,9 @@ func NewDefaultRunner(opts ...RunnerOption) *DefaultRunner {
 	}
 	if r.executionMode == ModeSubprocess && r.binaryProvider == nil {
 		r.binaryProvider = NewCachedBinaryProvider()
+	}
+	if r.executionMode == ModeSubprocess && r.faultWorkerProvider == nil {
+		r.faultWorkerProvider = NewFaultWorkerProvider()
 	}
 	return r
 }
@@ -162,6 +174,11 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 	meta := s.Metadata()
 	startTime := time.Now()
 
+	// 실행 모드 선언: 실제 OS 프로세스가 필요한 시나리오는 inproc 에서 건너뛴다 (샌드박스 생성 전).
+	if meta.RequiresSubprocess && r.executionMode != ModeSubprocess {
+		return ScenarioResult{Metadata: meta, Skipped: true, Passed: false, Error: "requires subprocess mode"}, nil
+	}
+
 	// 1. 시나리오별 격리 Ephemeral Sandbox 생성
 	env, err := NewSandboxEnvironment(SandboxConfig{
 		BaseDir: r.baseDir,
@@ -190,6 +207,19 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 			}, err
 		}
 		env.BinaryPath = binPath
+
+		if meta.RequiresSubprocess && r.faultWorkerProvider != nil {
+			fwPath, err := r.faultWorkerProvider.GetBinaryPath()
+			if err != nil {
+				return ScenarioResult{
+					Metadata: meta,
+					Passed:   false,
+					Duration: time.Since(startTime),
+					Error:    fmt.Sprintf("failed to acquire fault worker binary: %v", err),
+				}, err
+			}
+			env.FaultWorkerPath = fwPath
+		}
 	}
 
 	// 2. Setup 단계 실행

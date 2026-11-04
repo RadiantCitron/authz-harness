@@ -15,21 +15,22 @@ import (
 
 // SandboxConfig 는 격리 샌드박스 생성 설정이다.
 type SandboxConfig struct {
-	BaseDir   string        // 임시 루트 디렉터리 (공백 시 os.MkdirTemp 사용)
-	ClockTime time.Time     // 가상 시계 기준 시각
+	BaseDir   string    // 임시 루트 디렉터리 (공백 시 os.MkdirTemp 사용)
+	ClockTime time.Time // 가상 시계 기준 시각
 }
 
 // SandboxEnvironment 는 단일 시나리오가 실행되는 독립된 3-Zone 파일 및 감사 공간이다.
 type SandboxEnvironment struct {
-	RootDir      string        // 샌드박스 루트 경로
-	PrivKeyPath  string        // Zone A: 서명 개인키 파일 경로
-	PubJWKSPath  string        // Zone B: 공개 검증 키(JWKS) 파일 경로
-	StatePath    string        // Zone B: Grant/Epoch 상태 파일 경로
-	ReplayPath   string        // Zone B: Replay 방지 원장 파일 경로
-	WorkspaceDir string        // Zone C: Workspace 격리 디렉터리 경로
-	AuditPath    string        // 감사 로그 (audit.jsonl) 경로
-	MockClock    domain.Clock  // 결정론적 가상 시계
-	BinaryPath   string        // 서브프로세스 실행에 사용할 컴파일된 authz-harness 바이너리 경로
+	RootDir         string       // 샌드박스 루트 경로
+	PrivKeyPath     string       // Zone A: 서명 개인키 파일 경로
+	PubJWKSPath     string       // Zone B: 공개 검증 키(JWKS) 파일 경로
+	StatePath       string       // Zone B: Grant/Epoch 상태 파일 경로
+	ReplayPath      string       // Zone B: Replay 방지 원장 파일 경로
+	WorkspaceDir    string       // Zone C: Workspace 격리 디렉터리 경로
+	AuditPath       string       // 감사 로그 (audit.jsonl) 경로
+	MockClock       domain.Clock // 결정론적 가상 시계
+	BinaryPath      string       // 서브프로세스 실행에 사용할 컴파일된 authz-harness 바이너리 경로
+	FaultWorkerPath string       // G9 시험 전용 결함 워커 실행 파일 경로 (RequiresSubprocess 시나리오에만 주입)
 }
 
 // fixedClock 은 고정된 시각을 반환하는 가상 시계다.
