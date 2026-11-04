@@ -171,12 +171,12 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 ### 최종 허용 불변식 (Master Allow Invariant — Phase 0~17 통합 9대 조건)
 요청이 최종 허용(`ALLOW`, `EXIT_SUCCESS = 0`)되어 실제 도구 I/O가 집행되려면 다음 9가지 조건이 동시에 참(True)이어야 한다:
 1. **토큰 무결성 및 수명 유효 (Gate 1)**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
-2. **주체 바인딩 및 비재사용 (Gate 1 & Pre-Commit)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(단, Gate 2에서 `DecisionAsk(18)` 반환 시에는 재시도를 위해 `jti`를 소진하지 않음).
+2. **주체 바인딩 및 비재사용 (Gate 1 & Pre-Commit)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(Gate 1은 읽기 확인만 하고, PDP allow 직후 `StageReplay`에서 소비한다. `DecisionAsk(18)`·deny에서는 재시도를 위해 `jti`를 소진하지 않음).
 3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]`와 **일치**해야 하며 고리 Epoch가 1 미만이면 거부함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
 4. **Scope 포함 (Gate 2 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
 5. **실시간 활성 Grant 존재 (Gate 2)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
 6. **예산(Budget) 잔량 충분 (PEP `StageBudget`·읽기 직후 — Phase 12)**: 토큰에 `Budget`이 설정된 경우 Zone B 예산 원장(`budget_ledger.json`)의 잔여 호출 횟수·읽기/쓰기 바이트가 충분하고 PEP의 원자적 차감(`Consume`: 쓰기는 사전 차감, 읽기는 `ReadFile` 직후 사후 차감)을 통과함. PDP·PIP는 예산을 판정하지 않음.
-7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (Gate 2 & Pre-Commit — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고 `ConsumeMatching` 원자적 1회 소비를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
+7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (Gate 2 & Pre-Commit — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고(PDP가 `Decision.ApprovalID`로 지목) PEP `StageApproval`의 ID 기반 원자적 1회 소비(삭제)를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
 8. **도구별 실행 경계(Boundary) 검증 통과 (Gate 2c — Phase 03 & 16)**: `file:*`는 Workspace Jail 내부 경로(`ResolvePath`), `net:fetch`는 루프백 리터럴 및 허용 포트(`netguard`), `exec:run`은 허용 바이너리 ID 및 인자 정규식(`execguard`) 검증을 통과함.
 9. **사전 커밋 감사(Pre-Commit Audit) 기록 성공 (Stage 4)**: I/O 실행 직전 `audit.jsonl`에 사전 커밋 이벤트 기록이 성공함(실패 시 차감된 예산을 즉시 `Refund`하고 I/O 진입 없이 `ExitAuditFailure = 15`로 중단).
 
@@ -404,9 +404,9 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **목적**: 코어에서 `log/slog` 의존을 끊고 `internal/observe`(포트 + `slogadapter`) 포트로 분리하며(`TC-140-01`), authn 감사 오류 무시 제거(`TC-080-01` 전 패키지 확대), 감사 스키마 v2(`ArgHash`, `ResultHash`), Zone A Ed25519 서명 체크포인트(꼬리 절단·전체 재작성 탐지), `audit tree` 위임 계보 시각화를 완성한다.
 * **주요 산출물**: [14-감사-확장-및-관측성-포트](14-감사-확장-및-관측성-포트/README.md), `internal/observe`, `internal/audit/checkpoint/` 패키지, `G13` 시나리오(`E2E-61`~`66`).
 
-### Phase 15: PDP 3값 승인 결정(`ask`) 및 5요소 바인딩 1회용 승인 원장 (`G14`: `E2E-67`~`E2E-72`)
-* **목적**: 순수 PDP 결정을 `allow`/`deny`/`ask` 3값으로 확장하고, `(sub, action, resource, token_jti)` 4요소 및 선택적 5번째 요소 `ArgHash`(`sha256(req.Data)`, Confused Deputy 페이로드 바꿔치기 방어)에 바인딩된 Zone B 1회용 승인 원장(`approvals_state.json`)과 종료 코드 `18`(`ExitApprovalRequired`)을 증명한다.
-* **주요 산출물**: [15-pdp-승인-결정-ask](15-pdp-승인-결정-ask/README.md), `internal/authz/state/approval_store.go`, `approval grant/list` CLI, `G14` 시나리오(`E2E-67`~`72`).
+### Phase 15: PDP 3값 승인 결정(`ask`) 및 5요소 바인딩 1회용 승인 원장 (`G14`: `E2E-67`~`E2E-73`)
+* **목적**: 순수 PDP 결정을 `allow`/`deny`/`ask` 3값으로 확장하고, `(sub, action, resource, token_jti)` 4요소 및 선택적 5번째 요소 `ArgHash`(`sha256(req.Data)`, Confused Deputy 페이로드 바꿔치기 방어)에 바인딩된 Zone B 1회용 승인 원장(`grants_state.json`의 `Approvals`)과 종료 코드 `18`(`ExitApprovalRequired`)을 증명한다.
+* **주요 산출물**: [15-pdp-승인-결정-ask](15-pdp-승인-결정-ask/README.md), `internal/authz/state/approval.go`, `approval grant/list` CLI, `G14` 시나리오(`E2E-67`~`73`).
 
 ### Phase 16: 도구 종류 확장(`net:fetch`, `exec:run`) 및 Egress/실행 가드 (`G15`: `E2E-73`~`E2E-78`) — [기능 동결선]
 * **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고 78대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
