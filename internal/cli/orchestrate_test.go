@@ -116,6 +116,59 @@ func TestOrchestrateRunner_TC07_MissingRequiredArgs(t *testing.T) {
 	}
 }
 
+// plan-005 AT-04: 결함 주입 플래그는 정의되지 않은 플래그로 거부되고 자식은 기동되지 않는다.
+// 유효한 Grant·토큰을 준비해, 플래그가 무시된다면 쓰기가 성공했을 상황에서 거부됨을 확인한다.
+func TestOrchestrateRunner_AT04_RejectsRemovedInjectFlag(t *testing.T) {
+	rig := setupPEPCLITestRig(t)
+	bin := getTestBinary(t)
+
+	testFile := "at04_target.txt"
+	sub := "subagent-worker-at04"
+	rig.createGrant(t, sub, "operator", "file:write", testFile)
+	tok := rig.issueToken(t, sub, "file:write", "authz-harness")
+
+	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
+	if err != nil {
+		t.Fatalf("failed to create orchestrate runner: %v", err)
+	}
+	runner.SetWorkerBinaryPath(bin)
+
+	auditBefore, err := os.ReadFile(rig.auditPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read audit: %v", err)
+	}
+
+	rig.out.Reset()
+	rig.errOut.Reset()
+	code := runner.Run(context.Background(), []string{
+		"spawn",
+		"-token", tok,
+		"-action", "file:write",
+		"-file", testFile,
+		"-data", "must not be written",
+		"-inject-revoke-before-io",
+		"-trace-id", "tr-orch-at04",
+	})
+	if code != domain.ExitBadInput {
+		t.Fatalf("expected ExitBadInput(%d), got: %d (stderr: %s)", domain.ExitBadInput, code, rig.errOut.String())
+	}
+	if !strings.Contains(rig.errOut.String(), "inject-revoke-before-io") {
+		t.Errorf("stderr should name the undefined flag, got: %s", rig.errOut.String())
+	}
+
+	// 자식 미기동: 대상 파일 미생성, 부모 사전·사후 감사(스폰 기록) 추가 없음
+	if _, err := os.Stat(filepath.Join(rig.workspaceDir, testFile)); !os.IsNotExist(err) {
+		t.Errorf("target file must not exist when flag is rejected")
+	}
+	auditAfter, err := os.ReadFile(rig.auditPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read audit: %v", err)
+	}
+	if string(auditAfter) != string(auditBefore) {
+		t.Errorf("audit log must be unchanged (no spawn), grew by %d bytes", len(auditAfter)-len(auditBefore))
+	}
+}
+
 func TestOrchestrateRunner_TC08_HarvestDeniedExitCode(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
 	bin := getTestBinary(t)
