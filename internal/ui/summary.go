@@ -21,7 +21,11 @@ func RenderSummaryTable(results []harness.ScenarioResult) string {
 	var sb strings.Builder
 
 	sb.WriteString("========================================================================================================================\n")
-	sb.WriteString(" authz-harness v0.1.0 — 7대 그룹 30개 E2E 시나리오 실행 결과 요약표\n")
+	groups := make(map[string]struct{})
+	for _, res := range results {
+		groups[res.Metadata.Group] = struct{}{}
+	}
+	sb.WriteString(fmt.Sprintf(" authz-harness v0.1.0 — %d대 그룹 %d개 E2E 시나리오 실행 결과 요약표\n", len(groups), len(results)))
 	sb.WriteString("========================================================================================================================\n")
 	sb.WriteString(" ID     GROUP  시나리오 명칭                               기대코드 실제코드 [Exit/File/Audit/Hash] 결과   소요시간\n")
 	sb.WriteString("------------------------------------------------------------------------------------------------------------------------\n")
