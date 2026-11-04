@@ -9,8 +9,8 @@
 | 운영 로그 결합 | 코어 중 [`pep/gateway.go`](../../../internal/authz/pep/gateway.go)만 `Config.Logger *slog.Logger`(99행)로 slog에 직접 의존한다(호출 8곳). `AppConfig.Logger`는 설정하는 호출자가 0건이라 PEP는 늘 `slog.Default()`를 쓴다. 비코어인 `app`, `mcp`, `cli/mcp.go`, `cmd`, `confinement/seatbelt_darwin.go`도 slog를 쓴다 | 코어는 **관측성 포트(`observe.Observer`)**만 받는다. 구현은 `slogadapter` 하나다. `pep.Config`와 `AppConfig`의 `Logger`는 `Observer`로 바뀐다. 13번 `StageObserver`(시험 훅)는 그대로 둔다 |
 | 감사 무결성 | 해시 체인(`prev_hash`/`curr_hash`)과 flock. 중간 변조는 탐지한다. 꼬리 절단·전체 재작성은 못 잡고, **파일이 없으면 VALID**([`audit.go`](../../../internal/audit/audit.go) 303행) | Zone A 감사 전용 키의 **서명 체크포인트**로 꼬리 절단·전체 재작성·파일 삭제를 탐지한다 |
 | 감사 내용과 보호 범위 | 해시는 9필드만 보호한다(46~60행). `token_jti`, `agent_id`, `metadata`는 고쳐도 VALID | 항상 `schema_version: 2`. v2 해시는 `token_jti`·`agent_id`·인자·결과 **SHA-256 지문(`arg_hash`, `result_hash`)**까지 보호한다. 다운그레이드는 거부한다. `metadata`는 계속 비보호(한계) |
-| authn 감사 오류 | `issuer.go` 117행, `exchange.recordAuditDenied` 267행, `verifier.logAudit` 276행이 `_ =`로 오류를 버린다. 검증 **성공** 경로(243행)는 Fail-Open | 세 곳 모두 감사 실패 시 `AUDIT_LOG_FAILED`(15) |
-| 위임 뷰 | `audit timeline`의 `renderProcessTree`(`timeline.go` 101~129행)는 등장 순서대로 선형 들여쓰기만 한다 | 토큰 계보(`parent_jti → child_jti`)로 그린 **위임 트리 뷰**(`audit tree`, 보기 전용) |
+| 감사 실패 시 사유 | authn의 `issuer.go` 117행, `exchange.recordAuditDenied` 267행, `verifier.logAudit` 276행이 `_ =`로 오류를 버린다. 검증 **성공** 경로(243행)는 Fail-Open이다. PEP `finalize`는 차단 감사가 실패해도 원래 사유를 반환한다 | authn 세 곳과 PEP 차단 감사 모두 감사 실패 시 `AUDIT_LOG_FAILED`(15). I/O 성공 뒤 완료 감사 실패만 예외 |
+| 위임 뷰 | `audit timeline`의 `renderProcessTree`(`timeline.go` 101~129행)는 등장 순서대로 선형 들여쓰기만 한다 | 토큰 계보(`parent_jti → child_jti`)로 그린 **위임 트리 뷰**(`audit tree`, 보기 전용). `audit timeline`의 트리 구역도 같은 렌더러를 쓴다 |
 | 시나리오 | 60대(`E2E-01`~`E2E-60`, `G1`~`G12`) | G13 추가(`E2E-61`~`E2E-66`), 66대 |
 
 ## 2. 아키텍처 및 신뢰 경계
@@ -46,7 +46,7 @@ flowchart TD
   - 토큰 서명 키 상태 머신(`internal/authn/keys`)
   - 기존 v1 감사 레코드의 검증 가능성
   - `SubagentRequest` 프레임
-  - `audit timeline` 출력
+  - `audit timeline`의 머리말·시계열 구역(트리 구역만 050에서 교체)
   - `go.mod`(외부 의존성 0개)
   - 기존 60대 시나리오의 판정 기준
 
@@ -65,7 +65,7 @@ flowchart TD
 | 체크포인트를 만드는 도중 다른 프로세스가 기록해 줄 수와 HeadHash가 어긋남 | `<audit>.lock` 공유 잠금 안에서 둘을 함께 읽는다. 잠금 안에서 다른 잠금은 잡지 않는다(040) |
 | 트리가 형제 워커나 같은 주체의 두 토큰을 잘못 합침 | 노드를 jti로 하고, 간선은 `parent_jti → child_jti` 하나만 쓴다(050 TC-050-02·03) |
 | 포트 호출 실패가 요청 실패로 번짐 | `SafeObserver`가 panic을 복구한다(010 TC-010-04, E2E-65) |
-| authn 거부 경로의 감사 실패가 조용히 사라짐 | 세 기록 함수가 오류를 반환하고 `AUDIT_LOG_FAILED`(15)로 올린다(020) |
+| authn 거부 경로나 PEP 차단 감사의 실패가 조용히 사라짐 | 세 기록 함수가 오류를 반환하고, PEP 차단 감사 실패와 함께 `AUDIT_LOG_FAILED`(15)로 올린다(020 TC-020-02·03·05) |
 
 ## 5. 4층위 검증 설계
 
