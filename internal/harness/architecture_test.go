@@ -428,6 +428,200 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+
+	// TC-170-01: domain·pdp 의 전이적(Transitive) 인프라·OS 의존성 0%
+	t.Run("TC-170-01: domain·pdp 전이적 인프라 의존성 0% 검증", func(t *testing.T) {
+		graph := loadInternalImportGraph(t, root)
+		for _, start := range []string{modulePrefix + "internal/domain", modulePrefix + "internal/authz/pdp"} {
+			if _, ok := graph[start]; !ok {
+				t.Fatalf("start package not found in import graph: %s", start)
+			}
+			for _, v := range findTransitiveViolations(graph, start, transitiveForbidden) {
+				t.Errorf("TC-170-01 violation: %s", v)
+			}
+		}
+	})
+
+	// TC-170-02: CLI 단일 합성 루트 일원화 및 subagent.go 의 authz/state import 0건
+	t.Run("TC-170-02: CLI 직접 조립 호출 0건 및 subagent.go 의 state import 0건", func(t *testing.T) {
+		cliDir := filepath.Join(root, "internal", "cli")
+		fset := token.NewFileSet()
+		pkgs, err := parser.ParseDir(fset, cliDir, func(fi fs.FileInfo) bool {
+			return !strings.HasSuffix(fi.Name(), "_test.go")
+		}, 0)
+		if err != nil {
+			t.Fatalf("failed to parse cli dir: %v", err)
+		}
+		files := map[string]*ast.File{}
+		for _, pkg := range pkgs {
+			for fname, f := range pkg.Files {
+				files[filepath.Base(fname)] = f
+			}
+		}
+		if _, ok := files["subagent.go"]; !ok {
+			t.Fatal("cli/subagent.go not found")
+		}
+		for _, v := range findDirectConstructionViolations(files) {
+			t.Errorf("TC-170-02 violation: %s", v)
+		}
+	})
+
+	// TC-170-03: 가드 변이 시험 — 위반을 주입하면 검사 헬퍼가 반드시 검출해야 한다(False-Pass 방지)
+	t.Run("TC-170-03: 전이 의존성·CLI 직접 조립 가드 변이 검출", func(t *testing.T) {
+		fake := map[string][]string{
+			modulePrefix + "internal/authz/pdp":   {modulePrefix + "internal/authz/pip", "context"},
+			modulePrefix + "internal/authz/pip":   {modulePrefix + "internal/authz/state"},
+			modulePrefix + "internal/authz/state": {modulePrefix + "internal/storage"},
+			modulePrefix + "internal/storage":     {"os", "syscall"},
+		}
+		if got := findTransitiveViolations(fake, modulePrefix+"internal/authz/pdp", transitiveForbidden); len(got) == 0 {
+			t.Error("transitive guard failed to detect pdp -> pip -> state -> storage -> os")
+		}
+		clean := map[string][]string{
+			modulePrefix + "internal/authz/pdp": {modulePrefix + "internal/domain"},
+			modulePrefix + "internal/domain":    {"time"},
+		}
+		if got := findTransitiveViolations(clean, modulePrefix+"internal/authz/pdp", transitiveForbidden); len(got) != 0 {
+			t.Errorf("transitive guard false positive: %v", got)
+		}
+
+		src := "package cli\nimport (\n\t\"authz-harness/internal/audit\"\n\t\"authz-harness/internal/authz/state\"\n)\n" +
+			"func f() { _, _ = state.NewFileStore(\"p\"); _, _ = audit.NewJSONLWriter(\"a\") }\n"
+		f, err := parser.ParseFile(token.NewFileSet(), "subagent.go", src, 0)
+		if err != nil {
+			t.Fatalf("parse fake cli source: %v", err)
+		}
+		got := findDirectConstructionViolations(map[string]*ast.File{"subagent.go": f})
+		if len(got) < 3 { // NewFileStore, NewJSONLWriter, subagent.go state import
+			t.Errorf("cli guard expected >=3 violations, got %v", got)
+		}
+		okSrc := "package cli\nfunc g() {}\n"
+		okf, _ := parser.ParseFile(token.NewFileSet(), "subagent.go", okSrc, 0)
+		if got := findDirectConstructionViolations(map[string]*ast.File{"subagent.go": okf}); len(got) != 0 {
+			t.Errorf("cli guard false positive: %v", got)
+		}
+	})
+}
+
+const modulePrefix = "authz-harness/"
+
+var transitiveForbidden = map[string]bool{
+	modulePrefix + "internal/storage":          true,
+	modulePrefix + "internal/authz/state":      true,
+	modulePrefix + "internal/authz/pip":        true,
+	modulePrefix + "internal/audit":            true,
+	modulePrefix + "internal/audit/checkpoint": true,
+	modulePrefix + "internal/jail":             true,
+	modulePrefix + "internal/netguard":         true,
+	modulePrefix + "internal/execguard":        true,
+	modulePrefix + "internal/confinement":      true,
+	"os":                                       true,
+	"syscall":                                  true,
+	"os/exec":                                  true,
+	"net":                                      true,
+	"net/http":                                 true,
+	"path/filepath":                            true,
+	"io/fs":                                    true,
+}
+
+// loadInternalImportGraph 는 internal/ 아래 패키지별 프로덕션 파일의 직접 import 집합을 만든다.
+func loadInternalImportGraph(t *testing.T, root string) map[string][]string {
+	t.Helper()
+	graph := map[string][]string{}
+	base := filepath.Join(root, "internal")
+	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		pkg := modulePrefix + filepath.ToSlash(rel)
+		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		if _, ok := graph[pkg]; !ok {
+			graph[pkg] = nil
+		}
+		for _, imp := range f.Imports {
+			graph[pkg] = append(graph[pkg], strings.Trim(imp.Path.Value, `"`))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to build import graph: %v", err)
+	}
+	return graph
+}
+
+// findTransitiveViolations 는 start 에서 프로젝트 내부 간선만 따라 도달 가능한 모든 import 중 금지 항목을 경로와 함께 반환한다.
+// 표준 라이브러리 내부(time→os 등)는 따라가지 않는다.
+func findTransitiveViolations(graph map[string][]string, start string, forbidden map[string]bool) []string {
+	var out []string
+	visited := map[string]bool{start: true}
+	type item struct {
+		pkg  string
+		path string
+	}
+	queue := []item{{start, start}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, imp := range graph[cur.pkg] {
+			if forbidden[imp] {
+				out = append(out, cur.path+" -> "+imp)
+				continue
+			}
+			if strings.HasPrefix(imp, modulePrefix+"internal/") && !visited[imp] {
+				visited[imp] = true
+				queue = append(queue, item{imp, cur.path + " -> " + imp})
+			}
+		}
+	}
+	return out
+}
+
+var cliForbiddenCalls = map[string]bool{
+	"state.NewFileStore": true, "keys.NewFileStore": true, "token.NewFileReplayLedger": true,
+	"budget.NewFileLedger": true, "audit.NewJSONLWriter": true, "exchange.NewExchangeService": true,
+}
+
+// findDirectConstructionViolations 는 CLI 파일(파일명→AST)에서 금지된 직접 생성 호출과 subagent.go 의 state import 를 찾는다.
+func findDirectConstructionViolations(files map[string]*ast.File) []string {
+	var out []string
+	for name, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			id, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if q := id.Name + "." + sel.Sel.Name; cliForbiddenCalls[q] {
+				out = append(out, name+": direct call "+q)
+			}
+			return true
+		})
+		if name == "subagent.go" {
+			for _, imp := range f.Imports {
+				if strings.Trim(imp.Path.Value, `"`) == modulePrefix+"internal/authz/state" {
+					out = append(out, name+": imports internal/authz/state")
+				}
+			}
+		}
+	}
+	return out
 }
 
 func findForbiddenLogImports(t *testing.T, dir string, recursive bool) []string {
