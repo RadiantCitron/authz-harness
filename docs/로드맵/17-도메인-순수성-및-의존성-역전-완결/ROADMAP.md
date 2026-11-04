@@ -1,6 +1,6 @@
 # ROADMAP — 17 도메인 순수성 및 의존성 역전(DIP) 완결 (마스터 설계)
 
-> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 근거: [008번 보고서](../../보고서/008-로드맵16_완주이후_차기방향_및_클린아키텍처_DIP_모범정제_보고서.md), [015번 보고서](../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md), **[026번 보고서](../../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md)**
+> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 근거: [008번 보고서](../../보고서/008-로드맵16_완주이후_차기방향_및_클린아키텍처_DIP_모범정제_보고서.md), [015번 보고서](../../보고서/015-지속적_수정발생_근본원인_진단_및_과잉설계_제거_구조단순화_보고서.md), [026번 보고서](../../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md), **[027번 보고서(026 교정 재검증)](../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md)**
 
 ## 1. As-Is / To-Be
 
@@ -40,7 +40,8 @@ flowchart TD
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: `internal/domain/snapshot.go`(신규), `internal/authz/pdp/service.go`, `internal/authz/pip/service.go`, `internal/audit/audit.go`, `internal/app/builder.go`, `internal/cli/{grant,pdp,keys,approval,token,orchestrate,mcp,subagent,pep}.go`, `cmd/authz-harness/main.go`, `internal/harness/architecture_test.go`, `internal/harness/catalog/catalog_test.go`(주석/문구 `54` → `79`).
+- **변경**: `internal/domain/snapshot.go`(신규), `internal/domain/audit.go`(신규, [027번 보고서](../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md) R-08), `internal/authz/pdp/service.go`, `internal/authz/pip/service.go`, `internal/audit/audit.go`, `internal/app/builder.go`, `internal/cli/{grant,pdp,keys,approval,token,orchestrate,mcp,subagent,pep}.go`, `cmd/authz-harness/main.go`, `internal/harness/architecture_test.go`, `internal/harness/catalog/catalog_test.go`(주석/문구 `54` → `79`).
+- **의도된 미세 변화 (027 R-06)**: `token exchange`의 예산 원장 배선(버그 수정), 러너 생성 실패 문구의 `app builder:` 형식, 상위 디렉터리 자동 생성. 상세는 [030 지시서](instructions/030_cli_합성루트_일원화_및_중복_제거.md) §2에 있다.
 - **무영향**: 모든 CLI 명령어 인터페이스, MCP 프로토콜 규격, 감사 로그 JSONL 포맷 및 해시 체인 공식, 완료된 시나리오 파일(`g1`~`g15`), `E2E-01`~`E2E-79` 79대 시나리오의 입출력 및 종료 코드.
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가 ([026번 보고서](../../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md) 반영)
@@ -49,8 +50,10 @@ flowchart TD
 |---|---|
 | `pip.SubjectSnapshot`과 `audit.Event`/`Writer`를 `domain`으로 옮길 때 기존 테스트·호출부 대량 파손 | `pip`와 `audit` 패키지에 Go 타입 별칭(`type SubjectSnapshot = domain.SubjectSnapshot`, `type Event = domain.AuditEvent`, `type Writer = domain.AuditWriter`)을 두어 기존 코드는 단 1줄의 수정 없이 100% 호환되게 하면서 `pdp`의 `pip`·`audit` import만 제거 |
 | `go list -deps` 출력에서 `"os"`·`"syscall"` 문자열을 단순 검색하면 Go 표준 라이브러리(`time` → `os`) 때문에 항상 실패 (`D17-02`) | `go list -deps`에서는 `authz-harness/` 접두사를 가진 프로젝트 내부 패키지만 검사하고, 표준 라이브러리(`"os"`, `"syscall"` 등) 및 내부 인프라 패키지 차단은 `internal/` 패키지들의 AST import 그래프를 재귀 순회하는 `TC-170-01`로 정확히 검증 |
-| CLI 러너(`grant`, `pdp`, `approval`, `keys`)를 `app.BuildStack`으로 통합할 때 빈 경로(`PubJWKSPath == ""`, `ReplayPath == ""`)에서 에러가 나거나 현재 디렉터리에 `budget_ledger.json`이 생기고 `pep.NewGateway`가 실패함 (`D17-01`) | `BuildStack`에서 ① `BudgetPath` 파생은 `ReplayPath != ""`일 때만, ② `KeyStore`/`KeyManager`는 `PubJWKSPath != ""`일 때만, ③ `BudgetLedger`/`ReplayLedger`/`Token*`/`ExchangeService`는 `PubJWKSPath != "" && ReplayPath != ""`일 때만, ④ `pep.NewGateway`는 `pdpSvc != nil && tokenVerifier != nil && workspaceJail != nil`일 때만 조립하도록 조건 분기 명시 |
-| `BuildStack`이 `keys.NewManager` 생성 직후 또 `RotateKey`를 호출하여 초기 키가 2개 생성될 위험 | `keys.NewManager`가 이미 빈 키 링에서 첫 active 키 1개를 자동 부트스트랩하므로, `BuildStack`의 중복 초기 회전 블록을 제거하여 `NewKeysRunner`와 100% 동일하게 active 키 1개만 생성되도록 보장 |
+| CLI 러너(`grant`, `pdp`, `approval`, `keys`)를 `app.BuildStack`으로 통합할 때 빈 경로(`PubJWKSPath == ""`, `ReplayPath == ""`)에서 에러가 나거나 현재 디렉터리에 `budget_ledger.json`이 생기고 `pep.NewGateway`가 실패함 (`D17-01`) | `BuildStack`에서 ① `BudgetPath` 파생은 `ReplayPath != ""`일 때만, ② `KeyStore`/`KeyManager`는 `PubJWKSPath != ""`일 때만, ③ `BudgetLedger`/`ReplayLedger`/`Token*`/`ExchangeService`는 `PubJWKSPath != "" && ReplayPath != ""`일 때만, ④ `pep.NewGateway`는 `pdpSvc != nil && tokenVerifier != nil`일 때만 조립하도록 조건 분기 명시 (jail 누락은 기존대로 거부 — [027번 보고서](../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md) R-04) |
+| `BuildStack`의 초기 `RotateKey` 블록을 「중복」으로 오인해 제거하면, 활성 키 revoke 뒤 `token issue`의 자동 회전이 사라지는 회귀가 생긴다. 반대로 무조건 유지하면 `keys` CLI가 revoke 직후 `keys list`만으로 새 키를 회전한다 ([027번 보고서](../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md) R-02) | 블록을 유지하고 실행 조건을 `!VerifyOnly && keyMgr != nil && ReplayPath != ""`(토큰 발급 스택)로 한정한다. `TC-030-04`로 두 동작을 모두 고정한다 |
+| PEP 조립 조건에 `workspaceJail != nil`을 넣으면 워크스페이스 누락이 조용한 nil PEP가 되고, BeforeIO 훅이 nil 게이트웨이를 감싸면 첫 요청에서 panic이 난다 (027 R-03·R-04) | PEP 조건은 `pdpSvc != nil && tokenVerifier != nil`로 두고 jail 누락은 `pep: jail is required`로 거부한다(Fail-Closed). 훅 조건에는 `pepGateway != nil`을 추가한다. `TC-030-05`·`06`으로 검증한다 |
+| `main.go`의 `defer runner.Close()`는 `os.Exit` 때문에 실행되지 않는다 (027 R-05) | 각 분기에서 `os.Exit` 직전에 `Close()`를 명시적으로 호출하고, 에러는 `slog`로 기록한다 |
 
 ## 5. 4층위 검증 설계
 
