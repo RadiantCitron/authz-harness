@@ -22,6 +22,7 @@ import (
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/observe/slogadapter"
 )
 
 type testHarness struct {
@@ -1271,7 +1272,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 			PDP:         pdpStub,
 			Jail:        jailStub,
 			AuditWriter: auditStub,
-			Logger:      testLogger,
+			Observer:    slogadapter.New(testLogger),
 		})
 		if err != nil {
 			t.Fatalf("failed to create gateway: %v", err)

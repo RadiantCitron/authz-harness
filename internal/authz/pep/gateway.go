@@ -3,7 +3,6 @@ package pep
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"authz-harness/internal/authz/pdp"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/observe"
 )
 
 // Stage 는 5단계 관문 집행 파이프라인의 현재 단계를 식별한다.
@@ -96,15 +96,15 @@ type Config struct {
 	Jail          jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
 	AuditWriter   audit.Writer        // Layer 1: 감사 로그 기록기
 	Clock         domain.Clock        // 결정론적 가상 시계 주입
-	Logger        *slog.Logger        // 관측성 운영 로거 주입 (미주입 시 slog.Default())
+	Observer      observe.Observer    // 관측성 포트 주입 (미주입 시 NoopObserver, 항상 WrapSafe 적용)
 	StageObserver func(Stage)         // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
 	BudgetLedger  budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
 }
 
 type gateway struct {
-	cfg    Config
-	clock  domain.Clock
-	logger *slog.Logger
+	cfg   Config
+	clock domain.Clock
+	obs   observe.Observer
 }
 
 // NewGateway 는 검증기, PDP, Jail, 감사 기록기를 주입받아 Gateway 인스턴스를 생성한다.
@@ -128,12 +128,7 @@ func NewGateway(cfg Config) (Gateway, error) {
 		clk = domain.RealClock{}
 	}
 
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	return &gateway{cfg: cfg, clock: clk, logger: logger}, nil
+	return &gateway{cfg: cfg, clock: clk, obs: observe.WrapSafe(cfg.Observer)}, nil
 }
 
 // pipelineState 는 파이프라인 진행 과정에서 점진적으로 채워지는 불변 실행 상태다.
@@ -172,11 +167,9 @@ func (g *gateway) Execute(ctx context.Context, req Request) (*Result, error) {
 // runStage 는 파이프라인 단계별 Before/After Around 계측 래퍼다.
 func (g *gateway) runStage(ctx context.Context, state *pipelineState, stage Stage, fn func() error) error {
 	start := g.clock.Now()
-	g.logger.DebugContext(ctx, "pep stage entering",
-		"trace_id", state.traceID,
-		"stage", string(stage),
-		"resource", state.resource,
-		"subject", state.subject,
+	g.obs.OnStageStart(ctx, state.traceID, string(stage),
+		observe.Attr{Key: "resource", Value: state.resource},
+		observe.Attr{Key: "subject", Value: state.subject},
 	)
 
 	err := fn()
@@ -188,23 +181,19 @@ func (g *gateway) runStage(ctx context.Context, state *pipelineState, stage Stag
 	if err != nil {
 		state.failedStage = stage
 		reason := domain.ReasonFromError(err, domain.ReasonInternalError)
-		g.logger.WarnContext(ctx, "pep stage blocked",
-			"trace_id", state.traceID,
-			"stage", string(stage),
-			"reason", string(reason),
-			"duration_ms", durationMs,
-			"resource", state.resource,
-			"subject", state.subject,
+		g.obs.OnStageEnd(ctx, state.traceID, string(stage), false,
+			observe.Attr{Key: "reason", Value: string(reason)},
+			observe.Attr{Key: "duration_ms", Value: durationMs},
+			observe.Attr{Key: "resource", Value: state.resource},
+			observe.Attr{Key: "subject", Value: state.subject},
 		)
 		return err
 	}
 
-	g.logger.InfoContext(ctx, "pep stage passed",
-		"trace_id", state.traceID,
-		"stage", string(stage),
-		"duration_ms", durationMs,
-		"resource", state.resource,
-		"subject", state.subject,
+	g.obs.OnStageEnd(ctx, state.traceID, string(stage), true,
+		observe.Attr{Key: "duration_ms", Value: durationMs},
+		observe.Attr{Key: "resource", Value: state.resource},
+		observe.Attr{Key: "subject", Value: state.subject},
 	)
 	return nil
 }
@@ -396,10 +385,9 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 // refundBudget 은 사전 차감된 쓰기 예산을 원장에 환급한다. 실패는 운영 로그에만 남긴다.
 func (g *gateway) refundBudget(ctx context.Context, state *pipelineState) {
 	if err := g.cfg.BudgetLedger.Refund(state.tokenJTI, 1, 0, state.refundWriteBytes); err != nil {
-		g.logger.ErrorContext(ctx, "failed to refund budget",
-			"trace_id", state.traceID,
-			"token_jti", state.tokenJTI,
-			"error", err.Error(),
+		g.obs.OnError(ctx, state.traceID, "failed to refund budget",
+			observe.Attr{Key: "token_jti", Value: state.tokenJTI},
+			observe.Attr{Key: "error", Value: err.Error()},
 		)
 	}
 }
@@ -415,21 +403,19 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 		// 단일 출구 차단 감사 기록 (Stage4 감사 실패 시 중복 기록 시도 방지)
 		if failedStage != Stage4Audit {
 			if auditErr := g.logEvent(state, failedStage, false, reason, runErr.Error()); auditErr != nil {
-				g.logger.ErrorContext(ctx, "failed to record block audit event",
-					"trace_id", state.traceID,
-					"error", auditErr.Error(),
+				g.obs.OnError(ctx, state.traceID, "failed to record block audit event",
+					observe.Attr{Key: "error", Value: auditErr.Error()},
 				)
 			}
 		}
 
-		g.logger.WarnContext(ctx, "pep execution denied or failed",
-			"trace_id", state.traceID,
-			"stage", string(failedStage),
-			"reason", string(reason),
-			"exit_code", int(exitCode),
-			"subject", state.subject,
-			"agent_id", state.subject,
-			"caller_id", state.callerID,
+		g.obs.OnExecutionEnd(ctx, state.traceID, false,
+			observe.Attr{Key: "stage", Value: string(failedStage)},
+			observe.Attr{Key: "reason", Value: string(reason)},
+			observe.Attr{Key: "exit_code", Value: int(exitCode)},
+			observe.Attr{Key: "subject", Value: state.subject},
+			observe.Attr{Key: "agent_id", Value: state.subject},
+			observe.Attr{Key: "caller_id", Value: state.callerID},
 		)
 
 		return &Result{
@@ -446,20 +432,18 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 
 	// 정상 실행 완료 감사 기록
 	if auditErr := g.logEvent(state, Stage5FileIO, true, domain.ReasonAuthorized, "file I/O execution completed"); auditErr != nil {
-		g.logger.ErrorContext(ctx, "failed to record completion audit event",
-			"trace_id", state.traceID,
-			"error", auditErr.Error(),
+		g.obs.OnError(ctx, state.traceID, "failed to record completion audit event",
+			observe.Attr{Key: "error", Value: auditErr.Error()},
 		)
 	}
 
-	g.logger.InfoContext(ctx, "pep execution succeeded",
-		"trace_id", state.traceID,
-		"resource", state.resource,
-		"subject", state.subject,
-		"agent_id", state.subject,
-		"caller_id", state.callerID,
-		"bytes_read", res.BytesRead,
-		"bytes_wrote", res.BytesWrote,
+	g.obs.OnExecutionEnd(ctx, state.traceID, true,
+		observe.Attr{Key: "resource", Value: state.resource},
+		observe.Attr{Key: "subject", Value: state.subject},
+		observe.Attr{Key: "agent_id", Value: state.subject},
+		observe.Attr{Key: "caller_id", Value: state.callerID},
+		observe.Attr{Key: "bytes_read", Value: res.BytesRead},
+		observe.Attr{Key: "bytes_wrote", Value: res.BytesWrote},
 	)
 
 	return res, nil

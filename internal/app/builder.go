@@ -18,6 +18,8 @@ import (
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/observe"
+	"authz-harness/internal/observe/slogadapter"
 )
 
 // AppConfig 는 하네스 및 전체 런타임 스택 구동에 필요한 파일 경로 및 주입 요소를 포함한다.
@@ -31,7 +33,7 @@ type AppConfig struct {
 	WorkspaceDir string
 	VerifyOnly   bool // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
 	Clock        domain.Clock
-	Logger       *slog.Logger
+	Observer     observe.Observer
 }
 
 // AppStack 은 단일 합성 루트(Composition Root)를 통해 생성된 일원화된 컴포넌트 집합이다.
@@ -197,6 +199,11 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		workspaceJail = j
 	}
 
+	obs := cfg.Observer
+	if obs == nil {
+		obs = slogadapter.New(slog.Default())
+	}
+
 	var pepGateway pep.Gateway
 	if pdpSvc != nil {
 		gw, err := pep.NewGateway(pep.Config{
@@ -205,7 +212,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 			Jail:         workspaceJail,
 			AuditWriter:  auditWriter,
 			Clock:        cfg.Clock,
-			Logger:       cfg.Logger,
+			Observer:     obs,
 			BudgetLedger: budgetLedger,
 		})
 		if err != nil {

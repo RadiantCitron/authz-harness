@@ -1,6 +1,6 @@
 # [구현지시서 010] 관측성 포트(`internal/observe`) 및 `slog` 어댑터 구현
 
-> **문서 상태**: `Draft`
+> **문서 상태**: `Done`
 > **상위 대시보드**: [14번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md) | [ADR 0002](../../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md) | 교정 근거: [023번 보고서](../../../보고서/023-14번로드맵_구조결함_및_진행가능성_검증보고서.md) O-4~O-7
 > **선행 조건**: 로드맵 13 `Done` (충족). 착수와 함께 ADR 0002를 `Accepted`로 전환한다(본 단계 산출물).
 > **후속 단계**: [020_의존_금지_ast_가드.md](020_의존_금지_ast_가드.md)
@@ -75,7 +75,7 @@
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] ADR 0002 `Accepted` 전환 및 §6 개정
-- [ ] `domain` 원시 토큰 규칙 일원화, `internal/observe` 포트·`slogadapter`·`SafeObserver`·`SanitizeAttrs` 구현
-- [ ] `pep.Config.Logger` → `Observer`, `AppConfig.Logger` → `Observer` 전환 (`StageObserver` 유지)
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [x] ADR 0002 `Accepted` 전환 및 §6 개정
+- [x] `domain` 원시 토큰 규칙 일원화, `internal/observe` 포트·`slogadapter`·`SafeObserver`·`SanitizeAttrs` 구현
+- [x] `pep.Config.Logger` → `Observer`, `AppConfig.Logger` → `Observer` 전환 (`StageObserver` 유지)
+- [x] 대시보드 상태 갱신 및 변경 파일 단독 커밋

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -15,9 +14,6 @@ import (
 
 	"authz-harness/internal/domain"
 )
-
-// jwtTokenPattern 은 서명된 Bearer 토큰(JWT eyJ...) 유출 여부를 검출하는 정규식이다.
-var jwtTokenPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_\.\-]{10,}`)
 
 // Event 는 감사 로그(audit.jsonl)에 기록되는 불변의 보안 증거 레코드 스키마를 정의한다.
 // ROADMAP.md §15 감사 모델 준수.
@@ -322,7 +318,7 @@ func VerifyHashChain(path string) error {
 		lineNum++
 
 		// No Raw Token Leak 검사
-		if jwtTokenPattern.MatchString(line) {
+		if domain.ContainsRawToken(line) {
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("raw token leak detected in audit record #%d", lineNum), nil)
 		}
 
