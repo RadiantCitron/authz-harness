@@ -28,8 +28,14 @@ const (
 	// StageGate2AuthZ 는 순수 PDP 인가 결정 단계다.
 	StageGate2AuthZ Stage = "gate2_authz"
 
+	// StageReplay 는 PDP allow 직후 일회성 토큰의 jti 를 원자적으로 소비하는 단계다.
+	StageReplay Stage = "gate2b_replay"
+
 	// StageGate2cJail 은 Workspace Jail 경로 정규화 및 격리 경계 검증 단계다.
 	StageGate2cJail Stage = "gate2c_jail"
+
+	// StageApproval 은 PDP 가 지목한 승인을 원자적으로 소비하는 단계다 (Gate 2c 뒤, Budget 앞).
+	StageApproval Stage = "stage3a_approval"
 
 	// StageBudget 은 예산 토큰의 쓰기 사전 차감 단계다 (Gate 2c 뒤, Stage 4 앞).
 	StageBudget Stage = "stage3b_budget"
@@ -89,16 +95,22 @@ type Gateway interface {
 	Execute(ctx context.Context, req Request) (*Result, error)
 }
 
+// ApprovalConsumer 는 승인을 ID 로 찾아 재검증한 뒤 소비(삭제)하는 포트다.
+type ApprovalConsumer interface {
+	ConsumeApproval(id string, b domain.ApprovalBinding, now time.Time) error
+}
+
 // Config 는 Gateway 생성에 필요한 하위 컴포넌트 의존성 주입 구조체다.
 type Config struct {
-	Verifier      token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
-	PDP           pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
-	Jail          jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
-	AuditWriter   audit.Writer        // Layer 1: 감사 로그 기록기
-	Clock         domain.Clock        // 결정론적 가상 시계 주입
-	Observer      observe.Observer    // 관측성 포트 주입 (미주입 시 NoopObserver, 항상 WrapSafe 적용)
-	StageObserver func(Stage)         // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
-	BudgetLedger  budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
+	Verifier         token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
+	PDP              pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
+	Jail             jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
+	AuditWriter      audit.Writer        // Layer 1: 감사 로그 기록기
+	Clock            domain.Clock        // 결정론적 가상 시계 주입
+	Observer         observe.Observer    // 관측성 포트 주입 (미주입 시 NoopObserver, 항상 WrapSafe 적용)
+	StageObserver    func(Stage)         // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
+	ApprovalConsumer ApprovalConsumer    // 선택: 승인 소비기. 승인으로 허용된 요청인데 없으면 Fail-Closed(16)
+	BudgetLedger     budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
 }
 
 type gateway struct {
@@ -142,6 +154,8 @@ type pipelineState struct {
 	callerID    string
 	safePath    string
 	failedStage Stage
+	approvalID  string    // PDP 가 승인으로 allow 했을 때 소비할 승인 ID
+	evalNow     time.Time // PDP 판정과 승인 소비에 쓰는 같은 시각
 
 	// 예산 집행 상태 (환급용). 쓰기 사전 차감 성공 시에만 refundWriteBytes 가 채워진다.
 	budgeted         bool
@@ -240,7 +254,8 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		c, verifyErr := g.cfg.Verifier.VerifyToken(req.Token, token.VerifyOptions{
 			ExpectedAudience: expectedAud,
 			ExpectedSubject:  req.ExpectedSubject,
-			RecordReplay:     true,
+			RecordReplay:     false,
+			CheckReplay:      true,
 			ClockOffset:      req.ClockOffset,
 		}, auditCtx)
 		if verifyErr != nil {
@@ -267,6 +282,7 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 
 	// Stage 2: Gate 2 - Pure PDP Authorization
 	if err := g.runStage(ctx, state, StageGate2AuthZ, func() error {
+		state.evalNow = g.clock.Now().UTC().Add(req.ClockOffset)
 		pdpReq := pdp.Request{
 			Subject:      state.subject,
 			Action:       state.normAction,
@@ -276,6 +292,9 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 			RequireScope: true, // 토큰 기반 PEP 실행은 항상 Scope 검증 필수
 			Actor:        verifiedClaims.Claims.Actor,
 			TraceID:      state.traceID,
+			TokenJTI:     state.tokenJTI,
+			ArgHash:      state.argHash,
+			Now:          state.evalNow,
 		}
 
 		decision, decideErr := g.cfg.PDP.Decide(ctx, pdpReq)
@@ -291,7 +310,15 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 			}
 			return domain.NewError(reason, string(StageGate2AuthZ), details, nil)
 		}
+		state.approvalID = decision.ApprovalID
 		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	// Stage 2b: PDP allow 직후 jti 소비 (ask·deny 에서는 소비하지 않아 승인 뒤 같은 토큰으로 재시도할 수 있다)
+	if err := g.runStage(ctx, state, StageReplay, func() error {
+		return g.cfg.Verifier.ConsumeReplay(verifiedClaims.Claims, domain.AuditContext{TraceID: state.traceID, Actor: "pep-gateway"})
 	}); err != nil {
 		return nil, err
 	}
@@ -308,6 +335,26 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	// Stage 3a: 승인 소비 (PDP 가 승인으로 allow 한 경우만). 소비한 승인은 이후 단계가 실패해도 되돌리지 않는다.
+	if state.approvalID != "" {
+		if err := g.runStage(ctx, state, StageApproval, func() error {
+			if g.cfg.ApprovalConsumer == nil {
+				return domain.NewError(domain.ReasonInternalError, string(StageApproval), "approval required but no approval consumer is configured (fail-closed)", nil)
+			}
+			binding := domain.ApprovalBinding{Subject: state.subject, Action: state.normAction, Resource: state.resource, TokenJTI: state.tokenJTI, ArgHash: state.argHash}
+			if consumeErr := g.cfg.ApprovalConsumer.ConsumeApproval(state.approvalID, binding, state.evalNow); consumeErr != nil {
+				return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(StageApproval), fmt.Sprintf("approval consume denied: %v", consumeErr), consumeErr)
+			}
+			// 잠금은 이미 풀렸다. 감사 실패는 Fail-Closed(승인은 이미 소멸).
+			if auditErr := g.logApprovalConsumed(state); auditErr != nil {
+				return domain.NewError(domain.ReasonAuditLogFailed, string(StageApproval), fmt.Sprintf("approval audit failure (fail-closed): %v", auditErr), auditErr)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	// Stage 3b: Budget - 쓰기 사전 차감 (예산 토큰만, 읽기는 바이트 수를 알 수 없어 Stage 5 에서 사후 차감)
@@ -480,7 +527,7 @@ func (g *gateway) logEvent(state *pipelineState, stage Stage, success bool, reas
 		AgentID:    state.subject,
 		Action:     actionName,
 		Resource:   state.resource,
-		Decision:   map[bool]string{true: "allow", false: "deny"}[success],
+		Decision:   decisionLabel(success, reason),
 		Reason:     string(reason),
 		TokenJTI:   state.tokenJTI,
 		ArgHash:    state.argHash,
@@ -500,6 +547,40 @@ func (g *gateway) logEvent(state *pipelineState, stage Stage, success bool, reas
 	}
 
 	return g.cfg.AuditWriter.Log(event)
+}
+
+// decisionLabel 은 감사 decision 값을 정한다. 종료 코드 18 계열 거부는 "ask" 로 기록한다.
+func decisionLabel(success bool, reason domain.Reason) string {
+	switch {
+	case success:
+		return "allow"
+	case domain.ExitCodeForReason(reason) == domain.ExitApprovalRequired:
+		return "ask"
+	default:
+		return "deny"
+	}
+}
+
+// logApprovalConsumed 는 승인 소비 사실을 approval.consumed 로 기록한다 (원시 토큰은 기록하지 않는다).
+func (g *gateway) logApprovalConsumed(state *pipelineState) error {
+	return g.cfg.AuditWriter.Log(audit.Event{
+		Timestamp: g.clock.Now().UTC(),
+		TraceID:   state.traceID,
+		Step:      "pep.approval_consume",
+		Actor:     state.subject,
+		AgentID:   state.subject,
+		Action:    "approval.consumed",
+		Resource:  state.resource,
+		Decision:  "allow",
+		Reason:    string(domain.ReasonAuthorized),
+		TokenJTI:  state.tokenJTI,
+		ArgHash:   state.argHash,
+		Success:   true,
+		Metadata: map[string]interface{}{
+			"stage":       string(StageApproval),
+			"approval_id": state.approvalID,
+		},
+	})
 }
 
 func extractReasonFromTokenError(err error) domain.Reason {

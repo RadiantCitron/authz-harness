@@ -45,6 +45,7 @@ type VerifyOptions struct {
 	ExpectedAudience string
 	ExpectedSubject  string
 	RecordReplay     bool // true 인 경우 jti 를 Replay 원장에 검사 및 소비 등록
+	CheckReplay      bool // true 인 경우 jti 가 이미 소비되었는지 읽기만 확인한다(소비는 ConsumeReplay)
 	ClockOffset      time.Duration
 }
 
@@ -52,6 +53,8 @@ type VerifyOptions struct {
 type TokenVerifier interface {
 	VerifyToken(tokenStr string, opts VerifyOptions, auditCtx domain.AuditContext) (*domain.VerifiedClaims, error)
 	InspectToken(tokenStr string) (*JWTHeader, *domain.TokenClaims, error)
+	// ConsumeReplay 는 PDP allow 뒤에 jti 를 원자적으로 소비한다. 예산 토큰이거나 원장이 없으면 아무것도 하지 않는다.
+	ConsumeReplay(claims domain.TokenClaims, auditCtx domain.AuditContext) error
 }
 
 // Verifier 는 RFC 8725 BCP 및 Gate 1 검증을 수행하는 구현체다.
@@ -277,6 +280,21 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 		}
 	}
 
+	// 9b단계: 읽기 전용 Replay 확인 (소비는 PDP allow 뒤 ConsumeReplay)
+	if opts.CheckReplay && !opts.RecordReplay && v.replayLedger != nil && claims.Budget == nil {
+		consumed, cerr := v.replayLedger.IsConsumed(claims.JWTID)
+		if cerr != nil {
+			return nil, domain.NewError(domain.ReasonInternalError, "gate1", "replay ledger read failed", cerr)
+		}
+		if consumed {
+			rerr := fmt.Errorf("%w: %s (%s)", ErrReplayDetected, claims.JWTID, domain.ReasonTokenReplayDetected)
+			if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenReplayDetected, rerr.Error()); aerr != nil {
+				return nil, auditFailure(aerr)
+			}
+			return nil, domain.NewError(domain.ReasonTokenReplayDetected, "gate1", "token replay detected", rerr)
+		}
+	}
+
 	// 검증 성공 감사 이벤트 기록
 	if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, true, domain.ReasonAuthorized, "gate 1 verified successfully"); aerr != nil {
 		return nil, auditFailure(aerr)
@@ -330,4 +348,21 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 // auditFailure 는 감사 기록 실패를 Fail-Closed 오류로 변환한다. 감사 없이 검증을 끝내지 않는다.
 func auditFailure(err error) error {
 	return domain.NewError(domain.ReasonAuditLogFailed, "gate1", "audit log write failed", err)
+}
+
+// ConsumeReplay 는 PDP allow 직후 jti 를 CheckAndConsume 한 번으로 소비한다.
+// 경합에서 지면 9단계와 같은 감사(TOKEN_REPLAY_DETECTED)를 남기고 11 을 반환한다.
+func (v *Verifier) ConsumeReplay(claims domain.TokenClaims, auditCtx domain.AuditContext) error {
+	if claims.Budget != nil || v.replayLedger == nil {
+		return nil
+	}
+	now := v.clock.Now().UTC()
+	expTime := time.Unix(claims.ExpiresAt, 0).UTC()
+	if err := v.replayLedger.CheckAndConsume(claims.JWTID, expTime); err != nil {
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, "", false, domain.ReasonTokenReplayDetected, err.Error()); aerr != nil {
+			return auditFailure(aerr)
+		}
+		return domain.NewError(domain.ReasonTokenReplayDetected, "gate1", "token replay detected", err)
+	}
+	return nil
 }

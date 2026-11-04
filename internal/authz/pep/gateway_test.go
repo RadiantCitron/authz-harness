@@ -37,6 +37,7 @@ type testHarness struct {
 	jailInst     jail.Jail
 	auditWriter  audit.Writer
 	gateway      pep.Gateway
+	store        state.Store
 }
 
 func setupTestHarness(t *testing.T) *testHarness {
@@ -124,6 +125,7 @@ func setupTestHarness(t *testing.T) *testHarness {
 		jailInst:     jailInst,
 		auditWriter:  auditWriter,
 		gateway:      gw,
+		store:        store,
 	}
 }
 
@@ -835,6 +837,8 @@ type stubVerifier struct {
 	calls          int
 	lastOpts       token.VerifyOptions
 	lastAuditCtx   domain.AuditContext
+	consumeCalls   int
+	consumeErr     error
 }
 
 func (s *stubVerifier) VerifyToken(tokenStr string, opts token.VerifyOptions, actx domain.AuditContext) (*domain.VerifiedClaims, error) {
@@ -845,6 +849,11 @@ func (s *stubVerifier) VerifyToken(tokenStr string, opts token.VerifyOptions, ac
 		return nil, s.errToReturn
 	}
 	return s.claimsToReturn, nil
+}
+
+func (s *stubVerifier) ConsumeReplay(claims domain.TokenClaims, actx domain.AuditContext) error {
+	s.consumeCalls++
+	return s.consumeErr
 }
 
 func (s *stubVerifier) InspectToken(tokenStr string) (*token.JWTHeader, *domain.TokenClaims, error) {

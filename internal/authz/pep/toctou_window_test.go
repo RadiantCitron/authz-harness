@@ -173,7 +173,7 @@ func TestTOCTOUWindow(t *testing.T) {
 		}
 		// TC-040-08: 통과한 단계만 순서대로
 		want := []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ,
-			pep.StageGate2cJail, pep.StageBudget, pep.Stage4Audit, pep.Stage5FileIO}
+			pep.StageReplay, pep.StageGate2cJail, pep.StageBudget, pep.Stage4Audit, pep.Stage5FileIO}
 		if !reflect.DeepEqual(stages, want) {
 			t.Errorf("stages = %v, want %v", stages, want)
 		}

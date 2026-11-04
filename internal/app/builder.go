@@ -205,6 +205,10 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	}
 
 	var pepGateway pep.Gateway
+	var approvalConsumer pep.ApprovalConsumer // 인터페이스 nil 보존 (stateStore 없으면 미배선)
+	if stateStore != nil {
+		approvalConsumer = state.NewApprovalConsumer(stateStore)
+	}
 	if pdpSvc != nil {
 		gw, err := pep.NewGateway(pep.Config{
 			Verifier:     tokenVerifier,
@@ -214,6 +218,8 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 			Clock:        cfg.Clock,
 			Observer:     obs,
 			BudgetLedger: budgetLedger,
+
+			ApprovalConsumer: approvalConsumer,
 		})
 		if err != nil {
 			_ = auditWriter.Close()

@@ -32,6 +32,8 @@ type ReplayData struct {
 // ReplayLedger 는 jti 중복 소비 방지 인터페이스다.
 type ReplayLedger interface {
 	CheckAndConsume(jti string, expiresAt time.Time) error
+	// IsConsumed 는 jti 가 이미 소비되었는지 공유 잠금으로 읽기만 한다(소비하지 않는다).
+	IsConsumed(jti string) (bool, error)
 	PruneExpired(now time.Time) error
 }
 
@@ -107,6 +109,26 @@ func (l *FileReplayLedger) CheckAndConsume(jti string, expiresAt time.Time) erro
 		data.Entries = validEntries
 		return nil
 	})
+}
+
+// IsConsumed 는 jti 가 원장에 있는지 읽기 전용으로 확인한다.
+func (l *FileReplayLedger) IsConsumed(jti string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	data, err := l.store.Read()
+	if err != nil {
+		return false, err
+	}
+	if data == nil {
+		return false, nil
+	}
+	for _, e := range data.Entries {
+		if e.JTI == jti {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // PruneExpired 는 만료된 jti 항목을 파일에서 완전히 정리한다.
