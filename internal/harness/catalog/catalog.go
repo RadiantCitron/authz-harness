@@ -20,6 +20,7 @@ func AllScenarios() []harness.Scenario {
 	list = append(list, g11Scenarios()...)
 	list = append(list, g12Scenarios()...)
 	list = append(list, g13Scenarios()...)
+	list = append(list, g14Scenarios()...)
 	return list
 }
 

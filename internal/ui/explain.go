@@ -145,6 +145,14 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("  - 해설: 해시 체인만으로는 못 잡는 꼬리 절단·전체 재작성·검증 재료 부재를 서명 체크포인트가 %s에서 적발했다(종료 코드 %d).\n          체인 자체는 유효해도 체크포인트와 어긋나면 통과가 아니라 거부(Fail-Closed)다.\n", gateName, actualExit))
 		}
+	case "G14":
+		if meta.Expected.ExitCode == domain.ExitSuccess {
+			sb.WriteString("  - 해설: 처음에는 승인이 없어 막혔지만(18), 같은 토큰은 소비되지 않았다. 승인자가 그 토큰의 jti 에 승인하자 재시도가 통과했고 승인은 한 번 쓰이고 사라졌다.\n")
+		} else if meta.Expected.ExitCode == domain.ExitAuthzDenied {
+			sb.WriteString(fmt.Sprintf("  - 해설: 유효한 승인이 있어도 Grant 회수가 먼저 판정되어 %s에서 거부되었다(종료 코드 %d). 승인은 권한을 대체하지 못하는 추가 조건이다.\n", gateName, actualExit))
+		} else {
+			sb.WriteString(fmt.Sprintf("  - 해설: 승인이 없거나, 만료되었거나, 다른 토큰·다른 인자에 묶인 승인이라 %s에서 사람 승인 필요(18)로 멈췄다. 파일은 한 바이트도 바뀌지 않았다.\n", gateName))
+		}
 	case "G10":
 		if meta.Expected.Audit.ExpectedReason == domain.ReasonConfinementUnavailable {
 			sb.WriteString("  - 해설: 격리 필수 모드인데 OS 격리(CONFINEMENT_UNAVAILABLE)를 적용할 수 없어 부모가 자식을 기동하지 않고 거부(Fail-Closed, 16)했다.\n")
