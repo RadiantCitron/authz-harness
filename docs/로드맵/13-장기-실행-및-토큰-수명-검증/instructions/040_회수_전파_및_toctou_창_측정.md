@@ -1,7 +1,8 @@
-# [구현지시서 040] 위임 계보(`act` 체인) 연쇄 `Epoch` 회수(Subtree Kill-Switch) 및 TOCTOU 창 구간별 실측
+# [구현지시서 040] 위임 계보(`act` 사슬) 연쇄 `Epoch` 회수와 TOCTOU 창 구간별 실측
 
 > **문서 상태**: `Draft`
 > **상위 대시보드**: [13번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
+> **교정 기준**: [022번 보고서](../../../보고서/022-13번로드맵_구조결함_및_진행가능성_검증보고서.md) T-6, T-7, T-8
 > **선행 조건**: [030_재교환_흐름_검증.md](030_재교환_흐름_검증.md) 완료
 > **후속 단계**: [050_g12_e2e_시나리오.md](050_g12_e2e_시나리오.md)
 
@@ -9,35 +10,43 @@
 
 ## 1. 목적 및 배경
 
-1. **위임 계보(`act` 체인) 연쇄 `Epoch` 검증 (Subtree Kill-Switch, [011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md) 제안 1)**:
-   - 현재 [`internal/authz/pdp/service.go:64`](../../../../internal/authz/pdp/service.go)는 마지막 실행 주체(`req.Subject`)의 `CurrentEpoch`만 검사하고 `req.Actor`(`act` 위임 사슬)의 상위 주체들(`lead-01`, `mid-01`)의 `Epoch`는 검사하지 않는다.
-   - 본 단계에서는 `pip.SubjectSnapshot`에 `SubjectEpochs map[string]domain.Epoch`를 공급하고, 순수 함수 `pdp.Evaluate`가 `req.Subject`뿐 아니라 **`req.Actor` 연결 리스트의 모든 조상 주체에 대해 `act.Epoch > 0 && snapshot.SubjectEpochs.Get(act.Subject) != act.Epoch`이면 즉시 `DecisionDeny` + `ReasonSubjectEpochRevoked(12)`를 반환**하도록 보강한다. 이로써 상위 에이전트 1명의 `bump-epoch`만으로 하위 파생 토큰 전체가 일괄 무효화된다.
-2. **구간별 TOCTOU 창 실측·문서화**:
-   - [`internal/authz/pep/gateway.go`](../../../../internal/authz/pep/gateway.go) 파이프라인에서 회수가 일어나는 시점(Window A/B/C)별로 현재 진행 중인 호출과 다음 호출이 어떻게 판정되는지 결정론적 훅(`OnStagePassed`)으로 실측한다.
+1. **`act` 사슬 연쇄 Epoch 검증 ([011번 보고서](../../../보고서/011-권한관리_본질_코어파이프라인_안티패턴_및_분산적응형_기본구조_전문가진단_보고서.md) 제안 1)**:
+   - 현재 [`pdp/service.go`](../../../../internal/authz/pdp/service.go) 65행은 주체(`req.Subject`)의 Epoch만 검사하고 `req.Actor` 사슬은 보지 않는다.
+   - PIP 스냅샷에 모든 주체의 Epoch 사본 `SubjectEpochs`를 담고, 순수 함수 `pdp.Evaluate`가 주체 검사 직후 `req.Actor` 사슬의 **모든 고리**를 검사한다. 규칙은 기존 주체 검사와 같은 **동등 비교**다(022 T-6). 15번 030의 `<`, MASTER 175행의 「이상」은 현재 값보다 큰 Epoch를 통과시키므로 쓰지 않는다.
+2. **TOCTOU 창 실측**: 회수가 일어나는 시점(Window A/B/C)별로 진행 중 호출과 다음 호출의 판정을 결정론적으로 관찰한다. 관찰 수단은 **생성 시점 주입 관찰자** `pep.Config.StageObserver`이며, 요청 구조체에 함수 필드를 넣지 않는다(022 T-8).
 
 ---
 
 ## 2. 파급 범위와 무영향 근거
 
 - **변경**:
-  - `internal/authz/pip/service.go`: `SubjectSnapshot`에 `SubjectEpochs domain.SecurityEpochs` (`json:"subject_epochs,omitempty"`) 및 `StateVersion int` (`json:"state_version,omitempty"`) 공급 추가
-  - `internal/authz/pdp/service.go`: `Evaluate`에서 `req.Subject`의 Epoch 대조 직후 `for curr := req.Actor; curr != nil; curr = curr.Actor` 루프로 모든 상위 위임자의 `curr.Epoch`와 `snapshot.SubjectEpochs.Get(curr.Subject)`를 대조하여 불일치 시 `ReasonSubjectEpochRevoked(12)` 반환
-  - `internal/authz/pep/gateway.go`: `Request`에 선택적 `OnStagePassed func(stage Stage) error` 테스트 훅 추가
-  - `internal/authz/pep/toctou_window_test.go` [신규]: 2-Hop 계보 연쇄 Epoch 회수(`lead-01` Bump → `worker-01` 즉시 차단) 및 Window A/B/C 구간별 TOCTOU 실측 테스트
-- **무영향**:
-  - `act`가 없거나 상위자의 Epoch가 변경되지 않은 기존 시나리오는 100% 동일하게 통과한다.
+  - [`internal/authz/pip/service.go`](../../../../internal/authz/pip/service.go) `SubjectSnapshot`: `SubjectEpochs domain.SecurityEpochs` (`json:"subject_epochs,omitempty"`). 내용은 같은 `Load`(53행)의 `st.Epochs` **사본**(추가 I/O 없음, 호출자가 원본을 바꾸지 못하게 복사). 이름은 [17번 010](../../17-도메인-순수성-및-의존성-역전-완결/instructions/010_pdp_pip_의존성_역전_및_도메인_순수화.md)과 맞춘다. `StateVersion`은 넣지 않는다(022 T-7).
+  - [`internal/authz/pdp/service.go`](../../../../internal/authz/pdp/service.go) `Evaluate`: 2단계(주체 Epoch) 직후
+    ```go
+    if req.Actor != nil && snapshot.SubjectEpochs == nil { deny(ReasonSubjectEpochRevoked) } // 공급 누락 = Fail-Closed
+    for a := req.Actor; a != nil; a = a.Actor {
+        if a.Epoch < 1 || snapshot.SubjectEpochs.Get(a.Subject) != a.Epoch { deny(ReasonSubjectEpochRevoked) }
+    }
+    ```
+    `Details`에 어느 조상(`a.Subject`)이 몇 대 몇으로 불일치했는지 적는다.
+  - [`internal/authz/pep/gateway.go`](../../../../internal/authz/pep/gateway.go): `Config.StageObserver func(Stage)`(반환값 없음, nil 허용). `runStage`(172행)에서 `fn()` 성공 직후 호출한다. `BuildStack`은 배선하지 않는다(단위 시험 전용). `Execute`는 바꾸지 않으므로 `TC-060-04`(단일 `return`)와 무관하다.
+  - `internal/authz/pdp/pdp_test.go`: 조상 Epoch Table-Driven 시험 추가.
+  - `internal/authz/pep/toctou_window_test.go` [신규]: Window A/B/C 시험.
+- **무영향**: `act`가 없는 토큰과, 교환으로 `act.epoch`가 채워진 기존 위임 토큰(조상 Epoch 미변경)은 그대로 통과한다. 수동 `act`를 가진 루트 토큰은 `E2E-21` 하나이며 교환 단계(`DELEGATION_DEPTH_EXCEEDED`)에서 끝나 PEP에 오지 않는다([`g5_delegation_pdp.go`](../../../../internal/harness/catalog/g5_delegation_pdp.go) 250행).
 
 ---
 
-## 3. 세부 명세
+## 3. 세부 명세: TOCTOU 창 기준표
 
-### 구간별 회수 전파 및 TOCTOU 창 실측 기준표 (`gateway.go` 실제 동작 기반)
+현재 파이프라인: Gate 0 → Gate 1 → Gate 2 → Gate 2c → `StageBudget`(예산 쓰기만) → Stage 4 → Stage 5 ([`gateway.go`](../../../../internal/authz/pep/gateway.go) 23~41행).
 
-| 구간 ID | 상태 변화(Grant Revoke / 본인·조상 Epoch Bump) 발생 시점 | 현재 진행 중인 호출 (In-Flight Call) | 동일 세션의 직후 다음 호출 (Next Call) | 코드상 인과 근거 (`gateway.go`) |
+| 구간 | 상태 변화(Grant 회수 / 주체·조상 Epoch 증가) 주입 시점 | 진행 중 호출 | 같은 토큰의 다음 호출 | 근거 |
 |:---:|---|:---:|:---:|---|
-| **Window A** | PEP `Execute` 진입 직전 (`WithBeforeIOHook` 포함) | **즉시 거부 (`Exit 12`)** | **즉시 거부 (`Exit 12`)** | Gate 2 PIP 조회 전에 원장이 갱신되므로 본인 또는 조상 `act`의 회수 상태가 즉시 반영됨 |
-| **Window B** | **Gate 1 통과 직후 ~ Gate 2(PDP 결정) 진입 직전** (`OnStagePassed(StageGate1AuthN)`) | **즉시 거부 (`Exit 12`)** | **즉시 거부 (`Exit 12`)** | Gate 2 진입 시 `PIP.GetSubjectSnapshot`이 최신 `grants_state.json`을 실시간으로 읽어 포착함 |
-| **Window C (물리적 TOCTOU 창)** | **Gate 2(PDP `ALLOW` 결정) 통과 직후 ~ Stage 4/5 사이** (`OnStagePassed(StageGate2AuthZ)`) | **현재 호출은 완료 허용 (`Exit 0`)** | **다음 호출부터 즉시 거부 (`Exit 12`)** | Gate 2 인가 결정 확정 후 파일 I/O 직전까지의 짧은 창이 실제 물리적 TOCTOU 창이며, 직후 다음 호출은 100% 차단됨 |
+| **Window A** | `Execute` 진입 전 (`WithBeforeIOHook`, [`decorator.go`](../../../../internal/authz/pep/decorator.go). 이름과 달리 I/O 직전이 아니라 관문 전체 앞에서 돈다) | `12` | `12` | Gate 2 PIP 조회 전에 원장이 바뀜 |
+| **Window B** | `StageObserver(StageGate1AuthN)` | `12` | `12` | Gate 2 진입 시 PIP가 최신 `grants_state.json`을 읽음 |
+| **Window C** | `StageObserver(StageGate2AuthZ)` (Gate 2c·`StageBudget`·Stage 4 앞) | `0` (완료) | `12` | Gate 2 결정 후에는 재검사가 없으므로 이 구간이 실제 TOCTOU 창이다 |
+
+- Window C의 「다음 호출」은 **예산 토큰**으로 한다. 1회성 토큰이면 Gate 1 Replay(`TOKEN_REPLAY_DETECTED`, `11`)가 먼저 막아 창을 관찰할 수 없다([`verifier.go`](../../../../internal/authn/token/verifier.go) 234행). 시험 스택에는 예산 원장을 주입하고 루트 예산 토큰(`MaxCalls: 5`)을 쓴다.
 
 ---
 
@@ -45,21 +54,27 @@
 
 | ID | 입력 | 기대 결과 |
 |:---:|---|---|
-| **TC-040-01** | `lead-01 → mid-01 → worker-01` 2-Hop 위임 토큰 발급 후 최상위 `lead-01`만 `BumpEpoch` 수행 → `worker-01` 토큰으로 실행 | `pdp.Evaluate`가 조상 `lead-01`의 Epoch 불일치를 적발하여 즉시 `ReasonSubjectEpochRevoked(12)` 차단 |
-| **TC-040-02** | `Window A` 및 `Window B`(`OnStagePassed(StageGate1AuthN)`)에서 Grant Revoke / 조상 Epoch Bump 주입 | 현재 호출이 즉시 `ExitAuthzDenied(12)`로 차단, 파일 무변화 |
-| **TC-040-03** | `Window C`(`OnStagePassed(StageGate2AuthZ)`)에서 Grant Revoke 주입 후 동일 세션 토큰으로 2차 호출 실행 | 1차(In-Flight) 호출은 `ExitSuccess(0)` 완료, 직후 2차(Next) 호출이 즉시 `ExitAuthzDenied(12)`로 차단됨 |
+| **TC-040-01** | `lead-01 → mid-01 → worker-01` 2단 위임 토큰 발급 후 최상위 `lead-01`만 `BumpEpoch` → `worker-01` 토큰 실행 | `SUBJECT_EPOCH_REVOKED`(`12`), `Details`에 `lead-01` |
+| **TC-040-02** | 같은 사슬에서 중간 `mid-01`만 `BumpEpoch` | `12` |
+| **TC-040-03** | `act` 고리 `Epoch: 0`인 요청을 `Evaluate`에 직접 입력 | `DENY` / `SUBJECT_EPOCH_REVOKED` (건너뛰지 않음) |
+| **TC-040-04** | `act`가 있는데 `SubjectEpochs == nil`인 스냅샷 | `DENY` / `SUBJECT_EPOCH_REVOKED` |
+| **TC-040-05** | `act` 사슬 Epoch가 모두 현재 값과 같음 | `ALLOW` (회귀 없음) |
+| **TC-040-06** | Window A·B에서 Grant 회수 / 조상 Epoch 증가 주입 | 진행 중 호출 `12`, 대상 파일 무변화 |
+| **TC-040-07** | Window C에서 Grant 회수 주입 후 같은 예산 토큰으로 2차 호출 | 1차 `0`(쓰기 완료), 2차 `12`(`GRANT_REVOKED`) |
+| **TC-040-08** | `StageObserver` 호출 기록 | 통과한 단계만 순서대로 기록, 실패 단계는 기록 없음 |
 
 ---
 
 ## 5. 4층위 검증 기준
 
-1. `go test -v ./internal/authz/pdp ./internal/authz/pep -run TestTOCTOUWindow` PASS
-2. `go test -v ./internal/harness -run TestArchitectureGuardrails` PASS
+1. `go test -v ./internal/authz/pdp ./internal/authz/pep -run 'TestEvaluate|TestTOCTOUWindow'` PASS
+2. `go test -v ./internal/harness -run TestArchitectureGuardrails` PASS (`TC-060-01` PDP 순수성, `TC-060-04` 단일 출구 무회귀)
 3. `go test ./...` 전체 회귀 0건
 
 ---
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `pdp.Evaluate` 내 `act` 계보 조상 Epoch 전수 대조(Subtree Kill-Switch) 구현 완료
-- [ ] `OnStagePassed` 훅 추가 및 Window A/B/C 구간별 TOCTOU 실측 테스트 통과 후 단독 커밋
+- [ ] PIP `SubjectEpochs`, PDP `act` 사슬 동등 비교(Fail-Closed) 구현
+- [ ] `Config.StageObserver` 추가 및 Window A/B/C 시험 통과
+- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
