@@ -227,7 +227,7 @@ func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 	}
 }
 
-// TestCatalog_RunAll_QuadAssertion 은 54개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
+// TestCatalog_RunAll_QuadAssertion 은 전체(79대) 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -260,7 +260,7 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	}
 
 	if failedCount > 0 {
-		t.Fatalf("Total %d / 54 scenarios failed", failedCount)
+		t.Fatalf("Total %d / %d scenarios failed", failedCount, len(results))
 	}
 }
 
