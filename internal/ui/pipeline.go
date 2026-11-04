@@ -124,6 +124,9 @@ func ComputePipelineGates(res harness.ScenarioResult) []GateInfo {
 		reason == domain.ReasonGrantRevoked ||
 		reason == domain.ReasonTokenReplayDetected ||
 		reason == domain.ReasonSubjectEpochRevoked ||
+		reason == domain.ReasonApprovalRequired ||
+		reason == domain.ReasonApprovalExpired ||
+		reason == domain.ReasonApprovalMismatch ||
 		meta.ID == "E2E-03" || meta.ID == "E2E-18" || meta.ID == "E2E-23" || meta.ID == "E2E-24":
 		blockedGate = 3
 		if assertion.AuditActualReason != "" {

@@ -86,6 +86,14 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		return sb.String()
 	}
 
+	switch res.Assertion.AuditActualReason {
+	case domain.ReasonApprovalRequired, domain.ReasonApprovalExpired, domain.ReasonApprovalMismatch:
+		sb.WriteString(fmt.Sprintf("  - 질문: 왜 허용된 권한인데도 실패(Exit Code %d)했는데 하네스는 PASS(통과)라고 하나요?\n", actualExit))
+		sb.WriteString("  - 해설: 이 작업은 사람의 승인이 있어야 실행됩니다. 승인이 없거나(APPROVAL_REQUIRED), 시간이 지났거나(APPROVAL_EXPIRED),\n")
+		sb.WriteString("          다른 요청에 내준 승인이면(APPROVAL_MISMATCH) 거부와 똑같이 실패(18)하고 파일은 바뀌지 않아야 정상입니다.\n")
+		return sb.String()
+	}
+
 	sb.WriteString(fmt.Sprintf("  - 질문: 왜 프로세스는 실패(Exit Code %d)했는데 하네스는 PASS(통과)라고 하나요?\n", actualExit))
 
 	// 차단 관문 찾기

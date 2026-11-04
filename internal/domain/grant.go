@@ -46,6 +46,9 @@ type Grant struct {
 	Status    GrantStatus `json:"status"`
 	CreatedAt time.Time   `json:"created_at"`
 	RevokedAt *time.Time  `json:"revoked_at,omitempty"`
+
+	// RequiresApproval 이 true 이면 이 Grant 로 허용되는 요청도 사람 승인이 있어야 한다(ask).
+	RequiresApproval bool `json:"requires_approval,omitempty"`
 }
 
 // Validate 는 Grant 엔티티의 필수 필드 및 경로 규칙을 검증한다.

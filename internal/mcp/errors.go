@@ -34,6 +34,8 @@ func MapSubprocessError(exitCode int, rawReason string, rawErrMsg string) *ToolE
 			reason = domain.ReasonInvalidArguments
 		case domain.ExitAuditFailure:
 			reason = domain.ReasonAuditLogFailed
+		case domain.ExitApprovalRequired:
+			reason = domain.ReasonApprovalRequired
 		default:
 			reason = domain.ReasonInternalError
 		}

@@ -25,6 +25,7 @@ func TestTC_020_03_ClassifyExit(t *testing.T) {
 		{"exit16", TermExited, 16, "", 16, ""},
 		{"exit1 abnormal", TermExited, 1, "", 16, domain.ReasonSubprocessAbnormalExit},
 		{"exit2 abnormal", TermExited, 2, "", 16, domain.ReasonSubprocessAbnormalExit},
+		{"exit18 approval required passes", TermExited, 18, "APPROVAL_REQUIRED", 18, domain.ReasonApprovalRequired},
 		{"exit17 from child is not trusted", TermExited, 17, "", 16, domain.ReasonSubprocessAbnormalExit},
 		{"exit10 abnormal", TermExited, 10, "", 16, domain.ReasonSubprocessAbnormalExit},
 	}

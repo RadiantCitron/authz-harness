@@ -33,6 +33,22 @@ func TestMapSubprocessError(t *testing.T) {
 			expectedText:   "[TOKEN_EXPIRED] token has expired (exit code 11)",
 		},
 		{
+			name:           "TC-010-06a: 승인 필요 (ExitCode 18, 사유 복원)",
+			exitCode:       int(domain.ExitApprovalRequired),
+			rawReason:      "",
+			rawErrMsg:      "approval required",
+			expectedReason: "APPROVAL_REQUIRED",
+			expectedText:   "[APPROVAL_REQUIRED] approval required (exit code 18)",
+		},
+		{
+			name:           "TC-010-06b: 승인 만료 (사유 보존)",
+			exitCode:       int(domain.ExitApprovalRequired),
+			rawReason:      string(domain.ReasonApprovalExpired),
+			rawErrMsg:      "approval expired",
+			expectedReason: "APPROVAL_EXPIRED",
+			expectedText:   "[APPROVAL_EXPIRED] approval expired (exit code 18)",
+		},
+		{
 			name:           "TC-040-03: 알 수 없는 종료 코드 -> ReasonInternalError",
 			exitCode:       99,
 			rawReason:      "",

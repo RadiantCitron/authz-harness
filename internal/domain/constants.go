@@ -35,6 +35,10 @@ const (
 
 	// ExitResourceLimit 는 부모 스포너가 강제한 자원·수명 한계(시간·출력) 초과를 의미한다.
 	ExitResourceLimit ExitCode = 17
+
+	// ExitApprovalRequired 는 PDP 가 ask(사람 승인 필요)로 판정했거나 승인이 없음·만료·불일치임을 의미한다.
+	// 승인이 없는 ask 는 deny 와 같이 실패(Fail-Closed)하며 파일은 바뀌지 않는다.
+	ExitApprovalRequired ExitCode = 18
 )
 
 // Reason 은 PDP 인가 결정 및 검증 실패의 구체적인 판정 사유 코드다.
@@ -151,6 +155,15 @@ const (
 
 	// ReasonAuditCheckpointMismatch 는 서명 체크포인트가 없거나 위조되었거나 기록과 맞지 않음을 나타낸다.
 	ReasonAuditCheckpointMismatch Reason = "AUDIT_CHECKPOINT_MISMATCH"
+
+	// ReasonApprovalRequired 는 사람 승인이 필요하나 유효한 승인이 없음(ask)을 나타낸다.
+	ReasonApprovalRequired Reason = "APPROVAL_REQUIRED"
+
+	// ReasonApprovalExpired 는 바인딩은 맞는 승인이 있으나 TTL 이 지났음을 나타낸다.
+	ReasonApprovalExpired Reason = "APPROVAL_EXPIRED"
+
+	// ReasonApprovalMismatch 는 같은 주체의 승인이 있으나 액션·리소스·jti·인자 지문이 맞지 않음을 나타낸다.
+	ReasonApprovalMismatch Reason = "APPROVAL_MISMATCH"
 
 	// ReasonInternalError 는 시스템 예외, I/O 실패 등 내부 복구 불가능 오류를 나타낸다.
 	ReasonInternalError Reason = "INTERNAL_ERROR"

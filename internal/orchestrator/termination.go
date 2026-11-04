@@ -28,7 +28,7 @@ func classifyExit(term Termination, rawExit int, childReason string) (domain.Exi
 	case TermTimedOut:
 		return domain.ExitResourceLimit, domain.ReasonResourceTimeout
 	case TermExited:
-		if rawExit == 0 || (rawExit >= 11 && rawExit <= 16) {
+		if rawExit == 0 || (rawExit >= 11 && rawExit <= 16) || rawExit == int(domain.ExitApprovalRequired) {
 			return domain.ExitCode(rawExit), domain.Reason(childReason)
 		}
 	}
