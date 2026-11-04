@@ -218,7 +218,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | **`EXIT_BAD_INPUT`** | `14` | **Stage 0** 입력/컨텍스트 누락 오류 | `MISSING_TRACE_CONTEXT`, `UNSUPPORTED_ACTION`, `MALFORMED_CLI_ARGS` |
 | **`EXIT_AUDIT_FAILURE`** | `15` | **Stage 4/5** 감사 기록 실패 또는 무결성 파손 | `AUDIT_WRITE_FAILED`, `AUDIT_INTEGRITY_BROKEN`, `AUDIT_TRUNCATION_DETECTED` |
 | **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 및 격리 불가 | `INTERNAL_RUNTIME_ERROR`, `STATE_LOCK_TIMEOUT`, `CONFINEMENT_UNAVAILABLE` |
-| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 서브프로세스 자원·수명 한계 초과 | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT`, `RESOURCE_SIGNAL_KILLED` |
+| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 부모 스포너가 강제한 자원·수명 한계 초과 (원인 불명 종료는 `16` + `SUBPROCESS_ABNORMAL_EXIT`) | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT` |
 | **`EXIT_APPROVAL_REQUIRED`** | `18` | **Phase 15** Gate 2 사람 승인 필요(`ask`) 및 승인 불일치/만료 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED`, `APPROVAL_MISMATCH` |
 
 ## 14) 파일 접근 모델 (Workspace Jail, Read/Write, 경로 규칙)
@@ -386,7 +386,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ### Phase 10: 서브프로세스 자원·수명 통제 (`G9`: `E2E-40`~`E2E-44`)
 * **목적**: 허가받은 워커가 무한 루프에 빠지거나 손자 프로세스를 남기거나 대량 출력을 쏟아낼 때, 프로세스 그룹(`Setpgid`, `-pgid` 시그널) 일괄 소멸, `WaitDelay` 파이프 대기 상한, `limitedBuffer` 출력 바이트 상한(`onExceed=cancel`) 및 전용 종료 코드 `17`(`ExitResourceLimit`)로 통제함을 증명한다.
-* **주요 산출물**: [10-서브프로세스-자원-및-수명-통제](10-서브프로세스-자원-및-수명-통제/README.md), `testworker` 빌드 태그 격리(`TC-010-04`), `G9` 시나리오(`E2E-40`~`44`).
+* **주요 산출물**: [10-서브프로세스-자원-및-수명-통제](10-서브프로세스-자원-및-수명-통제/README.md), 결함 워커 별도 실행 파일(`internal/harness/faultworker`, [ADR 0003](../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-7 개정), `G9` 시나리오(`E2E-40`~`44`).
 
 ### Phase 11: OS 수준 커널 격리 및 악의 워커 차단 (`G10`: `E2E-45`~`E2E-49`)
 * **목적**: PEP 배선을 우회해 직접 OS 시스템콜(`open`, `socket`, `fork`)을 호출하는 악의 워커가 격리를 껐을 때(대조군)는 성공하지만 커널 격리(`internal/confinement`: macOS Seatbelt/VFS DAC + `ReadOnlyPaths`, Linux Landlock/seccomp)를 켰을 때(실험군)는 커널 수준에서 차단(`Exit 13`, `CONFINEMENT_VIOLATION`)됨을 쌍 대조로 증명한다.
