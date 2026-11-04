@@ -144,7 +144,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 모든 내부 패키지는 **자신보다 낮은 번호의 계층(Lower Layer)만 단방향으로 참조**할 수 있으며, `pdp`가 `jail`이나 OS 파일 I/O를 참조하는 것은 컴파일 타임에 원천 금지된다.
 * **Layer 5 (Entry, Composition Root & Harness)**: `cmd/authz-harness`, `internal/app` (단일 합성 루트 `BuildStack`), `internal/cli`, `internal/harness`, `internal/ui`, `internal/mcp`
 * **Layer 4 (Process Coordinators & OS Confinement)**: `internal/orchestrator` (부모 스포너·세션 러너), `internal/subagent` (자식 워커 엔트리), `internal/confinement` (Phase 11 OS 커널 격리 어댑터 — 코어 패키지에서 import 금지 `TC-110-01`)
-* **Layer 3 (Enforcement Gateway)**: `internal/authz/pep` (AuthN 검증 + PDP 결정 + 도구 경계 검증 + Pre-Commit 원장/감사 + I/O 실행 SESE 단일 입출구 조율, Phase 17 `ToolHandler` 전략 포트)
+* **Layer 3 (Enforcement Gateway)**: `internal/authz/pep` (AuthN 검증 + PDP 결정 + 도구 경계 검증 + Pre-Commit 원장/감사 + I/O 실행 SESE 단일 입출구 조율)
 * **Layer 2 (Core Security Domains — 수평 상호 참조 금지)**:
   * **Layer 2A**: `internal/authn/{keys,token,exchange,budget}` (클라이언트 인증, JWK 키 링, 토큰 발급·교환·검증, Replay 원장, Phase 12 Zone B `budget_ledger.json` 예산 원장)
   * **Layer 2B**: `internal/authz/{pap,pip,pdp,state}` (인가 관리·상태 공급·순수 결정 코어 — `pdp`는 파일/OS 의존성 0% 및 Phase 17에서 `domain.SubjectSnapshot` DIP로 전이적 인프라 의존성 0% 달성 `TC-170-01`)
@@ -413,8 +413,8 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md), `internal/netguard`, `internal/execguard`, `055` 격리 포트 단위 허용, `G15` 시나리오(`E2E-74`~`79`). 가드 자체의 상한 초과는 `TOOL_LIMIT_EXCEEDED`(12), 부모 상한 초과는 `17`.
 
 ### Phase 17: [포스트 로드맵 1] 도메인 순수성 및 전이적 의존성 역전(DIP) 완결
-* **목적**: 신규 기능 추가 없이 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter`를 `internal/domain`으로 역전시켜 `pdp`의 전이적 인프라 의존성을 0%로 만들고(`TC-170-01`), PEP 도구 실행을 `ToolHandler` 전략 포트로 추상화하며, 전 CLI 러너의 `app.BuildStack` 일원화(`TC-170-02`) 및 카탈로그 중복 제거를 완결한다.
-* **주요 산출물**: [17-도메인-순수성-및-의존성-역전-완결](17-도메인-순수성-및-의존성-역전-완결/README.md), `internal/domain/snapshot.go`, `internal/authz/pep/handler.go`.
+* **목적**: 신규 기능 추가 없이 `SubjectSnapshot`/`SnapshotProvider` 및 `AuditEvent`/`AuditWriter`를 `internal/domain`으로 역전시켜 `pdp`의 전이적 인프라 의존성을 0%로 만들고(`TC-170-01`), 전 CLI 러너의 `app.BuildStack` 일원화 및 `cli/subagent.go`의 `state` 의존 제거(`TC-170-02`)를 완결한다(`020 ToolHandler`와 `040 카탈로그 리팩토링`은 과잉 추상화 배제 및 완료 시나리오 비침범 OCP 원칙에 따라 `Dropped` — [026번 보고서](../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md)).
+* **주요 산출물**: [17-도메인-순수성-및-의존성-역전-완결](17-도메인-순수성-및-의존성-역전-완결/README.md), `internal/domain/snapshot.go`, `TC-170-01`·`TC-170-02`·`TC-170-03`.
 
 ### Phase 18: [포스트 로드맵 2] 아키텍처·패턴 교보재 및 코드리딩 가이드 편찬
 * **목적**: 코드 변경 없이 본 레포지토리의 5단계 코드리딩 동선, 4계층 의존성 역전(DIP) 실물 해부, 7대 디자인 패턴 및 12대 안티패턴 대조 교본, SESE 감사·권한 무결성 해설, 멀티·분산 에이전트 SDK 이식 가이드를 `docs/교보재/`에 편찬하여 프로젝트를 최종 완결한다.
