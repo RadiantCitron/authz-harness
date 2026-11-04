@@ -190,33 +190,39 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	}
 
 	// 6. 결과 출력
-	fmt.Fprintf(r.stdout, "=== Orchestrate Spawn Execution ===\n")
-	fmt.Fprintf(r.stdout, "Trace ID: %s\n", result.TraceID)
-	fmt.Fprintf(r.stdout, "Child Exit Code: %d\n", result.ExitCode)
-	fmt.Fprintf(r.stdout, "Termination: %s\n", result.Termination)
+	return renderSpawnResult(r.stdout, r.stderr, result)
+}
+
+// renderSpawnResult 는 자식 실행 결과를 출력하고 자식 종료 코드를 반환한다.
+// 자식이 낸 stderr·오류 문자열은 원시 토큰이 섞여 있을 수 있어 stderr 로 내보내기 전에 마스킹한다.
+func renderSpawnResult(stdout, stderr io.Writer, result *orchestrator.SpawnResult) domain.ExitCode {
+	fmt.Fprintf(stdout, "=== Orchestrate Spawn Execution ===\n")
+	fmt.Fprintf(stdout, "Trace ID: %s\n", result.TraceID)
+	fmt.Fprintf(stdout, "Child Exit Code: %d\n", result.ExitCode)
+	fmt.Fprintf(stdout, "Termination: %s\n", result.Termination)
 	if result.Reason != "" {
-		fmt.Fprintf(r.stdout, "Reason: %s\n", result.Reason)
+		fmt.Fprintf(stdout, "Reason: %s\n", result.Reason)
 	}
-	fmt.Fprintf(r.stdout, "Duration: %v\n", result.Duration)
+	fmt.Fprintf(stdout, "Duration: %v\n", result.Duration)
 
 	if result.Response != nil {
 		if result.Response.Reason != "" && result.Reason == "" {
-			fmt.Fprintf(r.stdout, "Reason: %s\n", result.Response.Reason)
+			fmt.Fprintf(stdout, "Reason: %s\n", result.Response.Reason)
 		}
 		if result.Response.Output != "" {
-			fmt.Fprintf(r.stdout, "Output:\n%s\n", result.Response.Output)
+			fmt.Fprintf(stdout, "Output:\n%s\n", result.Response.Output)
 		}
 		if result.Response.BytesRead > 0 {
-			fmt.Fprintf(r.stdout, "Bytes Read: %d\n", result.Response.BytesRead)
+			fmt.Fprintf(stdout, "Bytes Read: %d\n", result.Response.BytesRead)
 		}
 		if result.Response.BytesWritten > 0 {
-			fmt.Fprintf(r.stdout, "Bytes Written: %d\n", result.Response.BytesWritten)
+			fmt.Fprintf(stdout, "Bytes Written: %d\n", result.Response.BytesWritten)
 		}
 		if result.Response.Error != "" {
-			fmt.Fprintf(r.stderr, "Child Error: %s\n", result.Response.Error)
+			fmt.Fprintf(stderr, "Child Error: %s\n", domain.RedactRawTokens(result.Response.Error))
 		}
 	} else if result.StderrRaw != "" {
-		fmt.Fprintf(r.stderr, "Child Stderr:\n%s\n", result.StderrRaw)
+		fmt.Fprintf(stderr, "Child Stderr:\n%s\n", domain.RedactRawTokens(result.StderrRaw))
 	}
 
 	return domain.ExitCode(result.ExitCode)

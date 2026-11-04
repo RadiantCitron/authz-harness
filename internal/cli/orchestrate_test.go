@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/orchestrator"
+	"authz-harness/internal/subagent"
 )
 
 var (
@@ -346,5 +348,33 @@ func TestOrchestrateRunner_TC10_SingleAuditChain_And_Concurrency(t *testing.T) {
 	}
 	if !strings.Contains(auditContent, "pep-gateway") {
 		t.Errorf("audit log missing pep-gateway events")
+	}
+}
+
+// 보고서 029: 자식이 낸 stderr·오류 문자열의 원시 토큰은 사용자 stderr 로 나가기 전에 마스킹된다.
+func TestRenderSpawnResult_RedactsChildStderr(t *testing.T) {
+	const tok = "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl"
+	tests := []struct {
+		name   string
+		result *orchestrator.SpawnResult
+		want   string
+	}{
+		{"StderrRaw", &orchestrator.SpawnResult{ExitCode: 1, StderrRaw: "panic: bad token " + tok}, "Child Stderr:"},
+		{"Response.Error", &orchestrator.SpawnResult{ExitCode: 1, Response: &subagent.SubagentResponse{Error: "denied " + tok}}, "Child Error:"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			if code := renderSpawnResult(&out, &errOut, tc.result); code != domain.ExitCode(1) {
+				t.Fatalf("exit code = %d, want 1", code)
+			}
+			got := errOut.String()
+			if !strings.Contains(got, tc.want) || !strings.Contains(got, domain.RedactedToken) {
+				t.Errorf("expected %q and %s in stderr, got %q", tc.want, domain.RedactedToken, got)
+			}
+			if domain.ContainsRawToken(got) || domain.ContainsRawToken(out.String()) {
+				t.Errorf("raw token leaked: stderr=%q stdout=%q", got, out.String())
+			}
+		})
 	}
 }
