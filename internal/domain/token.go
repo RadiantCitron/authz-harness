@@ -46,6 +46,7 @@ func (c *OffsetClock) Now() time.Time {
 type ActorClaim struct {
 	Subject string      `json:"sub"`
 	JWTID   string      `json:"jti,omitempty"`
+	Epoch   Epoch       `json:"epoch,omitempty"` // 위임 시점 이 고리 주체의 Epoch (계보 연쇄 회수용)
 	Actor   *ActorClaim `json:"act,omitempty"`
 }
 

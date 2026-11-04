@@ -23,6 +23,7 @@ type ExchangeRequest struct {
 	Audience     string
 	TTL          time.Duration
 	Budget       *domain.Budget // 자식 예산 상한. 부모 예산이 있으면 필수.
+	ChildEpoch   domain.Epoch   // 자식 주체의 Epoch (0이면 1). 틀리면 PEP 의 PDP 가 거부한다(Fail-Closed).
 }
 
 // ExchangeResult 는 토큰 교환 결과다.
@@ -161,9 +162,14 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	childActor := &domain.ActorClaim{
 		Subject: parentClaims.Subject,
 		JWTID:   parentClaims.JWTID,
+		Epoch:   parentClaims.Epoch,
 		Actor:   parentClaims.Actor,
 	}
 	childDepth := parentClaims.DelegationDepth + 1
+	childEpoch := req.ChildEpoch
+	if childEpoch == 0 {
+		childEpoch = 1
+	}
 
 	aud := req.Audience
 	if strings.TrimSpace(aud) == "" {
@@ -178,7 +184,7 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		Scope:           req.Scope,
 		Audience:        aud,
 		TTL:             req.TTL,
-		Epoch:           parentClaims.Epoch,
+		Epoch:           childEpoch,
 		Actor:           childActor,
 		DelegationDepth: childDepth,
 		Budget:          req.Budget,
@@ -218,6 +224,8 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 				"client_id":        req.ClientID,
 				"scope":            childResult.Claims.Scope,
 				"delegation_depth": childDepth,
+				"child_epoch":      childEpoch,
+				"parent_epoch":     parentClaims.Epoch,
 				"expires_at":       childResult.Claims.ExpiresAt,
 			},
 		}
