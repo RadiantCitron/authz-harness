@@ -501,9 +501,75 @@ func TestArchitectureGuardrails(t *testing.T) {
 			t.Errorf("cli guard false positive: %v", got)
 		}
 	})
+
+	// TC-170-04: 허용 목록 — 금지 목록(TC-060-01·TC-170-01)에 없는 새 패키지도 pdp·domain 에서는 잡는다
+	t.Run("TC-170-04: pdp·domain 직접 import 허용 목록 검증", func(t *testing.T) {
+		graph := loadInternalImportGraph(t, root)
+		for pkg, allowed := range map[string]map[string]bool{
+			modulePrefix + "internal/authz/pdp": pdpAllowedImports,
+			modulePrefix + "internal/domain":    domainAllowedImports,
+		} {
+			if _, ok := graph[pkg]; !ok {
+				t.Fatalf("package not found in import graph: %s", pkg)
+			}
+			for _, imp := range findDisallowedImports(graph, pkg, allowed) {
+				t.Errorf("TC-170-04 violation: %s imports %q (not in allow list)", pkg, imp)
+			}
+		}
+	})
+
+	// TC-170-05: 허용 목록 가드 변이 시험 — 목록 밖 import 를 주입하면 반드시 검출해야 한다(False-Pass 방지)
+	t.Run("TC-170-05: 허용 목록 가드 변이 검출", func(t *testing.T) {
+		pdp := modulePrefix + "internal/authz/pdp"
+		fake := map[string][]string{pdp: {"context", "io/ioutil", modulePrefix + "internal/domain"}}
+		got := findDisallowedImports(fake, pdp, pdpAllowedImports)
+		if len(got) != 1 || got[0] != "io/ioutil" {
+			t.Errorf("allow-list guard expected [io/ioutil], got %v", got)
+		}
+		clean := map[string][]string{pdp: {"context", "fmt", modulePrefix + "internal/domain"}}
+		if got := findDisallowedImports(clean, pdp, pdpAllowedImports); len(got) != 0 {
+			t.Errorf("allow-list guard false positive: %v", got)
+		}
+	})
 }
 
 const modulePrefix = "authz-harness/"
+
+// 직접 import 허용 목록. 항목을 추가하는 변경은 그 자체가 리뷰 대상이다.
+// 추가 시 설명서 007편 Q4 「무엇을 못 잡나」도 함께 갱신한다.
+var pdpAllowedImports = map[string]bool{
+	"context":                        true,
+	"fmt":                            true,
+	"strings":                        true,
+	"time":                           true,
+	modulePrefix + "internal/domain": true,
+}
+
+var domainAllowedImports = map[string]bool{
+	"context":        true,
+	"crypto/ed25519": true,
+	"crypto/sha256":  true,
+	"encoding/hex":   true,
+	"errors":         true,
+	"fmt":            true,
+	"regexp":         true,
+	"strings":        true,
+	"sync":           true,
+	"time":           true,
+}
+
+// findDisallowedImports 는 pkg 의 직접 import 중 허용 목록에 없는 항목을 반환한다.
+func findDisallowedImports(graph map[string][]string, pkg string, allowed map[string]bool) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, imp := range graph[pkg] {
+		if !allowed[imp] && !seen[imp] {
+			seen[imp] = true
+			out = append(out, imp)
+		}
+	}
+	return out
+}
 
 var transitiveForbidden = map[string]bool{
 	modulePrefix + "internal/storage":          true,
