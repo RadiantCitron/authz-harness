@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"authz-harness/internal/orchestrator"
@@ -15,13 +16,27 @@ import (
 // 어댑터 프로세스 자체는 어떠한 파일 I/O나 Zone A/B 접근도 수행하지 않는다.
 type SubprocessExecutor struct {
 	spawner orchestrator.Spawner
+	logger  *slog.Logger // nil 이면 worker stderr 를 중계하지 않는다
+}
+
+// ExecutorOption 은 SubprocessExecutor 의 선택 설정이다.
+type ExecutorOption func(*SubprocessExecutor)
+
+// WithLogger 는 worker(자식) 프로세스가 stderr 로 낸 운영 로그를 Debug 로 중계할 로거를 지정한다.
+// 중계 내용의 원시 토큰 마스킹은 로거 핸들러(slogadapter.RedactReplaceAttr)가 맡는다.
+func WithLogger(l *slog.Logger) ExecutorOption {
+	return func(e *SubprocessExecutor) { e.logger = l }
 }
 
 // NewSubprocessExecutor 는 Spawner를 주입받아 SubprocessExecutor를 생성한다.
-func NewSubprocessExecutor(spawner orchestrator.Spawner) *SubprocessExecutor {
-	return &SubprocessExecutor{
+func NewSubprocessExecutor(spawner orchestrator.Spawner, opts ...ExecutorOption) *SubprocessExecutor {
+	e := &SubprocessExecutor{
 		spawner: spawner,
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
 }
 
 // ExecuteTool 은 파싱된 ToolCallRequest 를 subagent.SubagentRequest 로 변환하여 격리 서브프로세스에서 실행한다.
@@ -44,6 +59,11 @@ func (e *SubprocessExecutor) ExecuteTool(ctx context.Context, req *ToolCallReque
 	spawnRes, err := e.spawner.Spawn(ctx, subReq)
 	if err != nil {
 		return nil, fmt.Errorf("subprocess execution failed: %w", err)
+	}
+
+	// worker 의 운영 로그(stderr)는 응답 프레임 파싱 성공 여부와 무관하게 Debug 로 중계한다.
+	if e.logger != nil && spawnRes.StderrRaw != "" {
+		e.logger.Debug("worker stderr", "trace_id", traceID, "stderr", spawnRes.StderrRaw)
 	}
 
 	// 1. 자식 프로세스 정상 응답 수거

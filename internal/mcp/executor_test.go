@@ -2,10 +2,12 @@ package mcp
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/observe/slogadapter"
 	"authz-harness/internal/orchestrator"
 	"authz-harness/internal/subagent"
 )
@@ -127,5 +129,53 @@ func TestSubprocessExecutor_ResourceLimitReasonPropagation(t *testing.T) {
 				t.Fatal("raw token leaked")
 			}
 		})
+	}
+}
+
+// 보고서 029 후속: worker stderr 는 응답 파싱 성공 여부와 무관하게 로거로 중계되고, 토큰은 마스킹된다.
+func TestSubprocessExecutor_RelaysWorkerStderr(t *testing.T) {
+	const tok = "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl"
+	stderr := "level=DEBUG msg=\"pep stage entering\" stage=gate1_authn token=" + tok
+	okResp := &orchestrator.SpawnResult{ExitCode: 0, StderrRaw: stderr, Response: &subagent.SubagentResponse{Action: "file:read", Output: "ok"}}
+
+	tests := []struct {
+		name      string
+		logger    func(w *strings.Builder) *slog.Logger
+		result    *orchestrator.SpawnResult
+		wantRelay bool
+	}{
+		{"Debug 로거 + 정상 응답이어도 중계", func(w *strings.Builder) *slog.Logger {
+			return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: slogadapter.RedactReplaceAttr}))
+		}, okResp, true},
+		{"Info 로거는 중계하지 않음", func(w *strings.Builder) *slog.Logger {
+			return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		}, okResp, false},
+		{"stderr 가 비면 중계 없음", func(w *strings.Builder) *slog.Logger {
+			return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		}, &orchestrator.SpawnResult{ExitCode: 0, Response: okResp.Response}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			ex := NewSubprocessExecutor(&mockSpawner{result: tc.result}, WithLogger(tc.logger(&buf)))
+			res, err := ex.ExecuteTool(context.Background(), &ToolCallRequest{ToolName: "file_read", Action: domain.ActionFileRead, Path: "a.txt", AuthzToken: "t"})
+			if err != nil || res.IsError {
+				t.Fatalf("unexpected result: err=%v res=%+v", err, res)
+			}
+			out := buf.String()
+			if got := strings.Contains(out, "worker stderr"); got != tc.wantRelay {
+				t.Fatalf("relay=%v, want %v: %q", got, tc.wantRelay, out)
+			}
+			if tc.wantRelay && (!strings.Contains(out, "pep stage entering") || strings.Contains(out, tok) || !strings.Contains(out, "[REDACTED_TOKEN]")) {
+				t.Errorf("expected masked relay, got %q", out)
+			}
+		})
+	}
+}
+
+func TestSubprocessExecutor_NoLoggerNoPanic(t *testing.T) {
+	mock := &mockSpawner{result: &orchestrator.SpawnResult{StderrRaw: "x", Response: &subagent.SubagentResponse{Output: "ok"}}}
+	if _, err := NewSubprocessExecutor(mock).ExecuteTool(context.Background(), &ToolCallRequest{Action: domain.ActionFileRead, Path: "a", AuthzToken: "t"}); err != nil {
+		t.Fatal(err)
 	}
 }

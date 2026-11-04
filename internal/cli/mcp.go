@@ -158,7 +158,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 			return domain.ExitInternalError
 		}
 
-		executor = mcp.NewSubprocessExecutor(spawner)
+		executor = mcp.NewSubprocessExecutor(spawner, mcp.WithLogger(logger))
 	}
 
 	server := mcp.NewServer(r.in, r.out, r.errOut, executor, logger)
