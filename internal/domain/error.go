@@ -119,6 +119,7 @@ func ExitCodeForReason(r Reason) ExitCode {
 		return ExitBadInput // 14
 	case ReasonAuditLogFailed,
 		ReasonAuditIntegrityBroken,
+		ReasonAuditTailIncomplete,
 		ReasonAuditTruncationDetected,
 		ReasonAuditCheckpointMismatch:
 		return ExitAuditFailure // 15

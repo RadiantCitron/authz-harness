@@ -57,6 +57,8 @@ func (r *AuditRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		return r.runTree(args[1:])
 	case "checkpoint":
 		return r.runCheckpoint(args[1:])
+	case "recover":
+		return r.runRecover()
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown audit command '%s'\n", subcmd)
 		r.printUsage()
@@ -251,11 +253,27 @@ func (r *AuditRunner) runCheckpoint(args []string) domain.ExitCode {
 	return domain.ExitSuccess
 }
 
+// runRecover 는 기록 도중 충돌로 잘린 마지막 줄을 옆 파일로 보존하고 사슬을 복구한다(운영자 명령).
+func (r *AuditRunner) runRecover() domain.ExitCode {
+	res, err := audit.RecoverIncompleteTail(r.auditPath, domain.RealClock{})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: audit recover refused: %v\n", err)
+		return domain.ExitCodeFromError(err, domain.ExitAuditFailure)
+	}
+	if !res.Recovered {
+		fmt.Fprintln(r.out, "OK: nothing to recover (audit tail is intact)")
+		return domain.ExitSuccess
+	}
+	fmt.Fprintf(r.out, "OK: recovered incomplete tail (%d bytes, sha256=%s) saved to %s\n", res.TruncatedBytes, res.TruncatedSHA, res.PartialPath)
+	return domain.ExitSuccess
+}
+
 func (r *AuditRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "Usage: authz-harness audit <command> [options]")
 	fmt.Fprintln(r.errOut, "\nCommands:")
 	fmt.Fprintln(r.errOut, "  timeline  단일 TraceID에 속한 다중 프로세스 감사 타임라인 및 계보 트리 시각화")
 	fmt.Fprintln(r.errOut, "  verify    전체 audit.jsonl의 SHA-256 해시 체인 및 무결성 검증 (--checkpoint <path>: 서명 체크포인트 대조)")
 	fmt.Fprintln(r.errOut, "  tree      토큰(jti) 계보 기반 위임 트리 (보기 전용, 해시로 검증되지 않은 metadata 필드 포함)")
+	fmt.Fprintln(r.errOut, "  recover   기록 도중 충돌로 잘린 마지막 줄을 옆 파일로 보존하고 사슬 복구 (AUDIT_TAIL_INCOMPLETE 전용)")
 	fmt.Fprintln(r.errOut, "  checkpoint 감사 체인 서명 체크포인트 생성 (--out <path>)")
 }

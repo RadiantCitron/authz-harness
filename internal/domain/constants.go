@@ -150,6 +150,9 @@ const (
 	// ReasonAuditIntegrityBroken 은 감사 로그 해시 체인 무결성이 훼손되었음을 나타낸다.
 	ReasonAuditIntegrityBroken Reason = "AUDIT_INTEGRITY_BROKEN"
 
+	// ReasonAuditTailIncomplete 는 감사 파일의 마지막 줄이 줄바꿈 없이 잘렸고 그 앞 사슬은 온전함(기록 도중 충돌)을 나타낸다.
+	ReasonAuditTailIncomplete Reason = "AUDIT_TAIL_INCOMPLETE"
+
 	// ReasonAuditTruncationDetected 는 서명 체크포인트보다 감사 기록이 짧아졌음(꼬리 절단·삭제)을 나타낸다.
 	ReasonAuditTruncationDetected Reason = "AUDIT_TRUNCATION_DETECTED"
 

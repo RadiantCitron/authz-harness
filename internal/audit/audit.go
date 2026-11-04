@@ -195,11 +195,7 @@ func (w *JSONLWriter) Log(event Event) error {
 		return domain.NewError(domain.ReasonAuditLogFailed, "audit", "audit writer is closed", nil)
 	}
 
-	// 1. 이벤트 최상위 필드 정규화
-	NormalizeEvent(&event)
-	event.SchemaVersion = CurrentSchemaVersion // 호출자 값은 덮어쓴다
-
-	// 2. syscall.Flock 배타 락 획득 (다중 프로세스 원자적 동기화)
+	// 1. syscall.Flock 배타 락 획득 (다중 프로세스 원자적 동기화)
 	lockPath := w.path + ".lock"
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -212,11 +208,24 @@ func (w *JSONLWriter) Log(event Event) error {
 	}
 	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 
+	return w.appendLocked(event)
+}
+
+// appendLocked 는 배타 flock 을 이미 잡은 상태에서 이벤트 하나를 사슬에 잇는다.
+func (w *JSONLWriter) appendLocked(event Event) error {
+	// 1. 이벤트 최상위 필드 정규화
+	NormalizeEvent(&event)
+	event.SchemaVersion = CurrentSchemaVersion // 호출자 값은 덮어쓴다
+
 	// 3. 파일의 마지막 레코드로부터 prev_hash 추출 (다중 프로세스 체인 연속성 보장)
 	prevHash := ""
 	lastEv, err := readLastEvent(w.file)
 	if err != nil {
-		return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("failed to read last event from audit file: %v", err), err)
+		reason := domain.ReasonAuditIntegrityBroken
+		if verr := VerifyHashChain(w.path); isReason(verr, domain.ReasonAuditTailIncomplete) {
+			reason = domain.ReasonAuditTailIncomplete
+		}
+		return domain.NewError(reason, "audit", fmt.Sprintf("failed to read last event from audit file: %v", err), err)
 	}
 	if lastEv != nil {
 		if lastEv.CurrHash != "" {
@@ -292,6 +301,13 @@ func VerifyHashChain(path string) error {
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 64*1024), MaxRecordBytes+1)
+	// 마지막 토큰이 줄바꿈 없이 EOF 로 끝났는지 기록한다(잘린 꼬리 판정용).
+	lastNoNL := false
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		adv, tok, err := bufio.ScanLines(data, atEOF)
+		lastNoNL = atEOF && tok != nil && len(data) > 0 && data[len(data)-1] != '\n'
+		return adv, tok, err
+	})
 
 	var expectedPrevHash string
 	lineNum := 0
@@ -311,6 +327,10 @@ func VerifyHashChain(path string) error {
 
 		var ev Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			if lastNoNL {
+				// 앞 레코드는 모두 통과했고, 줄바꿈 없는 마지막 조각만 깨짐 → 기록 도중 충돌.
+				return domain.NewError(domain.ReasonAuditTailIncomplete, "audit", fmt.Sprintf("audit record #%d is an incomplete tail (no newline, not valid JSON); run 'audit recover'", lineNum), err)
+			}
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d is not valid JSON: %v", lineNum, err), err)
 		}
 
@@ -362,4 +382,9 @@ func VerifyHashChain(path string) error {
 	}
 
 	return nil
+}
+
+func isReason(err error, r domain.Reason) bool {
+	var de *domain.Error
+	return errors.As(err, &de) && de.Reason == r
 }
