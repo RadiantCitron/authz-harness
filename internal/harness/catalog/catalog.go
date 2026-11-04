@@ -4,7 +4,7 @@ import (
 	"authz-harness/internal/harness"
 )
 
-// AllScenarios 는 E2E-01 부터 E2E-49 까지 10대 그룹 49개 전체 시나리오 인스턴스를 반환한다.
+// AllScenarios 는 E2E-01 부터 E2E-54 까지 11대 그룹 54개 전체 시나리오 인스턴스를 반환한다.
 func AllScenarios() []harness.Scenario {
 	var list []harness.Scenario
 	list = append(list, g1Scenarios()...)
@@ -17,6 +17,7 @@ func AllScenarios() []harness.Scenario {
 	list = append(list, g8Scenarios()...)
 	list = append(list, g9Scenarios()...)
 	list = append(list, g10Scenarios()...)
+	list = append(list, g11Scenarios()...)
 	return list
 }
 

@@ -93,8 +93,8 @@ func TestRunCLI_AT_CLI_04_JSONOutput(t *testing.T) {
 		t.Fatalf("failed to parse json output: %v", err)
 	}
 
-	if report.Total != 49 {
-		t.Errorf("expected 49 total scenarios in json, got %d", report.Total)
+	if report.Total != 54 {
+		t.Errorf("expected 54 total scenarios in json, got %d", report.Total)
 	}
 	// 격리 불가 환경에서는 G10 이 Skipped 이므로 Passed = Total - Skipped 로 기대한다.
 	if report.Passed != report.Total-report.Skipped {

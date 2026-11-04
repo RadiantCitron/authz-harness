@@ -14,11 +14,11 @@ import (
 	"authz-harness/internal/orchestrator"
 )
 
-// TestCatalog_ScenarioCount 는 카탈로그에 49개의 고유 시나리오가 등록되어 있는지 검증한다.
+// TestCatalog_ScenarioCount 는 카탈로그에 54개의 고유 시나리오가 등록되어 있는지 검증한다.
 func TestCatalog_ScenarioCount(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 49 {
-		t.Fatalf("expected 49 scenarios, got %d", len(scenarios))
+	if len(scenarios) != 54 {
+		t.Fatalf("expected 54 scenarios, got %d", len(scenarios))
 	}
 
 	seen := make(map[string]bool)
@@ -44,7 +44,7 @@ func TestCatalog_ScenarioCount(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 49개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 54개 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -52,8 +52,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 49 {
-		t.Fatalf("expected 49 registered scenarios, got %d", len(list))
+	if len(list) != 54 {
+		t.Fatalf("expected 54 registered scenarios, got %d", len(list))
 	}
 }
 
@@ -209,7 +209,7 @@ func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 	}
 }
 
-// TestCatalog_RunAll_QuadAssertion 은 49개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
+// TestCatalog_RunAll_QuadAssertion 은 54개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -221,8 +221,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 49 {
-		t.Fatalf("expected 49 results, got %d", len(results))
+	if len(results) != 54 {
+		t.Fatalf("expected 54 results, got %d", len(results))
 	}
 
 	failedCount := 0
@@ -242,7 +242,7 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	}
 
 	if failedCount > 0 {
-		t.Fatalf("Total %d / 30 scenarios failed", failedCount)
+		t.Fatalf("Total %d / 54 scenarios failed", failedCount)
 	}
 }
 
@@ -327,7 +327,7 @@ func TestG9_SkippedInProc(t *testing.T) {
 	}
 }
 
-// TestG10: OS 격리 대조군→실험군 (E2E-45 ~ E2E-49). 격리 불가 환경에서는 Skipped 이며 실패가 아니다.
+// TestG10: OS 격리 대조군→실험군 (E2E-45 ~ E2E-54). 격리 불가 환경에서는 Skipped 이며 실패가 아니다.
 func TestG10_Scenarios(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	for _, sc := range g10Scenarios() {

@@ -8,6 +8,8 @@ import (
 
 	"authz-harness/internal/app"
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/budget"
+	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pap"
@@ -39,20 +41,22 @@ func grantPermission(
 
 // harnessStack 은 단일 시나리오가 샌드박스 내에서 상호작용하는 모든 컴포넌트 묶음이다.
 type harnessStack struct {
-	Env           *harness.SandboxEnvironment
-	AuditWriter   audit.Writer
-	KeyStore      keys.Store
-	KeyManager    keys.KeyManager
-	TokenIssuer   token.TokenIssuer
-	TokenVerifier token.TokenVerifier
-	ClientReg     *token.InMemoryClientRegistry
-	ReplayLedger  token.ReplayLedger
-	StateStore    state.Store
-	PAP           pap.Service
-	PIP           pip.Service
-	PDP           pdp.Service
-	Jail          jail.Jail
-	PEP           pep.Gateway
+	Env             *harness.SandboxEnvironment
+	AuditWriter     audit.Writer
+	KeyStore        keys.Store
+	KeyManager      keys.KeyManager
+	TokenIssuer     token.TokenIssuer
+	TokenVerifier   token.TokenVerifier
+	ClientReg       *token.InMemoryClientRegistry
+	ReplayLedger    token.ReplayLedger
+	BudgetLedger    budget.Ledger
+	ExchangeService exchange.Service
+	StateStore      state.Store
+	PAP             pap.Service
+	PIP             pip.Service
+	PDP             pdp.Service
+	Jail            jail.Jail
+	PEP             pep.Gateway
 }
 
 // Close 는 스택에 바인딩된 리소스(감사 로그 기록기 등)를 안전하게 닫아 파일 디스크립터 누수를 방지한다.
@@ -79,20 +83,22 @@ func setupHarnessStack(env *harness.SandboxEnvironment) (*harnessStack, error) {
 	}
 
 	return &harnessStack{
-		Env:           env,
-		AuditWriter:   st.AuditWriter,
-		KeyStore:      st.KeyStore,
-		KeyManager:    st.KeyManager,
-		TokenIssuer:   st.TokenIssuer,
-		TokenVerifier: st.TokenVerifier,
-		ClientReg:     st.ClientReg,
-		ReplayLedger:  st.ReplayLedger,
-		StateStore:    st.StateStore,
-		PAP:           st.PAP,
-		PIP:           st.PIP,
-		PDP:           st.PDP,
-		Jail:          st.Jail,
-		PEP:           st.PEP,
+		Env:             env,
+		AuditWriter:     st.AuditWriter,
+		KeyStore:        st.KeyStore,
+		KeyManager:      st.KeyManager,
+		TokenIssuer:     st.TokenIssuer,
+		TokenVerifier:   st.TokenVerifier,
+		ClientReg:       st.ClientReg,
+		ReplayLedger:    st.ReplayLedger,
+		BudgetLedger:    st.BudgetLedger,
+		ExchangeService: st.ExchangeService,
+		StateStore:      st.StateStore,
+		PAP:             st.PAP,
+		PIP:             st.PIP,
+		PDP:             st.PDP,
+		Jail:            st.Jail,
+		PEP:             st.PEP,
 	}, nil
 }
 
