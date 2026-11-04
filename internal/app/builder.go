@@ -17,7 +17,9 @@ import (
 	"authz-harness/internal/authz/pip"
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
+	"authz-harness/internal/execguard"
 	"authz-harness/internal/jail"
+	"authz-harness/internal/netguard"
 	"authz-harness/internal/observe"
 	"authz-harness/internal/observe/slogadapter"
 )
@@ -31,7 +33,8 @@ type AppConfig struct {
 	BudgetPath   string // 비면 filepath.Dir(ReplayPath)/budget_ledger.json
 	AuditPath    string
 	WorkspaceDir string
-	VerifyOnly   bool // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
+	NetAllowList []string // net:fetch 허용 host:port (정규 형태). 비면 net:fetch 는 전부 거부
+	VerifyOnly   bool     // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
 	Clock        domain.Clock
 	Observer     observe.Observer
 }
@@ -210,7 +213,18 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		approvalConsumer = state.NewApprovalConsumer(stateStore)
 	}
 	if pdpSvc != nil {
+		netGuard, err := netguard.NewGuard(cfg.NetAllowList, 0, 0)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: net guard: %w", err)
+		}
+		var execRunner *execguard.Runner
+		if cfg.WorkspaceDir != "" {
+			execRunner = execguard.NewRunner(cfg.WorkspaceDir, 0, 0)
+		}
 		gw, err := pep.NewGateway(pep.Config{
+			NetGuard:     netGuard,
+			ExecRunner:   execRunner,
 			Verifier:     tokenVerifier,
 			PDP:          pdpSvc,
 			Jail:         workspaceJail,

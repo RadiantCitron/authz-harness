@@ -70,12 +70,10 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 	resp.Reason = string(pepRes.Reason)
 
 	if pepRes.Allowed {
-		normAction, _ := pep.NormalizeAction(req.Action)
-		if normAction == domain.ActionFileRead {
-			resp.BytesRead = pepRes.BytesRead
+		resp.BytesRead = pepRes.BytesRead
+		resp.BytesWritten = pepRes.BytesWrote
+		if len(pepRes.Data) > 0 {
 			resp.Output = string(pepRes.Data)
-		} else if normAction == domain.ActionFileWrite {
-			resp.BytesWritten = pepRes.BytesWrote
 		}
 	} else {
 		resp.Error = pepRes.Details

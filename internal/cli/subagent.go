@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"authz-harness/internal/app"
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
+	"authz-harness/internal/netguard"
 	"authz-harness/internal/subagent"
 )
 
@@ -71,6 +73,7 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		pubJWKSFlag   string
 		replayFlag    string
 		auditFlag     string
+		netAllowFlag  string
 	)
 
 	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
@@ -79,8 +82,21 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 	fs.StringVar(&replayFlag, "replay-file", r.replayPath, "Zone B Replay 방지 원장 경로")
 	fs.StringVar(&auditFlag, "audit-file", r.auditPath, "감사 로그 저장 파일 경로")
 
+	fs.StringVar(&netAllowFlag, "net-allow", "", "net:fetch 허용 host:port 목록 (쉼표 구분, 예: 127.0.0.1:18080). 비면 전부 거부")
+
 	if err := fs.Parse(args[1:]); err != nil {
 		return domain.ExitBadInput
+	}
+
+	var netAllow []string
+	if strings.TrimSpace(netAllowFlag) != "" {
+		for _, e := range strings.Split(netAllowFlag, ",") {
+			netAllow = append(netAllow, strings.TrimSpace(e))
+		}
+		if _, err := netguard.NewGuard(netAllow, 0, 0); err != nil {
+			fmt.Fprintf(r.stderr, "Error: invalid -net-allow: %v\n", err)
+			return domain.ExitBadInput
+		}
 	}
 
 	// 1. 단일 합성 루트(AppStack)를 통한 검증 전용 컴포넌트 조립
@@ -90,6 +106,7 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 		PubJWKSPath:  pubJWKSFlag,
 		ReplayPath:   replayFlag,
 		AuditPath:    auditFlag,
+		NetAllowList: netAllow,
 		VerifyOnly:   true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
 	})
 	if err != nil {

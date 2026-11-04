@@ -563,8 +563,6 @@ func TestGate0InputValidation(t *testing.T) {
 		{"공백 리소스", domain.ActionFileWrite, "   "},
 		{"유효하지 않은 액션", domain.Action("delete"), "test.txt"},
 		{"빈 액션", domain.Action(""), "test.txt"},
-		{"net:fetch 는 040 전까지 거부", domain.ActionNetFetch, "127.0.0.1:18080"},
-		{"exec:run 은 040 전까지 거부", domain.ActionExecRun, "echo-safe"},
 	}
 
 	for _, tc := range testCases {

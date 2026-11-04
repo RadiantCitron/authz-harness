@@ -203,3 +203,26 @@ func TestSubagentRunner_SubcommandValidation(t *testing.T) {
 		t.Errorf("expected ExitBadInput for invalid flag, got %d", code)
 	}
 }
+
+// 로드맵 16 / 040 TC-040-12: -net-allow 검증
+func TestSubagentRunner_NetAllowFlag(t *testing.T) {
+	rig := setupPEPCLITestRig(t)
+	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runner.SetStdin(bytes.NewBufferString("{}"))
+	if c := runner.Run(context.Background(), []string{"worker", "-net-allow", "evil:80"}); c != domain.ExitBadInput {
+		t.Fatalf("invalid -net-allow: expected 14, got %d", c)
+	}
+
+	rig.out.Reset()
+	runner.SetStdin(bytes.NewBufferString("{broken"))
+	c := runner.Run(context.Background(), []string{"worker", "-net-allow", "127.0.0.1:18080,[::1]:18080"})
+	// 정상 기동: 스택이 조립되어 JSON 프레임 단계(입력 오류 14, 응답 JSON 존재)까지 도달한다.
+	var resp subagent.SubagentResponse
+	if c != domain.ExitBadInput || json.Unmarshal(rig.out.Bytes(), &resp) != nil || resp.Reason != string(domain.ReasonInvalidArguments) {
+		t.Fatalf("valid -net-allow must boot to frame parsing: code=%d out=%q", c, rig.out.String())
+	}
+}
