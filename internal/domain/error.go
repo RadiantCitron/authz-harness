@@ -72,7 +72,7 @@ func ExitCodeFromError(err error, fallback ExitCode) ExitCode {
 	return fallback
 }
 
-// ExitCodeForReason 은 Reason 상수로부터 결정론적 ExitCode(0, 11~16)를 산출하는 순수 매핑 함수다.
+// ExitCodeForReason 은 Reason 상수로부터 결정론적 ExitCode(0, 11~17)를 산출하는 순수 매핑 함수다.
 func ExitCodeForReason(r Reason) ExitCode {
 	switch r {
 	case ReasonAuthorized:
@@ -114,6 +114,11 @@ func ExitCodeForReason(r Reason) ExitCode {
 	case ReasonAuditLogFailed,
 		ReasonAuditIntegrityBroken:
 		return ExitAuditFailure // 15
+	case ReasonResourceTimeout,
+		ReasonResourceOutputLimit:
+		return ExitResourceLimit // 17
+	case ReasonSubprocessAbnormalExit:
+		return ExitInternalError // 16
 	default:
 		return ExitInternalError // 16
 	}

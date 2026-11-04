@@ -584,7 +584,7 @@ func (s *e2e31Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	defer stack.Close()
 
 	// MultiHopSpawner 구동
-	spawner := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
+	spawner, err := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
 		BinaryPath:   env.BinaryPath,
 		WorkspaceDir: env.WorkspaceDir,
 		StatePath:    env.StatePath,
@@ -593,6 +593,9 @@ func (s *e2e31Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		AuditPath:    env.AuditPath,
 		Audit:        stack.AuditWriter,
 	})
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
 
 	return spawner.ExecuteMultiHop(ctx, orchestrator.MultiHopDelegationRequest{
 		TraceID:       "trace-e2e-31",
@@ -668,7 +671,7 @@ func (s *e2e32Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 
 	// MultiHopSpawner 구동
 	// Root -> Lead(file:read) -> Worker(file:write 초과 시도 -> 2차 교환 거부)
-	spawner := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
+	spawner, err := orchestrator.NewMultiHopSpawner(orchestrator.MultiHopConfig{
 		BinaryPath:   env.BinaryPath,
 		WorkspaceDir: env.WorkspaceDir,
 		StatePath:    env.StatePath,
@@ -677,6 +680,9 @@ func (s *e2e32Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		AuditPath:    env.AuditPath,
 		Audit:        stack.AuditWriter,
 	})
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
 
 	return spawner.ExecuteMultiHop(ctx, orchestrator.MultiHopDelegationRequest{
 		TraceID:       "trace-e2e-32",

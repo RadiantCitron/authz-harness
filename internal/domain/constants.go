@@ -32,6 +32,9 @@ const (
 
 	// ExitInternalError 는 시스템 예외, I/O 실패 등 복구 불가능한 내부 오류를 의미한다.
 	ExitInternalError ExitCode = 16
+
+	// ExitResourceLimit 는 부모 스포너가 강제한 자원·수명 한계(시간·출력) 초과를 의미한다.
+	ExitResourceLimit ExitCode = 17
 )
 
 // Reason 은 PDP 인가 결정 및 검증 실패의 구체적인 판정 사유 코드다.
@@ -139,4 +142,13 @@ const (
 
 	// ReasonInternalError 는 시스템 예외, I/O 실패 등 내부 복구 불가능 오류를 나타낸다.
 	ReasonInternalError Reason = "INTERNAL_ERROR"
+
+	// ReasonResourceTimeout 은 부모가 강제한 실행 시간 한계 초과를 나타낸다.
+	ReasonResourceTimeout Reason = "RESOURCE_TIMEOUT"
+
+	// ReasonResourceOutputLimit 은 부모가 강제한 출력 바이트 한계 초과를 나타낸다.
+	ReasonResourceOutputLimit Reason = "RESOURCE_OUTPUT_LIMIT"
+
+	// ReasonSubprocessAbnormalExit 는 원인을 알 수 없는 자식 비정상 종료(외부 신호·취소·표준 밖 코드)를 나타낸다.
+	ReasonSubprocessAbnormalExit Reason = "SUBPROCESS_ABNORMAL_EXIT"
 )

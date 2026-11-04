@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -28,6 +30,32 @@ func TestHelperProcess(t *testing.T) {
 	case "sleep":
 		time.Sleep(1 * time.Second)
 		os.Exit(0)
+
+	case "hang":
+		time.Sleep(1 * time.Hour)
+
+	case "flood":
+		chunk := make([]byte, 8192)
+		for {
+			if _, err := os.Stdout.Write(chunk); err != nil {
+				os.Exit(0)
+			}
+		}
+
+	case "spawn_child_hang":
+		grand := exec.Command("sleep", "60")
+		if err := grand.Start(); err != nil {
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stdout, "CHILD_PID=%d\n", grand.Process.Pid)
+		time.Sleep(1 * time.Hour)
+
+	case "exit_2":
+		os.Exit(2)
+
+	case "self_kill":
+		_ = syscall.Kill(os.Getpid(), syscall.SIGKILL)
+		time.Sleep(1 * time.Hour)
 
 	case "exit_11":
 		resp := subagent.SubagentResponse{
@@ -138,7 +166,7 @@ func helperSpawnerForTest(t *testing.T, mode string, timeout time.Duration, audi
 	cfg := SpawnConfig{
 		BinaryPath: exe,
 		Args:       []string{"-test.run=TestHelperProcess", "--"},
-		Timeout:    timeout,
+		Limits:     Limits{Timeout: timeout},
 		Audit:      auditWriter,
 		ExtraEnv: []string{
 			"GO_WANT_HELPER_PROCESS=1",
@@ -434,7 +462,7 @@ func TestSpawner_FailClosedOnAuditError(t *testing.T) {
 	spawner, err := NewSubprocessSpawner(SpawnConfig{
 		BinaryPath: "/bin/sh",
 		Args:       []string{"-c", fmt.Sprintf("echo 'created' > %s", outPath)},
-		Timeout:    2 * time.Second,
+		Limits:     Limits{Timeout: 2 * time.Second},
 		Audit:      mockFailingAuditWriter{},
 	})
 	if err != nil {

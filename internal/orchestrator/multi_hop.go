@@ -14,31 +14,31 @@ import (
 
 // MultiHopConfig 는 2-Hop 다단계 프로세스 연쇄 위임 실행에 필요한 설정이다.
 type MultiHopConfig struct {
-	BinaryPath   string        // authz-harness 실행 바이너리 경로
-	WorkspaceDir string        // 격리 작업공간 디렉터리 경로
-	StatePath    string        // 상태 파일 경로
-	PubJWKSPath  string        // 공개키 JWKS 경로
-	ReplayPath   string        // Replay 원장 경로
-	AuditPath    string        // 감사 파일 경로
-	Audit        audit.Writer  // 부모 감사 로거
-	Timeout      time.Duration // 서브프로세스 제한 시간
+	BinaryPath   string       // authz-harness 실행 바이너리 경로
+	WorkspaceDir string       // 격리 작업공간 디렉터리 경로
+	StatePath    string       // 상태 파일 경로
+	PubJWKSPath  string       // 공개키 JWKS 경로
+	ReplayPath   string       // Replay 원장 경로
+	AuditPath    string       // 감사 파일 경로
+	Audit        audit.Writer // 부모 감사 로거
+	Limits       Limits       // 서브프로세스 자원·수명 한계
 }
 
 // MultiHopDelegationRequest 는 루트 오케스트레이터에서 시작되는 다단계 위임 요청 파라미터다.
 type MultiHopDelegationRequest struct {
-	TraceID         string        // 단일 분산 추적 식별자
-	RootToken       string        // Depth 0 루트 부모 토큰
-	LeadSubject     string        // Depth 1 중간 관리자 주체 (예: "lead-01")
-	LeadScope       string        // Depth 1 위임 스코프 (예: "file:read file:write")
-	WorkerSubject   string        // Depth 2 최종 워커 주체 (예: "worker-01")
-	WorkerScope     string        // Depth 2 위임 스코프 (예: "file:read" 또는 "file:write")
-	TargetFile      string        // 최종 워커가 접근할 파일 상대경로
-	Action          domain.Action // 최종 워커 수행 액션 (file:read 또는 file:write)
-	Data            []byte        // 쓰기 시 기록 데이터
-	TokenIssuer     token.TokenIssuer
-	TokenVerifier   token.TokenVerifier
-	ClientReg       token.ClientRegistry
-	Clock           domain.Clock
+	TraceID       string        // 단일 분산 추적 식별자
+	RootToken     string        // Depth 0 루트 부모 토큰
+	LeadSubject   string        // Depth 1 중간 관리자 주체 (예: "lead-01")
+	LeadScope     string        // Depth 1 위임 스코프 (예: "file:read file:write")
+	WorkerSubject string        // Depth 2 최종 워커 주체 (예: "worker-01")
+	WorkerScope   string        // Depth 2 위임 스코프 (예: "file:read" 또는 "file:write")
+	TargetFile    string        // 최종 워커가 접근할 파일 상대경로
+	Action        domain.Action // 최종 워커 수행 액션 (file:read 또는 file:write)
+	Data          []byte        // 쓰기 시 기록 데이터
+	TokenIssuer   token.TokenIssuer
+	TokenVerifier token.TokenVerifier
+	ClientReg     token.ClientRegistry
+	Clock         domain.Clock
 }
 
 // MultiHopSpawner 는 2-Hop 프로세스 연쇄 스폰 및 위임을 실행하는 오케스트레이터다.
@@ -47,11 +47,13 @@ type MultiHopSpawner struct {
 }
 
 // NewMultiHopSpawner 는 새 MultiHopSpawner 인스턴스를 생성한다.
-func NewMultiHopSpawner(cfg MultiHopConfig) *MultiHopSpawner {
-	if cfg.Timeout == 0 {
-		cfg.Timeout = 10 * time.Second
+func NewMultiHopSpawner(cfg MultiHopConfig) (*MultiHopSpawner, error) {
+	limits, err := cfg.Limits.Normalize()
+	if err != nil {
+		return nil, err
 	}
-	return &MultiHopSpawner{cfg: cfg}
+	cfg.Limits = limits
+	return &MultiHopSpawner{cfg: cfg}, nil
 }
 
 // ExecuteMultiHop 은 루트 -> 중간 관리자 -> 최종 워커로 이어지는 2-Hop 위임 및 실행을 수행한다.
@@ -121,8 +123,8 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 				"-replay-file", s.cfg.ReplayPath,
 				"-audit-file", s.cfg.AuditPath,
 			},
-			Audit:   s.cfg.Audit,
-			Timeout: s.cfg.Timeout,
+			Audit:  s.cfg.Audit,
+			Limits: s.cfg.Limits,
 		})
 		if err != nil {
 			return domain.ExitInternalError, fmt.Errorf("failed to create worker spawner: %w", err)

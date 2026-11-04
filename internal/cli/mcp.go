@@ -146,7 +146,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 			BinaryPath: binPath,
 			Args:       childArgs,
-			Timeout:    timeoutFlag,
+			Limits:     orchestrator.Limits{Timeout: timeoutFlag},
 			Audit:      auditWriter,
 		})
 		if err != nil {

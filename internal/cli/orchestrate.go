@@ -165,7 +165,7 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 		BinaryPath: binPath,
 		Args:       childArgs,
-		Timeout:    timeoutFlag,
+		Limits:     orchestrator.Limits{Timeout: timeoutFlag},
 		Audit:      auditWriter,
 	})
 	if err != nil {
