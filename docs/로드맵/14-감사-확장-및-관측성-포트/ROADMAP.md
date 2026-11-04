@@ -1,92 +1,125 @@
 # ROADMAP — 14 감사 확장 및 관측성 포트 (마스터 설계)
 
-> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 결정: [ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md), [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md)
+> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 결정: [ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md), [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) | 교정: [023번 보고서](../../보고서/023-14번로드맵_구조결함_및_진행가능성_검증보고서.md)
 
 ## 1. As-Is / To-Be
 
-| 구분 | As-Is (코드 확인) | To-Be (Phase 14) |
+| 구분 | As-Is (2026-11-04 코드 확인) | To-Be (Phase 14) |
 |---|---|---|
-| 운영 로그 결합 | `slog`는 [`pep/gateway.go`](../../../internal/authz/pep/gateway.go) `Config.Logger *slog.Logger`, [`app/builder.go`](../../../internal/app/builder.go), [`mcp/server.go`](../../../internal/mcp/server.go), [`cli/mcp.go`](../../../internal/cli/mcp.go), [`cmd/authz-harness/main.go`](../../../cmd/authz-harness/main.go)에서 직접 사용. `domain`은 비의존 | 코어(`pep.Config` 등)는 구체 타입 대신 **관측성 포트(`observe.Observer`)**만 받고, 구현은 어댑터(`slogadapter`, `oteladapter`, `noop`)로 분리 (합성 루트 `app.AppConfig`만 하위 호환 래핑 제공) |
-| 감사 무결성 | 해시 체인(`prev_hash`/`curr_hash`)과 flock. 중간 변조는 탐지 | 끝부분 삭제와 전체 재작성도 **서명 체크포인트**로 탐지. 로테이션 시 제네시스 `prev_hash` 승계 검증 유지 |
-| 감사 내용 | 이벤트·사유·`jti` 등. 도구 인자·결과 정보 부족 | `schema_version`과 인자·결과 **SHA-256 해시(`arg_hash`, `result_hash`)**, 원문·원시 토큰 비노출 |
-| 상관 | 문자열 `trace_id` ([`domain/event.go`](../../../internal/domain/event.go)) | 기존 `trace_id` 유지 + W3C 호환 `span_id`/`parent_span_id`, 자식 프로세스에 `stdin` 프레임으로 전달 |
-| 뷰 | `audit timeline` (`renderProcessTree`가 등장 순서대로 선형 들여쓰기만 수행) | 실제 `caller_id → agent_id` 및 `parent_span_id → span_id` 관계를 반영한 부모→자식 **위임 트리 뷰**(`audit tree`) 추가 |
-| 시나리오 | 39대 + 로드맵 10~13 그룹 | 신규 G13 그룹 (`E2E-61`~`E2E-66`) |
+| 운영 로그 결합 | 코어 중 [`pep/gateway.go`](../../../internal/authz/pep/gateway.go)만 `Config.Logger *slog.Logger`(99행)로 slog에 직접 의존한다(호출 8곳). `AppConfig.Logger`는 설정하는 호출자가 0건이라 PEP는 늘 `slog.Default()`를 쓴다. 비코어인 `app`, `mcp`, `cli/mcp.go`, `cmd`, `confinement/seatbelt_darwin.go`도 slog를 쓴다 | 코어는 **관측성 포트(`observe.Observer`)**만 받는다. 구현은 `slogadapter` 하나다. `pep.Config`와 `AppConfig`의 `Logger`는 `Observer`로 바뀐다. 13번 `StageObserver`(시험 훅)는 그대로 둔다 |
+| 감사 무결성 | 해시 체인(`prev_hash`/`curr_hash`)과 flock. 중간 변조는 탐지한다. 꼬리 절단·전체 재작성은 못 잡고, **파일이 없으면 VALID**([`audit.go`](../../../internal/audit/audit.go) 303행) | Zone A 감사 전용 키의 **서명 체크포인트**로 꼬리 절단·전체 재작성·파일 삭제를 탐지한다 |
+| 감사 내용과 보호 범위 | 해시는 9필드만 보호한다(46~60행). `token_jti`, `agent_id`, `metadata`는 고쳐도 VALID | 항상 `schema_version: 2`. v2 해시는 `token_jti`·`agent_id`·인자·결과 **SHA-256 지문(`arg_hash`, `result_hash`)**까지 보호한다. 다운그레이드는 거부한다. `metadata`는 계속 비보호(한계) |
+| authn 감사 오류 | `issuer.go` 117행, `exchange.recordAuditDenied` 267행, `verifier.logAudit` 276행이 `_ =`로 오류를 버린다. 검증 **성공** 경로(243행)는 Fail-Open | 세 곳 모두 감사 실패 시 `AUDIT_LOG_FAILED`(15) |
+| 위임 뷰 | `audit timeline`의 `renderProcessTree`(`timeline.go` 101~129행)는 등장 순서대로 선형 들여쓰기만 한다 | 토큰 계보(`parent_jti → child_jti`)로 그린 **위임 트리 뷰**(`audit tree`, 보기 전용) |
+| 시나리오 | 60대(`E2E-01`~`E2E-60`, `G1`~`G12`) | G13 추가(`E2E-61`~`E2E-66`), 66대 |
 
 ## 2. 아키텍처 및 신뢰 경계
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '11px'}}}%%
 flowchart TD
-  A["app (합성 루트)"] --> B["pep / orchestrator"]
-  A --> C["observe 어댑터 (slogadapter, oteladapter, noop)"]
-  B --> D["observe 포트 (internal/observe)"]
+  A["app (합성 루트)"] --> B["pep"]
+  A --> C["observe/slogadapter"]
+  B --> D["observe 포트"]
   C --> D
-  B --> E["audit (독립 Fail-Closed 경로)"]
-  E --> K[("서명 체크포인트 (Zone A 전용 감사 서명 키)")]
+  B --> E["audit (Fail-Closed)"]
+  F["cli audit checkpoint/verify"] --> G["audit/checkpoint (Zone A 감사 키)"]
+  G --> E
 ```
 
-- **포트와 감사는 서로 호출하지 않는다.** 감사는 샘플링·비동기·드롭이 없는 fail-closed 경로이고, 포트는 `SafeObserver`로 감싼 best-effort다.
-- **서명 키는 Zone A에 두고 토큰 서명 키 저장소(`signing_keys.priv.json`)와 물리적으로 분리된 감사 전용 키 파일(`audit_signing_key.priv.json`)로 관리**한다. 이로써 토큰 서명 키 회전·폐기(`keys rotate`/`revoke`)가 감사 체크포인트 검증에 영향을 주지 않으며, 워커(`internal/subagent`)는 접근할 수 없다.
-- **원시 토큰은 포트 속성에도 금지**한다. 속성 필터(`SanitizeAttrs`)를 포트 계층에 두어 `jti`와 요약만 통과시킨다([ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md) B-7).
-- **코어는 slog·OTel을 import하지 않는다**: `domain`, `authn`, `authz`(`pap`, `pip`, `pdp`, `pep`, `state`), `jail`, `audit`.
+- **포트와 감사는 서로 호출하지 않는다.** 감사는 샘플링·비동기·드롭이 없는 Fail-Closed 경로다. 포트는 `SafeObserver`로 감싼 best-effort다.
+- **감사 서명 키는 토큰 서명 키와 분리한다.** Zone A `audit_signing_key.priv.json`, Zone B `audit_verification_key.pub.json`이며, 토큰 키 회전·폐기(`keys rotate`/`revoke`)와 간섭하지 않는다. 서명 코드는 `internal/audit/checkpoint` 패키지에 두고, 워커(`internal/subagent`)는 이를 import하지 않는다(`TC-060-02` 확대).
+- **원시 토큰 탐지 규칙은 `domain`에 하나만 둔다.** 감사 검증과 포트 속성 필터(`SanitizeAttrs`)가 같은 규칙을 쓴다([ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md) B-7).
+- **코어는 slog·OTel을 import하지 않는다** (`TC-140-01`): `domain`, `authn/...`, `authz/...`, `jail`, `audit/...`, `storage`, `observe`(포트 패키지). `confinement`는 OS 어댑터라 제외한다.
+- **범위 밖으로 명시하는 한계**:
+  - `metadata`·`step`·`error_class`는 v2에서도 해시 비보호다. 그래서 이를 근거로 그린 `audit tree`는 보기 전용이다.
+  - 체크포인트는 서명 시점까지만 보호한다. 그 뒤의 꼬리 절단과, 옛 체크포인트로 되돌리는 공격(rollback)은 검증자가 최신 체크포인트를 따로 보관해야 막을 수 있다.
+  - 인자·결과 지문은 비솔트 SHA-256이라 추측하기 쉬운 입력은 사전 대입으로 되돌릴 수 있다.
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: 신규 `internal/observe`(`port.go`, `slogadapter`, `oteladapter`), `pep.Config.Observer`(기존 `Logger *slog.Logger` 제거) 및 `app.AppConfig`(`Observer` 추가 및 `Logger` 자동 래핑), `internal/audit`(스키마 v2 확장, `checkpoint.go`, 제네시스 해시 승계 검증), `internal/cli`(`audit checkpoint`, `audit tree`), `internal/ui/tree.go`, `internal/subagent`(`parent_span_id` 프레임 필드), `internal/harness`(`TC-140-01` 가드와 G13).
-- **무영향**: PDP·PEP 판정 로직, 토큰 서명 키 상태머신(`internal/authn/keys`), 기존 감사 레코드의 검증 가능성(**구버전 v1 레코드가 새 검증기에서 100% `VALID`**), `go.mod` 외부 의존성 0개 유지, 기존 시나리오 판정 기준.
+- **변경**:
+  - 신규: `internal/observe`(`port.go`, `slogadapter`), `internal/audit/checkpoint`, `internal/ui/tree.go`, `domain`의 `DataDigest`·원시 토큰 규칙·이유 코드 2종
+  - 수정: `pep.Config.Observer`, `app.AppConfig.Observer`, `internal/audit`(v2), `authn`(감사 오류 3곳), `internal/cli`(`audit checkpoint`, `audit verify --checkpoint`, `audit tree`), `cmd`(`NewAuditRunner` 경로), `internal/harness`(`TC-140-01`, `TC-080-01`·`TC-060-02` 확대, G13)
+- **무영향**:
+  - PDP·PEP 판정 로직
+  - 토큰 서명 키 상태 머신(`internal/authn/keys`)
+  - 기존 v1 감사 레코드의 검증 가능성
+  - `SubagentRequest` 프레임
+  - `audit timeline` 출력
+  - `go.mod`(외부 의존성 0개)
+  - 기존 60대 시나리오의 판정 기준
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가
 
 | 위험 | 방어책 |
 |---|---|
-| `010`에서 `pep.Config.Logger *slog.Logger`를 하위 호환용으로 남겨두어 `020`의 AST 가드(`TC-140-01`)가 실패 | `pep.Config`에서는 `Logger`를 완전히 제거하고 `Observer observe.Observer`로 일원화. 하위 호환 래핑은 합성 루트인 `app.AppConfig`에서만 수행하고, `gateway_test.go`의 `TC-060-05-6`은 `slogadapter.New(testLogger)`를 주입하도록 갱신 |
-| 스키마 변경으로 기존 `audit.jsonl` 및 `TestQuadAssertion_SuccessCase`가 `INTEGRITY_BROKEN` | `NormalizeEvent`에서 `ArgHash`/`ResultHash`가 비어 있는 기존 이벤트는 `SchemaVersion <= 1`을 그대로 유지하여 기존 9필드 해시 공식 결과를 100% 보존. `SchemaVersion == 2`일 때만 `\|v2\|argHash\|resultHash` 해시 공식 적용 |
-| 감사 체크포인트 키를 `signing_keys.priv.json`에 섞어 넣어 토큰 키 회전·폐기 시 체크포인트나 토큰 발급이 깨짐 | `internal/authn/keys`를 수정하지 않고 `internal/audit/checkpoint.go`에서 `storage.AtomicFileStore` 기반으로 Zone A 전용 `audit_signing_key.priv.json`(`0600`) 및 Zone B `audit_verification_key.pub.json`(`0644`)을 독립 관리 |
-| 해시 체인만으로는 끝부분 삭제(tail truncation)와 전체 재작성(full rewrite)을 못 잡음 | Zone A Ed25519 서명 체크포인트(줄 수 + HeadHash + 타임스탬프 + kid + sig)를 기록하고, 검증 시 줄 수 부족(`ReasonAuditTruncationDetected`) 및 해시·서명 불일치(`ReasonAuditCheckpointMismatch`)를 구분 적발 |
-| 로테이션 시 새 파일 첫 레코드가 `prev_hash: ""`로 시작해 체인 단절 | `VerifyHashChainWithGenesis(path, expectedGenesisPrevHash)` 및 `RotateJSONLWriter`를 통해 새 파일의 첫 레코드 `prev_hash`가 이전 파일의 체크포인트 `HeadHash`를 승계했는지 검증 |
-| `ui/timeline.go`처럼 등장 순서대로 선형 들여쓰기만 하여 형제 워커가 부모·자식처럼 왜곡됨 | `internal/ui/tree.go`는 `ParentSpanID → SpanID`, `parent_sub → child_sub`, `caller_id → agent_id` 간선을 그래프로 재구성해 형제 워커(`worker-01`, `worker-02`)를 동일 부모 아래 나란히 렌더링 |
-| OTel SDK 도입이 `go.mod` 외부 의존성을 오염시키거나 오프라인 샌드박스 빌드를 깨뜨림 | `internal/observe/oteladapter`는 외부 패키지 추가 없이 표준 라이브러리 기반 W3C Trace Context / OTLP JSON Span Recorder 어댑터로 구현하여 `go.mod` 서드파티 의존성 0개 원칙을 유지 |
-| 포트 호출 실패가 요청 실패로 번짐 | `SafeObserver` 래퍼가 panic과 에러를 복구하여 포트 장애 시에도 PEP 인가 결과와 Fail-Closed 감사 기록이 영향받지 않음을 검증(`TC-010-04`, `E2E-65`) |
+| `pep.Config`에 `*slog.Logger`가 남아 `TC-140-01` 실패 | `Logger`를 완전히 제거하고 `Observer`로 일원화한다. `TC-060-05-6`은 `slogadapter.New(testLogger)`를 주입한다(010) |
+| Observer와 `StageObserver`를 합쳐 TOCTOU 시험 훅의 panic이 삼켜짐 | 둘은 따로 둔다. `StageObserver`는 감싸지 않는다(010 TC-010-06) |
+| v2 필드를 v1 레코드에 끼워 넣어도 VALID | 항상 v2로 쓰고, 검증기가 v1의 v2 필드·알 수 없는 버전·v2 뒤 v1을 거부한다(030) |
+| 스키마 변경으로 기존 `audit.jsonl`이 `INTEGRITY_BROKEN` | v1 레코드는 v1 공식 그대로 검증하고, writer는 마지막 줄의 `curr_hash`를 승계한다(030 TC-030-01·02, E2E-66) |
+| 지문 함수가 `audit`에 있어 15번 PDP가 `audit`을 import | `domain.DataDigest`로 둔다(030) |
+| 감사 키를 토큰 키 저장소에 섞어 키 회전 시 체크포인트가 깨짐 | 별도 파일과 별도 패키지 `internal/audit/checkpoint`를 쓴다(040) |
+| 파일을 지우거나 비우면 검증이 VALID | 체크포인트 검증은 줄 수 부족(0 포함)을 `AUDIT_TRUNCATION_DETECTED`로 판정한다(040 TC-040-03) |
+| 체크포인트 검증 재료(공개키·체크포인트)가 없을 때 통과 | `AUDIT_CHECKPOINT_MISMATCH`(Fail-Closed)로 판정하고, 검증 측은 키를 생성하지 않는다(040 TC-040-04·06, E2E-63) |
+| 체크포인트를 만드는 도중 다른 프로세스가 기록해 줄 수와 HeadHash가 어긋남 | `<audit>.lock` 공유 잠금 안에서 둘을 함께 읽는다. 잠금 안에서 다른 잠금은 잡지 않는다(040) |
+| 트리가 형제 워커나 같은 주체의 두 토큰을 잘못 합침 | 노드를 jti로 하고, 간선은 `parent_jti → child_jti` 하나만 쓴다(050 TC-050-02·03) |
+| 포트 호출 실패가 요청 실패로 번짐 | `SafeObserver`가 panic을 복구한다(010 TC-010-04, E2E-65) |
+| authn 거부 경로의 감사 실패가 조용히 사라짐 | 세 기록 함수가 오류를 반환하고 `AUDIT_LOG_FAILED`(15)로 올린다(020) |
 
 ## 5. 4층위 검증 설계
 
 | 층위 | 대상 | 방법 |
 |:---:|---|---|
-| 1 | 반복 수동 검증 배제 | `go test -race ./internal/audit/... ./internal/observe/...` 등 스크립트화 |
-| 2 | 단위·구조 | AST 가드(`TC-140-01`: 코어 `log/slog`·OTel import 금지), 스키마 버전별 해시 table-driven, `SanitizeAttrs` 원시 토큰 마스킹 테스트 |
-| 3 | 상태·정합성 | 구버전 v1 픽스처 `VALID`, 끝부분 삭제·재작성·로테이션 시나리오, 체크포인트 Ed25519 서명 검증 |
-| 4 | 통합 | G13(`E2E-61`~`E2E-66`) 및 기존 시나리오 전체 회귀 |
+| 1 | 반복 수동 검증 배제 | `go test -race ./internal/audit/... ./internal/observe/... ./internal/authz/pep` 등 스크립트화 |
+| 2 | 단위·구조 | AST 가드(`TC-140-01`, 확대된 `TC-080-01`·`TC-060-02`), 버전별 해시 table-driven, `SanitizeAttrs` 마스킹 |
+| 3 | 상태·정합성 | v1 픽스처 `VALID`, 다운그레이드 거부, 꼬리 절단·재작성·파일 삭제, 체크포인트 Ed25519 서명 |
+| 4 | 통합 | G13(`E2E-61`~`E2E-66`) 및 기존 60대 회귀 |
 
 ## 6. 단계 의존 관계
 
-`010 → 020 → 030 → 040 → 050 → 060 → 070 → 080`. 030~040(감사)과 010~020(포트)은 독립이나 번호순 실행을 기본으로 한다.
+`010 → 020 → 030 → 040 → 050 → 070 → 080` (`060` `Dropped`). 010~020(포트·가드)과 030~040(감사)은 서로 독립이지만, 번호순 실행을 기본으로 한다.
 
 ## 7. 단계 분해표 (구현지시서 작성의 입력)
 
 | 단계 | 목표 | 완료 기준 | 인수 시나리오 (입력 → 기대 결과) |
 |:---:|---|---|---|
-| **010** | 관측성 포트, `slogadapter`·`noop`, `pep.Config.Observer` 전환 | 기존 stderr 출력 문구(`pep stage entering` 등)·테스트 불변, `pep`에 `log/slog` import 0건 | 포트에 noop 주입 → 인가 결과 불변. `slogadapter` → 기존 로그 문구·필드(`caller_id` 등) 유지 |
-| **020** | AST 가드(`TC-140-01`): 코어의 `log/slog`·OTel import 금지 | 가드가 위반을 검출 | 코어 패키지에 `log/slog` import 추가 → 가드 테스트 즉시 실패 |
-| **030** | `schema_version`, 인자·결과 해시(`arg_hash`, `result_hash`) | 구버전 픽스처 `VALID`, 신규 필드에 원문·원시 JWT 없음 | 구버전 `audit.jsonl` → `VALID`. 인자에 비밀 문자열 → 감사에 SHA-256 해시만 존재 |
-| **040** | 감사 전용 서명 키(Zone A), 체크포인트, 로테이션 연결 | 끝부분 삭제·전체 재작성 탐지, 토큰 키 회전과 무간섭 | 마지막 N줄 삭제 → `AUDIT_TRUNCATION_DETECTED(15)`. 로테이션 전후 연속 검증 `VALID` |
-| **050** | `audit tree`, W3C 호환 `span_id`/`parent_span_id`, stdin 전파 | 부모→자식 트리가 실제 위임 계보와 일치, 환경변수 전달 없음 | 2-Hop 실행 → 트리 뷰가 Depth 0→1→2 계보와 일치, 자식 프로세스 환경에 `TRACEPARENT` 없음 |
-| **060** | 표준 라이브러리 기반 OTel 스팬 어댑터(`oteladapter`), 속성 필터 | 코어 import 가드 통과, `go.mod` 외부 의존성 0건, 원시 토큰 0건 | `oteladapter` 주입 → 인가 결과 불변, 수집된 스팬에 JWT 정규식 매칭 0건 |
-| **070** | G13(`E2E-61`~`E2E-66`): 절단, 재작성, 로테이션, 해시, 포트 장애, 하위 호환 | 6대 시나리오 `PASS` | 포트 구현이 에러·panic → 인가 결과 불변, 감사 정상 기록 |
-| **080** | 전체 회귀, 문서 동기화 | `go test -race ./...` 통과, AGENTS.md 로깅 서술 개정안 제출 | `run --scenario all` → 종료 코드 `0` |
+| **010** | 포트(4메서드, `OnError`), `slogadapter`, `SafeObserver`, `SanitizeAttrs`, `Observer` 전환, ADR 0002 `Accepted` | 기존 stderr 문구·수준·필드 불변, `pep`에 `log/slog` import 0건 | noop 주입 → 판정 불변. panic Observer → 판정·감사 정상 |
+| **020** | `TC-140-01`, authn 감사 오류 무시 3곳 제거, `TC-080-01` 확대 | 가드가 위반 검출, 감사 실패 → 15 | 유효 토큰 검증 + 감사 실패 → `AUDIT_LOG_FAILED` |
+| **030** | 항상 v2, v2 공식, 다운그레이드 거부, `domain.DataDigest`, PEP 지문 | v1 픽스처 `VALID`, v2 필드 변조·주입 탐지, 평문 0건 | v1에 `arg_hash` 주입 → `INTEGRITY_BROKEN` |
+| **040** | `internal/audit/checkpoint`, 이유 코드 2종, `audit checkpoint`·`verify --checkpoint` | 꼬리 절단·재작성·파일 삭제·키 부재 탐지, 토큰 키와 무간섭 | 마지막 줄 삭제 → `AUDIT_TRUNCATION_DETECTED(15)` |
+| **050** | `audit tree`(jti 노드, `parent_jti → child_jti`) | 트리가 실제 교환 계보와 일치 | 2-Hop → Depth 0→1→2, 형제 → 같은 Depth 1 |
+| **060** | (`Dropped`) | - | - |
+| **070** | G13(`E2E-61`~`E2E-66`) | 6대 `PASS`, `lastScenarioID = 66` | panic Observer → 판정 불변, 감사 정상 |
+| **080** | 전체 회귀, 문서 동기화 | `go test -race ./...` 통과, AGENTS.md 로깅 서술 개정안 **제안** | `run --scenario all` → 종료 코드 `0` |
 
 ## 8. 선행 조건·결정 확정 사항
 
-- **선행 조건**: [ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md) `Accepted` 전환 (착수 시 미결 4건을 아래 확정안으로 반영 후 진행).
-- **사전 확정된 설계 결정 (구현 시 혼선 방지)**:
-  1. **포트 인터페이스 및 패키지명**: `internal/observe.Observer`로 확정하며, 단계 시작/종료(`OnStageStart`/`OnStageEnd`), 실행 종료(`OnExecutionEnd`), 감사 기록 오류(`OnAuditError`) 최소 연산과 `SafeObserver` panic 복구 래퍼로 구성한다.
-  2. **상관 ID 및 해시 체인 호환**: 기존 `TraceID` 문자열과 v1 9필드 해시 공식은 100% 그대로 유지하고, W3C 호환 `SpanID`/`ParentSpanID`(16-hex)를 선택적 필드로 추가하며 `oteladapter` 내부에서 `TraceID`를 32-hex W3C 형식으로 정규화 매핑한다.
-  3. **인자·결과 해시 방식 (030)**: 결정론적 사후 대조를 위해 `len(data) > 0`일 때 표준 SHA-256 16진수 지문(`sha256:<hex>`)을 `ArgHash`/`ResultHash`에 기록하고 `SchemaVersion = 2`로 마킹한다(원문 기록 절대 금지).
-  4. **감사 서명 키 분리 및 체크포인트 (040)**: 토큰 서명 키(`signing_keys.priv.json`)와 섞이지 않도록 Zone A의 `audit_signing_key.priv.json`(`0600`) 및 Zone B의 `audit_verification_key.pub.json`(`0644`)에 감사 전용 Ed25519 키(`kid: "audit-ckpt-key-..."`)를 분리 저장하며, CLI(`audit checkpoint`) 및 프로그래밍 API(`CreateCheckpoint`)로 체크포인트를 생성한다.
-  5. **OTel 어댑터 무의존성 원칙 (060)**: `go.mod`의 서드파티 의존성 0개 원칙과 오프라인 샌드박스 호환성을 지키기 위해 `internal/observe/oteladapter`는 외부 SDK를 `go get`하지 않고 표준 라이브러리만으로 W3C/OTLP 호환 인메모리·JSON 스팬 익스포터를 구현한다.
+- **선행 조건**: 로드맵 13 `Done`(충족). [ADR 0002](../../adr/0002-관측성-포트-분리-및-오픈텔레메트리-전환.md)의 `Accepted` 전환과 §6 개정은 010의 산출물이다.
+- **사전 확정된 설계 결정**:
+  1. **포트**: `internal/observe.Observer`(`OnStageStart`, `OnStageEnd`, `OnExecutionEnd`, `OnError`) + `Attr` + `SafeObserver`. 어댑터는 `observe/slogadapter` 하나다.
+  2. **상관 ID**: 기존 `trace_id` 문자열 그대로다. W3C `span_id`/`parent_span_id`와 `traceparent` 전파는 두지 않는다(023 결정 1).
+  3. **v2 해시 (030)**: v1 9필드 + `token_jti|agent_id|arg_hash|result_hash`. 새 레코드는 항상 v2이고, 지문은 `domain.DataDigest`(`sha256:<hex>`)다. 원문 기록은 금지한다(023 결정 2).
+  4. **체크포인트 (040)**: 감사 전용 Ed25519 키(`kid: audit-ckpt-<hex>`), Zone B `audit_checkpoint.json` 1개. CLI `audit checkpoint`와 API `checkpoint.Create`로 만든다. 로테이션은 없다(023 결정 3).
+  5. **OTel (060)**: `Dropped`. `go.mod`는 바뀌지 않는다.
 
 ## 9. 인수인계 (다음 에이전트용)
 
-- **코드 사실 확인 포인터**: [`audit/audit.go`](../../../internal/audit/audit.go)(`ComputeEventHash`, `NormalizeEvent`, `VerifyHashChain`), [`authz/pep/gateway.go`](../../../internal/authz/pep/gateway.go) 및 [`gateway_test.go`](../../../internal/authz/pep/gateway_test.go)(`TC-060-05-6` 로그 검증 문구), [`harness/architecture_test.go`](../../../internal/harness/architecture_test.go) 가드 형식, [`app/builder.go`](../../../internal/app/builder.go).
-- **금지 사항**: 감사를 OTel로 대체·연결, 감사 경로에 샘플링·비동기 도입, 서명 키의 워커 접근, 구버전 v1 레코드 검증 불가화, 원시 토큰을 속성·로그에 기록, `pep.Config`에 `*slog.Logger` 잔류.
-- **착수 순서**: ADR 0002 `Accepted` 전환 → `010`부터 한 단계씩 구현. `080` 마감 시 [AGENTS.md](../../../AGENTS.md) 로깅 삼분 서술 개정을 **제안**으로 보고(직접 수정은 별도 지시).
-- **접점**: [로드맵 16](../16-도구-종류-확장-및-egress-통제/README.md)은 도구 인자 해시(`030`)를 활용하는 것이 권장된다.
+- **코드 사실 확인 포인터**:
+  - [`audit/audit.go`](../../../internal/audit/audit.go): `jwtTokenPattern` 20행, `ComputeEventHash` 46행, `NormalizeEvent` 63행, `Log` 211행, `VerifyHashChain` 300행
+  - [`authz/pep/gateway.go`](../../../internal/authz/pep/gateway.go): `Config` 93~102행, `runStage`, Stage 4 337행, `refundBudget` 397행, `finalize` 409행, `logEvent` 470행
+  - [`gateway_test.go`](../../../internal/authz/pep/gateway_test.go): `TC-060-05-6` 1274행
+  - [`harness/architecture_test.go`](../../../internal/harness/architecture_test.go): `TC-060-02` 72행, `TC-080-01` 210행
+  - [`app/builder.go`](../../../internal/app/builder.go): `AppConfig` 24행, PEP 조립 202행
+  - [`cli/audit.go`](../../../internal/cli/audit.go)
+  - [`cmd/authz-harness/main.go`](../../../cmd/authz-harness/main.go) 126행
+- **금지 사항**:
+  - 감사를 텔레메트리로 대체하거나 연결하기
+  - 감사 경로에 샘플링·비동기 넣기
+  - 서명 키·`internal/audit/checkpoint`를 워커가 다루게 하기
+  - v1 레코드를 검증 불가로 만들기
+  - 원시 토큰을 속성·로그에 남기기
+  - `pep.Config`에 `*slog.Logger`를 남기기
+  - v2 필드를 해시 밖에 두기
+- **착수 순서**: `010`(ADR 0002 전환 포함)부터 한 단계씩 진행한다. `080` 마감 때 [AGENTS.md](../../../AGENTS.md) 로깅 삼분 서술 개정은 **제안**으로만 보고한다.
+- **접점**: [로드맵 15](../15-pdp-승인-결정-ask/README.md)(승인 `ArgHash`)와 [로드맵 16](../16-도구-종류-확장-및-egress-통제/README.md)(`exec:run` 인자)은 `domain.DataDigest`를 써야 한다. 각 로드맵의 점검 차례에 반영한다.
