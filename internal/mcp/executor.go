@@ -67,7 +67,7 @@ func (e *SubprocessExecutor) ExecuteTool(ctx context.Context, req *ToolCallReque
 	}
 
 	// 2. Response 프레임 파싱 실패 시 stderr 또는 raw 에러 반환
-	return MapSubprocessError(spawnRes.ExitCode, "", spawnRes.StderrRaw), nil
+	return MapSubprocessError(spawnRes.ExitCode, string(spawnRes.Reason), spawnRes.StderrRaw), nil
 }
 
 func generateTraceID() string {

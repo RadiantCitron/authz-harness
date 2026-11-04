@@ -1,6 +1,6 @@
 # [구현지시서 030] 소비자 배선 (MCP·CLI·UI)
 
-> **문서 상태**: `Draft`
+> **문서 상태**: `Done`
 > **상위 대시보드**: [10번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **선행 조건**: [020_스포너_감독_계층_일괄_구현.md](020_스포너_감독_계층_일괄_구현.md) 완료
 > **후속 단계**: [040_결함_워커_전용_실행파일_및_실행모드_선언.md](040_결함_워커_전용_실행파일_및_실행모드_선언.md)
@@ -84,7 +84,7 @@
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] MCP 강제 종료 경로 `Reason` 전파
-- [ ] CLI `Termination`·`Reason` 출력, `exitCodeName(17)`
-- [ ] UI 실행 감독 줄과 관문 `GateSkipped` 처리, `G9` 해설
-- [ ] 대시보드 갱신 후 변경 파일만 커밋
+- [x] MCP 강제 종료 경로 `Reason` 전파
+- [x] CLI `Termination`·`Reason` 출력, `exitCodeName(17)`
+- [x] UI 실행 감독 줄과 관문 `GateSkipped` 처리, `G9` 해설
+- [x] 대시보드 갱신 후 변경 파일만 커밋

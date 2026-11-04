@@ -441,6 +441,8 @@ func exitCodeName(c domain.ExitCode) string {
 		return "ExitAuditFailure"
 	case domain.ExitInternalError:
 		return "ExitInternalError"
+	case domain.ExitResourceLimit:
+		return "ExitResourceLimit"
 	default:
 		return "Unknown"
 	}

@@ -195,10 +195,14 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	fmt.Fprintf(r.stdout, "=== Orchestrate Spawn Execution ===\n")
 	fmt.Fprintf(r.stdout, "Trace ID: %s\n", result.TraceID)
 	fmt.Fprintf(r.stdout, "Child Exit Code: %d\n", result.ExitCode)
+	fmt.Fprintf(r.stdout, "Termination: %s\n", result.Termination)
+	if result.Reason != "" {
+		fmt.Fprintf(r.stdout, "Reason: %s\n", result.Reason)
+	}
 	fmt.Fprintf(r.stdout, "Duration: %v\n", result.Duration)
 
 	if result.Response != nil {
-		if result.Response.Reason != "" {
+		if result.Response.Reason != "" && result.Reason == "" {
 			fmt.Fprintf(r.stdout, "Reason: %s\n", result.Response.Reason)
 		}
 		if result.Response.Output != "" {

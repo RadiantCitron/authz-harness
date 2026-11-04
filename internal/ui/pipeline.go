@@ -25,11 +25,46 @@ type GateInfo struct {
 	Detail     string
 }
 
+// SupervisionInfo 는 부모 스포너의 실행 감독(시간·출력 한계) 결과다. 인가 관문과 별개다.
+type SupervisionInfo struct {
+	Blocked bool
+	Reason  domain.Reason // RESOURCE_TIMEOUT | RESOURCE_OUTPUT_LIMIT
+	Detail  string
+}
+
+// ComputeSupervision 은 시나리오 결과에서 자원 한계 종료 여부를 도출한다.
+func ComputeSupervision(res harness.ScenarioResult) SupervisionInfo {
+	reason := res.Assertion.AuditActualReason
+	if reason == "" {
+		reason = res.Metadata.Expected.Audit.ExpectedReason
+	}
+	switch reason {
+	case domain.ReasonResourceTimeout:
+		return SupervisionInfo{Blocked: true, Reason: reason, Detail: "시간 상한 초과로 프로세스 그룹 종료"}
+	case domain.ReasonResourceOutputLimit:
+		return SupervisionInfo{Blocked: true, Reason: reason, Detail: "출력 상한 초과로 프로세스 그룹 종료"}
+	}
+	return SupervisionInfo{}
+}
+
+// RenderSupervisionLine 은 관문 표 아래에 붙는 "실행 감독" 한 줄을 만든다.
+func RenderSupervisionLine(s SupervisionInfo) string {
+	if s.Blocked {
+		return fmt.Sprintf("  실행 감독: 차단 (%s) — %s\n", s.Reason, s.Detail)
+	}
+	return "  실행 감독: 정상\n"
+}
+
 // ComputePipelineGates 는 시나리오 결과와 메타데이터로부터 6단계 관문 상태를 도출한다.
 func ComputePipelineGates(res harness.ScenarioResult) []GateInfo {
 	meta := res.Metadata
 	assertion := res.Assertion
 	expected := meta.Expected
+
+	// 실행 감독 종료는 인가 관문의 결과가 아니므로 모든 관문을 SKIPPED 로 표시한다.
+	if ComputeSupervision(res).Blocked {
+		return skippedGates()
+	}
 
 	// 차단이 발생할 관문 결정 (0~5, 차단 없으면 -1)
 	blockedGate := -1
@@ -176,6 +211,16 @@ func ComputePipelineGates(res harness.ScenarioResult) []GateInfo {
 		gates[5].Detail = "감사 기록 및 4중 무결성 검증 완료"
 	}
 
+	return gates
+}
+
+// skippedGates 는 6개 관문을 모두 SKIPPED 로 반환한다 (실행 감독에서 종료된 경우).
+func skippedGates() []GateInfo {
+	names := []string{"Gate 0: 컨텍스트 검증", "Gate 1: 토큰 & 서명", "Gate 2: 위임 & 스코프", "Gate 3: 실시간 Grant", "Gate 4: Jail 경로격리", "Gate 5: 감사 & I/O"}
+	gates := make([]GateInfo, 6)
+	for i := range gates {
+		gates[i] = GateInfo{GateNumber: i, Name: names[i], Status: GateSkipped, Detail: "실행 감독에서 종료됨 — 관문 판정과 무관"}
+	}
 	return gates
 }
 

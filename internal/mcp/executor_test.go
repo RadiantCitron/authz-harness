@@ -101,3 +101,31 @@ func TestSubprocessExecutor_Denied(t *testing.T) {
 		t.Errorf("expected TOKEN_INSUFFICIENT_SCOPE in text, got: %v", res.Content[0].Text)
 	}
 }
+
+// TC-030-01/02: 강제 종료(Response 없음)에서도 스포너가 정한 Reason 이 도구 오류에 실린다.
+func TestSubprocessExecutor_ResourceLimitReasonPropagation(t *testing.T) {
+	jwt := "eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl"
+	for _, reason := range []domain.Reason{domain.ReasonResourceTimeout, domain.ReasonResourceOutputLimit} {
+		t.Run(string(reason), func(t *testing.T) {
+			mock := &mockSpawner{result: &orchestrator.SpawnResult{
+				ExitCode: 17, Reason: reason, StderrRaw: "killed " + jwt,
+			}}
+			res, err := NewSubprocessExecutor(mock).ExecuteTool(context.Background(), &ToolCallRequest{
+				ToolName: "file_read", Action: domain.ActionFileRead, Path: "a.txt", AuthzToken: jwt,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			text := res.Content[0].Text
+			if !res.IsError || !strings.Contains(text, "["+string(reason)+"]") || !strings.Contains(text, "exit code 17") {
+				t.Fatalf("unexpected text: %q", text)
+			}
+			if res.StructuredContent == nil || res.StructuredContent.ExitCode != 17 || res.StructuredContent.Reason != reason {
+				t.Fatalf("unexpected structured: %+v", res.StructuredContent)
+			}
+			if ContainsRawToken(text) || ContainsRawToken(res.StructuredContent.Message) {
+				t.Fatal("raw token leaked")
+			}
+		})
+	}
+}

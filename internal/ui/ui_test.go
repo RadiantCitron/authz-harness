@@ -132,3 +132,37 @@ func TestComputePipelineGates(t *testing.T) {
 		t.Errorf("Gates 3, 4, 5 should be SKIPPED")
 	}
 }
+
+func resourceResult(reason domain.Reason) harness.ScenarioResult {
+	r := sampleResult("E2E-X", "G9", "자원 한계", domain.ExitResourceLimit, domain.ExitResourceLimit, true)
+	r.Assertion.AuditActualReason = reason
+	return r
+}
+
+// TC-030-03/04: 자원 한계는 관문 PASS 를 칠하지 않고 실행 감독 줄로 표시된다.
+func TestSupervision_ResourceLimit(t *testing.T) {
+	res := resourceResult(domain.ReasonResourceTimeout)
+	for i, g := range ComputePipelineGates(res) {
+		if g.Status != GateSkipped {
+			t.Errorf("gate %d expected SKIPPED, got %s", i, g.Status)
+		}
+	}
+	s := ComputeSupervision(res)
+	if !s.Blocked || s.Reason != domain.ReasonResourceTimeout {
+		t.Fatalf("unexpected supervision: %+v", s)
+	}
+	if !strings.Contains(RenderScenarioExplain(res), "실행 감독: 차단 (RESOURCE_TIMEOUT)") {
+		t.Fatal("explain output lacks supervision line")
+	}
+}
+
+// TC-030-05: 기존 시나리오의 관문 표시는 그대로다.
+func TestSupervision_ExistingScenariosUnchanged(t *testing.T) {
+	res := sampleResult("E2E-22", "G5", "위임 스코프 차단", domain.ExitAuthzDenied, domain.ExitAuthzDenied, true)
+	if ComputeSupervision(res).Blocked {
+		t.Fatal("must not be blocked")
+	}
+	if g := ComputePipelineGates(res); g[2].Status != GateBlocked {
+		t.Fatalf("gate 2 expected BLOCKED, got %s", g[2].Status)
+	}
+}

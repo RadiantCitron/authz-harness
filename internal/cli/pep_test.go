@@ -429,3 +429,10 @@ func TestPEPCLI_JSONOutputFormat(t *testing.T) {
 		t.Fatalf("expected exit_code %d, got: %v", domain.ExitSuccess, parsed["exit_code"])
 	}
 }
+
+// TC-030-06
+func TestExitCodeName_ResourceLimit(t *testing.T) {
+	if got := exitCodeName(domain.ExitResourceLimit); got != "ExitResourceLimit" {
+		t.Fatalf("got %q", got)
+	}
+}

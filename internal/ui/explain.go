@@ -55,6 +55,7 @@ func RenderScenarioExplain(res harness.ScenarioResult) string {
 
 	gates := ComputePipelineGates(res)
 	sb.WriteString(RenderPipelineDiagram(gates))
+	sb.WriteString(RenderSupervisionLine(ComputeSupervision(res)))
 
 	sb.WriteString("\n [💡 초보자를 위한 보안 원리 해설 (부정 테스트의 역설)]\n")
 	explanation := generateExplanation(res, gates)
@@ -116,6 +117,8 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		sb.WriteString(fmt.Sprintf("  - 해설: 작업 디렉터리(Workspace Jail) 바깥의 민감한 파일에 접근하려는 탈출 시도입니다.\n          상대경로나 심볼릭 링크 공격을 %s에서 차단하여 호스트를 안전하게 격리했습니다.\n", gateName))
 	case "G7":
 		sb.WriteString("  - 해설: 감사 기록 실패 시 기본 거부(Fail-Closed) 및 사후 위변조 탐지 원칙을 증명합니다.\n          보안 감사 추적이 불가능한 상태에서 작업을 강행하지 않고 안전하게 정지했습니다.\n")
+	case "G9":
+		sb.WriteString("  - 해설: 판정(허용/거부)과 별개로, 부모가 시간·출력 한계를 넘은 워커와 그 자식 전체를 끝냈다.\n")
 	default:
 		sb.WriteString(fmt.Sprintf("  - 해설: 비인가 공격이 %s에서 탐지되어 시스템이 안전하게 거부(Fail-Closed)되었습니다.\n", gateName))
 	}
