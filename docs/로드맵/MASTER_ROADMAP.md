@@ -408,9 +408,9 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **목적**: 순수 PDP 결정을 `allow`/`deny`/`ask` 3값으로 확장하고, `(sub, action, resource, token_jti)` 4요소 및 선택적 5번째 요소 `ArgHash`(`sha256(req.Data)`, Confused Deputy 페이로드 바꿔치기 방어)에 바인딩된 Zone B 1회용 승인 원장(`grants_state.json`의 `Approvals`)과 종료 코드 `18`(`ExitApprovalRequired`)을 증명한다.
 * **주요 산출물**: [15-pdp-승인-결정-ask](15-pdp-승인-결정-ask/README.md), `internal/authz/state/approval.go`, `approval grant/list` CLI, `G14` 시나리오(`E2E-67`~`73`).
 
-### Phase 16: 도구 종류 확장(`net:fetch`, `exec:run`) 및 Egress/실행 가드 (`G15`: `E2E-73`~`E2E-78`) — [기능 동결선]
-* **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고 78대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
-* **주요 산출물**: [16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md), `internal/netguard`, `internal/execguard`, `G15` 시나리오(`E2E-73`~`78`).
+### Phase 16: 도구 종류 확장(`net:fetch`, `exec:run`) 및 Egress/실행 가드 (`G15`: `E2E-74`~`E2E-79`) — [기능 동결선]
+* **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고(`net:fetch` URL 정규화는 Gate 0, allow-list 대조는 Gate 2c, 실행은 Stage 5), OS 격리를 포트 단위로 열어(`055` `Policy.AllowConnectPorts`) 79대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
+* **주요 산출물**: [16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md), `internal/netguard`, `internal/execguard`, `055` 격리 포트 단위 허용, `G15` 시나리오(`E2E-74`~`79`). 가드 자체의 상한 초과는 `TOOL_LIMIT_EXCEEDED`(12), 부모 상한 초과는 `17`.
 
 ### Phase 17: [포스트 로드맵 1] 도메인 순수성 및 전이적 의존성 역전(DIP) 완결
 * **목적**: 신규 기능 추가 없이 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter`를 `internal/domain`으로 역전시켜 `pdp`의 전이적 인프라 의존성을 0%로 만들고(`TC-170-01`), PEP 도구 실행을 `ToolHandler` 전략 포트로 추상화하며, 전 CLI 러너의 `app.BuildStack` 일원화(`TC-170-02`) 및 카탈로그 중복 제거를 완결한다.
