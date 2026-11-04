@@ -19,6 +19,8 @@ type SubjectSnapshot struct {
 	Timestamp     time.Time      `json:"timestamp"`
 	// SubjectEpochs 는 모든 주체의 현재 Epoch 사본이다(위임 계보 연쇄 회수 검사용, 호출자가 원본을 바꾸지 못하도록 복사).
 	SubjectEpochs domain.SecurityEpochs `json:"subject_epochs,omitempty"`
+	// Approvals 는 이 주체의 승인 사본이다(같은 Load 에서 공급, 호출자가 원장을 바꾸지 못하도록 복사).
+	Approvals []domain.Approval `json:"approvals,omitempty"`
 }
 
 // Service 는 정책 정보점(PIP)의 읽기 전용 조회 규약이다.
@@ -93,7 +95,15 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 		}
 	}
 
+	var approvals []domain.Approval
+	for _, a := range st.Approvals {
+		if a.Subject == cleanSub {
+			approvals = append(approvals, a)
+		}
+	}
+
 	return &SubjectSnapshot{
+		Approvals:     approvals,
 		Subject:       cleanSub,
 		CurrentEpoch:  epoch,
 		ActiveGrants:  activeGrants,

@@ -173,3 +173,29 @@ func TestPIP_GetCurrentEpoch(t *testing.T) {
 		t.Errorf("expected default epoch 1, got %d", defaultEpoch)
 	}
 }
+
+func TestPIP_SnapshotApprovals(t *testing.T) { // TC-030-08
+	ctx := context.Background()
+	svc, store := setupTestPIP(t)
+	now := time.Now().UTC()
+	err := store.Update(func(st *state.GrantsState) error {
+		st.Approvals = []domain.Approval{
+			{ID: "a1", Subject: "worker-01", TokenJTI: "j", ExpiresAt: now.Add(time.Minute)},
+			{ID: "a2", Subject: "worker-02", TokenJTI: "j", ExpiresAt: now.Add(time.Minute)},
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := svc.GetSubjectSnapshot(ctx, "worker-01")
+	if err != nil || len(snap.Approvals) != 1 || snap.Approvals[0].ID != "a1" {
+		t.Fatalf("%v %+v", err, snap)
+	}
+	snap.Approvals[0].ID = "mutated"
+	again, _ := svc.GetSubjectSnapshot(ctx, "worker-01")
+	st, _ := store.Load()
+	if again.Approvals[0].ID != "a1" || st.Approvals[0].ID != "a1" {
+		t.Fatal("snapshot mutation leaked")
+	}
+}

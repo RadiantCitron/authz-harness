@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authz/pip"
@@ -16,6 +17,8 @@ type DecisionType string
 const (
 	DecisionAllow DecisionType = "ALLOW"
 	DecisionDeny  DecisionType = "DENY"
+	// DecisionAsk 는 허용 권한은 있으나 사람 승인이 필요함을 뜻한다. 승인이 없으면 deny 처럼 실패한다.
+	DecisionAsk DecisionType = "ASK"
 )
 
 // Request 는 PDP 인가 결정을 위한 단일 요청 명세다.
@@ -28,6 +31,11 @@ type Request struct {
 	RequireScope bool               `json:"require_scope,omitempty"` // true 인 경우 TokenScope 가 비어있어도 즉시 거부
 	Actor        *domain.ActorClaim `json:"actor,omitempty"`
 	TraceID      string             `json:"trace_id,omitempty"`
+
+	// 승인 바인딩용 입력이다. Now 가 비면 snapshot.Timestamp 를 쓴다(PDP 는 OS 시계를 읽지 않는다).
+	TokenJTI string    `json:"token_jti,omitempty"`
+	ArgHash  string    `json:"arg_hash,omitempty"`
+	Now      time.Time `json:"now,omitempty"`
 }
 
 // Decision 은 PDP의 판정 결과 및 상세 사유다.
@@ -36,6 +44,9 @@ type Decision struct {
 	Reason   domain.Reason `json:"reason"`
 	GrantID  string        `json:"grant_id,omitempty"`
 	Details  string        `json:"details,omitempty"`
+
+	// ApprovalID 는 승인으로 ALLOW 를 낼 때 소비 대상이 되는 승인의 ID 다.
+	ApprovalID string `json:"approval_id,omitempty"`
 }
 
 // Evaluate 는 일체의 부작용 없이 순수 인자만을 대조하여 인가 여부를 결정하는 순수 함수다.
@@ -101,14 +112,50 @@ func Evaluate(req Request, snapshot *pip.SubjectSnapshot) Decision {
 	}
 
 	// 4. 활성 Grant 매칭 검증
-	for _, g := range snapshot.ActiveGrants {
+	// 맞는 활성 Grant 를 모두 모은다. 하나라도 승인이 필요하면 가장 엄격한 쪽을 따른다.
+	var matched *domain.Grant
+	needsApproval := false
+	for i := range snapshot.ActiveGrants {
+		g := &snapshot.ActiveGrants[i]
 		if g.Subject == cleanSub && g.Action == req.Action && g.Resource == cleanRes && g.IsActive() {
+			if matched == nil || (g.RequiresApproval && !matched.RequiresApproval) {
+				matched = g
+			}
+			if g.RequiresApproval {
+				needsApproval = true
+			}
+		}
+	}
+	if matched != nil {
+		if !needsApproval {
 			return Decision{
 				Decision: DecisionAllow,
 				Reason:   domain.ReasonAuthorized,
-				GrantID:  g.ID,
-				Details:  fmt.Sprintf("활성 권한(%s)에 의해 정상 인가되었습니다.", g.ID),
+				GrantID:  matched.ID,
+				Details:  fmt.Sprintf("활성 권한(%s)에 의해 정상 인가되었습니다.", matched.ID),
 			}
+		}
+		now := req.Now
+		if now.IsZero() {
+			now = snapshot.Timestamp
+		}
+		id, reason := domain.SelectApproval(snapshot.Approvals, domain.ApprovalBinding{
+			Subject: cleanSub, Action: req.Action, Resource: cleanRes, TokenJTI: req.TokenJTI, ArgHash: req.ArgHash,
+		}, now)
+		if reason == domain.ReasonAuthorized {
+			return Decision{
+				Decision:   DecisionAllow,
+				Reason:     domain.ReasonAuthorized,
+				GrantID:    matched.ID,
+				ApprovalID: id,
+				Details:    fmt.Sprintf("활성 권한(%s)과 승인(%s)에 의해 정상 인가되었습니다.", matched.ID, id),
+			}
+		}
+		return Decision{
+			Decision: DecisionAsk,
+			Reason:   reason,
+			GrantID:  matched.ID,
+			Details:  fmt.Sprintf("권한(%s)은 사람 승인이 필요하며 유효한 승인이 없습니다(%s).", matched.ID, reason),
 		}
 	}
 
@@ -232,6 +279,9 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 			},
 		}
 
+		if decision.ApprovalID != "" {
+			event.Metadata["approval_id"] = decision.ApprovalID
+		}
 		if req.Actor != nil && req.Actor.Subject != "" {
 			event.Metadata["caller_id"] = req.Actor.Subject
 		}
