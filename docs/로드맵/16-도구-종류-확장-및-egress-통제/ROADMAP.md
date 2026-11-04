@@ -1,87 +1,94 @@
 # ROADMAP — 16 도구 종류 확장 및 egress 통제 (마스터 설계)
 
-> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 결정: [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-2, C-3, [ADR 0001](../../adr/0001-mcp-tool-call-어댑터-범위-및-프로토콜.md) A-2
+> 상위 색인: [전체 로드맵 색인](../README.md) | 대시보드: [README.md](README.md) | 계획: [PLAN.md](PLAN.md) | 배경: [WHY.md](WHY.md) | 결정: [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-2, C-3, [ADR 0001](../../adr/0001-mcp-tool-call-어댑터-범위-및-프로토콜.md) A-2 | 교정 보고서: [025번 보고서](../../보고서/025-16번로드맵_구조결함_및_진행가능성_검증보고서.md)
 
 ## 1. As-Is / To-Be
 
-| 구분 | As-Is | To-Be (Phase 16) |
+| 구분 | As-Is (15번 완료 시점 코드) | To-Be (Phase 16) |
 |---|---|---|
-| Action | `file:read`, `file:write` ([`domain/constants.go`](../../../internal/domain/constants.go), [`domain/scope.go`](../../../internal/domain/scope.go)) | 신규 `net:fetch`, `exec:run` 및 `domain.IsValidAction` 일원화 |
-| 리소스 문법 | 상대 경로 | `net:fetch:<host>:<port>`(루프백만), `exec:run:<allowlist-id>` |
-| 집행 | PEP Stage 5가 파일 I/O 수행(jail 경유) | PEP 단일 입출구 안에서 Gate 2c(`jail`/`netguard`/`execguard`) 및 Stage 5 도구별 실행기 디스패치 수행 |
-| MCP 도구 | `file_read`, `file_write` 2종 한정(ADR 0001 A-2) | `net_fetch`, `exec_run` 추가 (ADR 0003 C-3로 개정, 총 4종) |
-| 방어 | jail 경로 검사 | `netguard`(URL·호스트 정규화·루프백 Allow-List·리다이렉트 금지), `execguard`(바이너리 ID·인자 스키마·환경 비상속) + OS 격리(로드맵 11) |
-| 시나리오 | 39대 + 로드맵 10~15 그룹 (72개) | 신규 G15 그룹 (`E2E-73`~`E2E-78`, 6개 추가 → 총 78개) |
+| Action | `file:read`, `file:write` ([`domain/grant.go`](../../../internal/domain/grant.go)). PEP Gate 0 `NormalizeAction`·CLI `grant`/`pdp`가 각자 두 값을 하드코딩 | `net:fetch`, `exec:run` 추가. `domain.ParseAction`·`IsValidAction` 단일 원천 |
+| 자원 문자열 | 워크스페이스 상대 경로 | `net:fetch` → `127.0.0.1:<port>`·`[::1]:<port>`(Gate 0 정규화), `exec:run` → 등록 ID(`echo-safe`). 3단 스코프 `net:fetch:127.0.0.1:<port>`는 기존 `ScopeMatches`로 이미 맞음 |
+| 경계 검사 (Gate 2c) | 액션과 무관하게 Jail | `file:*` → Jail, `net:fetch` → netguard allow-list, `exec:run` → execguard 등록 ID·인자 |
+| 실행 (Stage 5) | 파일 읽기·쓰기 | + 루프백 GET, + 고정 바이너리 실행 |
+| MCP 도구 | `file_read`, `file_write` (ADR 0001 A-2) | + `net_fetch`, `exec_run` (ADR 0003 C-3, 총 4종) |
+| 격리 | `AllowNetwork` 전부/전무, 정직 워커는 격리 미배선 | `AllowConnectPorts`로 포트 단위 허용, 격리 하 정직 워커 실측 |
+| 시나리오 | 73대 (`E2E-01`~`E2E-73`, G1~G14) | G15 `E2E-74`~`E2E-79` 추가 → 79대 |
 
 ## 2. 아키텍처 및 신뢰 경계
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '11px'}}}%%
 flowchart TD
-  P["PEP (단일 입출구)"] --> F["file 실행기 (jail)"]
-  P --> N["net 실행기 (netguard)"]
-  P --> X["exec 실행기 (execguard)"]
-  N --> L["루프백 가짜 서버 (127.0.0.1:<allowed_port>)"]
-  X --> B["allow-list 고정 바이너리 (/bin/echo 등)"]
+  G0["Gate 0: 액션 해석·net URL 정규화"] --> G1["Gate 1: 토큰 검증(jti 읽기)"]
+  G1 --> G2["Gate 2: PDP (무변경)"]
+  G2 --> RP["StageReplay: jti 소비"]
+  RP --> G2c["Gate 2c: Jail / netguard.Check / execguard.Validate"]
+  G2c --> AP["StageApproval → Budget → Stage 4 감사"]
+  AP --> S5["Stage 5: 파일 / GET / 실행"]
 ```
 
-- **실행기 및 가드 위치**: 각 가드(`jail`, `netguard`, `execguard`)와 실행기는 PEP의 단일 `Execute` 파이프라인 내부에서만 호출된다. 새 입구를 만들지 않는다(`TC-060-04` 유지).
-- **PDP는 순수 유지**: 도구 종류는 `Action` 문자열과 정규화된 타겟 식별자(`127.0.0.1:<port>`, `<allowlist-id>`)로만 표현되고 PDP가 소켓·프로세스를 다루지 않는다(`TC-060-01` 유지).
-- **allow-list는 코드 및 `pep.Config` 주입으로 고정**한다. 워커(`internal/subagent`)가 allow-list를 변경할 수 없다.
-- **OS 격리와의 관계**: 가드는 앱 수준 1차 방어, 로드맵 11의 격리는 2차 방어(심층 방어). 가드 우회 시도(악의 워커)를 격리가 막는지 대조군(`E2E-78`)으로 확인한다.
+- **단계 순서는 15번 고정 순서 그대로다.** 바뀌는 것은 Gate 0 정규화, Gate 2c 경계 `switch`, Stage 3b 예산 조건, Stage 5 실행 `switch` 네 곳이다. 새 단계·새 파일·새 인터페이스는 만들지 않는다(`TC-060-04` 단일 return 유지).
+- **PDP는 순수 유지**: 도구 종류는 `Action` 문자열과 정규화된 자원 문자열로만 표현된다. PDP는 소켓·프로세스를 다루지 않는다(`TC-060-01`). 승인(`ask`)도 새 도구에 그대로 걸린다.
+- **allow-list 출처**: 네트워크는 부모가 넘기는 `-net-allow`(무작위 시험 포트), 실행은 코드 고정. 둘 다 Zone B(Grant)와 독립이다.
+- **심층 방어**: netguard·execguard가 1차(정직한 워커에 들어온 악의 입력), 커널 포트 규칙이 2차(PEP를 건너뛴 악의 워커).
 
 ## 3. 파급 범위와 무영향 근거
 
-- **변경**: `internal/domain`(`Action`, `IsValidAction`, `ScopeMatches`, `ScopeCovers`, `Reason`), `internal/authn/exchange/validator.go`(`ScopeCovers` 연동), 신규 `internal/netguard`·`internal/execguard`, `internal/authz/pep`(Gate 2/2c/Stage 5 디스패치), `internal/subagent/worker.go`(`ActionNetFetch`/`ActionExecRun` 출력 복사), `internal/cli/grant.go`·`pdp.go`·`pep.go`(4종 Action 허용), `internal/mcp`(4종 도구 확장), `internal/harness/catalog`(G15), `internal/harness/architecture_test.go`(`TC-090-01` 가드 확장).
-- **무영향**: 기존 `file:*` 스코프의 의미·파싱 결과, 기존 도구(`file_read`, `file_write`)의 동작, PDP·토큰·감사 계약, 기존 시나리오(`E2E-01`~`E2E-72`) 판정.
+- **변경**: `internal/domain`(Action 2종, `ParseAction`·`IsValidAction`, Reason 4종), 신규 `internal/netguard`·`internal/execguard`, `internal/authz/pep`(Gate 0·2c·3b·5), `internal/app`(`AppConfig.NetAllowList`), `internal/cli`(`grant`·`pdp` 액션 검사, `subagent worker`·`mcp serve`의 `-net-allow`), `internal/subagent/worker.go`(출력 전달), `internal/mcp`(도구 2종), `internal/confinement`(`AllowConnectPorts`), `internal/harness/catalog`(G15), `internal/harness/architecture_test.go`(`TC-090-01`), `internal/ui`(G15 해설·새 사유), [ADR 0001](../../adr/0001-mcp-tool-call-어댑터-범위-및-프로토콜.md) 상태 줄.
+- **무영향**: PDP·PIP·PAP·토큰 교환(스코프 완전 일치 유지), 감사 스키마(항상 v2), `classifyExit`, `file:*` 요청의 단계·사유·종료 코드, 기존 시나리오 `E2E-01`~`E2E-73` 판정.
 
 ## 4. 사전 점검 (Pre-Mortem): 이 로드맵이 실패한다면 무엇 때문인가
 
 | 위험 | 방어책 |
 |---|---|
-| `net:fetch` 요청의 `req.Resource`가 전체 URL(`http://127.0.0.1:18080/status` 또는 `http://127.0.0.1@evil`)인데 Gate 2(PDP)가 Gate 2c(`netguard`)보다 먼저 실행되어 Grant(`127.0.0.1:18080`)와 문자열 불일치로 `NO_ACTIVE_GRANT`가 발생 | PEP에서 `net:fetch` 처리 시 ① 먼저 토큰의 Epoch 및 `net:fetch` 스코프 보유 여부를 확인(미보유 시 `TOKEN_INSUFFICIENT_SCOPE`)한 뒤, ② `netguard.ParseAndNormalizeTarget`으로 URL 정규화·루프백·Allow-List 검증(실패 시 즉시 `ReasonEgressDenied`) 및 정규화된 `host:port` 추출을 수행하여 PDP Grant/3단 스코프와 대조하고, ③ Stage 5에서는 원본 검증 URL로 GET 요청을 수행 |
-| `internal/subagent/worker.go:66`이 `normAction == ActionFileRead`일 때만 `resp.Output`을 채워 `net:fetch`/`exec:run` 결과가 빈 문자열로 유실됨 | `worker.go`에서 `ActionFileRead`, `ActionNetFetch`, `ActionExecRun` 모두 `resp.BytesRead = pepRes.BytesRead` 및 `resp.Output = string(pepRes.Data)`를 채우도록 수정 (`cli/grant.go`, `cli/pdp.go`의 2종 Action 하드코딩도 `domain.IsValidAction`으로 일원화) |
-| `exec:run` 인자(`arg`) 전달을 위해 `SubagentRequest` 프레임을 깨뜨리거나 감사에 평문 인자가 노출됨 | `exec:run`은 `Resource`(`FilePath`)에 논리 바이너리 ID(`command_id`, 예: `"echo-safe"`), `Data`에 인자 문자열(`arg`)을 매핑. 이로써 프레임 호환성을 유지하고 Stage 4 감사에서 `req.Data`가 자동으로 `ArgHash`(`sha256:...`)로만 기록됨 |
-| URL·호스트 정규화 우회: userinfo(`http://127.0.0.1@evil`), IPv6 표기, 정수·16진 IP, 대소문자·후행 점, 리다이렉트로 외부 이동 | **파싱 후 정규화된 `(호스트, 포트)` 튜플만** allow-list와 비교. DNS 조회 금지, 리다이렉트 추종 금지(`http.ErrUseLastResponse` / 에러 반환), 호스트 문자열 부분 일치 금지. `FuzzNetTarget` 필수 |
-| 실행 allow-list 우회: 경로 조작(`../`), 심볼릭 링크, `PATH` 변조, 플래그(`-e`) 주입 | 실행은 **논리 ID → 고정 절대 경로 매핑**으로만 수행하고 인자는 고정 정규식(`^[a-zA-Z0-9_.-]{1,64}$`, 선행 `-` 금지)만 허용. 환경변수 비상속(`SanitizeEnv`), 작업 디렉터리는 `WorkspaceDir`로 고정 |
-| 응답 크기·시간 무제한(로드맵 10 기능 미적용) | `netguard`와 `execguard` 모두 로드맵 10의 시간(`Timeout`) 및 출력 바이트 상한(`MaxOutputBytes`, 초과 시 `ReasonResourceOutputLimit` / `ExitResourceExhausted = 17`)을 강제 적용 |
-| ADR 0001 A-2와 실제 어댑터 불일치 | `050`에서 ADR 0001에 "Superseded in part by ADR 0003" 표기 |
+| 가드 상한 초과를 17로 내면 스포너가 16으로 바꾼다 | 가드 상한은 `TOOL_LIMIT_EXCEEDED`(12). 17은 부모만(D-06) |
+| 원시 URL을 PDP에 넘겨 Grant `host:port`와 불일치 | Gate 0에서 정규화. PDP는 정규화 자원만 본다(D-04) |
+| `net:fetch` 자원이 Jail을 「유효한 상대 경로」로 통과 | Gate 2c는 액션별 `switch`. file 외 자원은 Jail을 타지 않는다 |
+| 무작위 시험 포트를 allow-list에 넣을 길이 없음 | `-net-allow` → `AppConfig.NetAllowList` → `pep.Config.NetGuard`(D-05) |
+| 검사한 주소와 연결한 주소가 다름(프록시 환경변수, 리다이렉트) | 전용 Transport `Proxy: nil`, `DialContext`가 검증된 `host:port`만 연결, 모든 3xx 거부 |
+| URL 표기 우회(userinfo, 정수·8진·16진 IP, `localhost`, 후행 점, 백슬래시) | 파싱 후 리터럴 `127.0.0.1`·`::1`만 허용, 문자열 부분 일치 금지, `FuzzNetTarget` |
+| 실행 우회(경로 문자 ID, 플래그·메타문자 인자, `PATH` 변조) | 논리 ID → 고정 절대 경로, 인자 정규식, `cmd.Env = []string{}`(nil 아님), `cmd.Dir` = 워크스페이스 |
+| 예산 소진 토큰으로 프로세스가 한 번 더 실행됨 | `exec:run`은 사전 차감(D-09) |
+| 경로만 다른 URL이 감사·승인에서 구별되지 않음 | `arg_hash = DataDigest(정규 URL)`(D-10) |
+| 격리를 켜면 정상 접속도 막힘 / 원안 E2E가 E2E-47 중복 | `AllowConnectPorts`(055), E2E-79는 「정직 워커 허용 포트 성공 + 우회 워커 비허용 포트 차단」 쌍 |
+| 격리 하에서 정직 워커가 Zone B·감사 파일을 못 열어 실패 | 055 TC-055-04에서 먼저 실측. 필요한 경로가 `WorkerPolicy`에 없으면 멈추고 보고 |
 
 ## 5. 4층위 검증 설계
 
 | 층위 | 대상 | 방법 |
 |:---:|---|---|
-| 1 | 반복 수동 검증 배제 | `go test -race ./internal/netguard/... ./internal/execguard/... ./internal/authz/...` 스크립트화 |
-| 2 | 단위·구조 | 정규화 표준 케이스 table-driven, `FuzzNetTarget`, `FuzzScopeMatches`, AST 가드(PEP 단일 return `TC-060-04`, PDP 순수 `TC-060-01`, MCP 직접 소켓·실행 금지 `TC-090-01`) |
-| 3 | 상태·정합성 | 거부 후 소켓 연결·프로세스 생성 0건(서버 접속 카운터·출력 검증), 해시 체인 `VALID`, workspace 무변화 |
-| 4 | 통합 | G15(`E2E-73`~`E2E-78`) 및 기존 시나리오 회귀, 격리 켬/끔 쌍 |
+| 1 | 반복 수동 검증 배제 | `go test -race ./internal/netguard/... ./internal/execguard/... ./internal/authz/... ./internal/confinement/...` |
+| 2 | 단위·구조 | 정규화 표준형 table-driven, `FuzzNetTarget`, AST 가드(`TC-060-01`, `TC-060-04`, `TC-090-01` 확장) |
+| 3 | 상태·정합성 | 거부 시 시험 서버 요청 수 0·프로세스 출력 없음, 감사 `resource`·`arg_hash`·`result_hash`, 해시 체인 `VALID`, 워크스페이스 무변화 |
+| 4 | 통합 | G15(`E2E-74`~`E2E-79`)와 기존 73대 회귀, 격리 켬/끔 쌍 |
 
 ## 6. 단계 의존 관계
 
-`010 → 020 → 030 → 040 → 050 → 060 → 070`. `020`과 `030`은 서로 독립이지만 번호순 실행을 기본으로 한다.
+`010 → 020 → 030 → 040 → 050 → 055 → 060 → 070`. `020`·`030`은 서로 독립이고, `055`는 `040`(워커 `-net-allow`) 뒤라야 격리 하 정직 워커를 실측할 수 있다.
 
 ## 7. 단계 분해표 (구현지시서 작성의 입력)
 
 | 단계 | 목표 | 완료 기준 | 인수 시나리오 (입력 → 기대 결과) |
 |:---:|---|---|---|
-| **010** | 신규 Action 2종, `IsValidAction`, `ScopeCovers`, Reason 3종(`EGRESS_DENIED`, `EXEC_NOT_ALLOWED`, `EXEC_ARG_REJECTED`) | 기존 `file:*` 파싱 결과 불변, `grant`/`pdp` CLI 4종 액션 지원 | 기존 스코프 문자열 전체 → 파싱 결과 동일. `net:fetch` ⊇ `net:fetch:127.0.0.1:18080`, 포트 다르면 비포함 |
-| **020** | `netguard`: 정규화·루프백 전용 allow-list·리다이렉트 금지·출력 상한 | 우회 표기 전부 거부, 퍼징 패닉 0 | `@` userinfo 위장 URL, `[::1]` 비허용 포트, `2130706433`, `302` 리다이렉트 응답 → 모두 거부, 외부 연결 0건 |
-| **030** | `execguard`: 바이너리 ID 매핑, 인자 스키마, 환경 비상속, jail 작업 디렉터리·출력 상한 | 허용 ID만 실행, 주입 거부 | 등록 ID + 정상 인자 → 실행. 미등록 ID, `../` 경로, `-` 옵션·`;` 메타문자 인자 → 거부, 프로세스 생성 0건 |
-| **040** | PEP 도구 디스패처 및 `subagent/worker.go` 출력 연동 | `Execute` 단일 return 가드 통과, 기존 file 도구 회귀 없음 | `net:fetch` 허용 토큰 → 가짜 서버 응답 반환, 감사에 `host:port`와 해시만 기록. `file:read` 토큰으로 `net:fetch` 호출 → `12` |
-| **050** | MCP `net_fetch`, `exec_run` 도구 추가, ADR 0001 상태 표기, `TC-090-01` 확장 | 어댑터가 소켓·프로세스를 직접 다루지 않음 | MCP `net_fetch`/`exec_run` 호출 → 서브프로세스 PEP 경로로만 집행. 알 수 없는 도구 이름 → `-32602` 거부 |
-| **060** | G15(`E2E-73`~`E2E-78`): 정상 호출, 우회 표기, 리다이렉트, 실행 주입, 한계 초과, 격리 켬/끔 쌍 | 6대 시나리오 `PASS` | 악의 워커가 가드를 건너뛰고 소켓 연결 시도 → 격리 켬에서 `Exit 13(CONFINEMENT_VIOLATION)`, 끔에서 성공(대조군) |
-| **070** | 전체 회귀(78대 시나리오), 문서 동기화 | `go test -race ./...` 통과, 전 시나리오 완주 | `run --scenario all` → 종료 코드 `0` |
+| **010** | Action 2종, `ParseAction`·`IsValidAction`, Reason 4종, CLI 일원화(PEP Gate 0은 040까지 새 액션 14 거부), ADR 0001 표기 | 기존 file 동작 불변, CLI가 4종 액션 Grant 생성 | `ParseAction("net:fetch")` → 성공, `"net:post"` → 실패. 부모 `file:read` → 자식 `file:read:x` 교환은 지금처럼 거부 |
+| **020** | netguard 정규화·allow-list·안전 GET | 우회 표기 전부 거부, 퍼징 패닉 0 | `http://127.0.0.1@evil/`, `http://2130706433:80/`, `localhost`, 302, `HTTP_PROXY` 설정 → 모두 거부·서버/프록시 요청 0 |
+| **030** | execguard 등록 ID·인자·실행 | 허용 ID만 실행, 주입 거부 | `echo-safe`+`hello_123` → `"hello_123\n"`. `sh`, `../bin/echo`, `-n`, `a;b` → 거부, 프로세스 0 |
+| **040** | PEP 디스패치·예산·지문·워커 출력 | `file:*` 회귀 없음, 가드레일 통과 | `net:fetch` 허용 → 응답 수신·감사 `resource=127.0.0.1:<p>`. Grant 있는 비허용 포트 → `EGRESS_DENIED` |
+| **050** | MCP 도구 2종, `-net-allow` 패스스루, `TC-090-01` | 어댑터가 소켓·프로세스를 직접 다루지 않음 | `tools/list` → 4종. `net_fetch`에 `path` 전달 → `-32602` |
+| **055** | 격리 포트 단위 허용 | darwin 실측 통과, Landlock 규칙 컴파일·단위 통과 | 허용 포트 연결 성공, 비허용 포트 연결 실패, 격리 하 정직 워커 `file:read` 성공 |
+| **060** | G15 6대 | 6대 `PASS` | 표는 [060](instructions/060_g15_e2e_시나리오.md) |
+| **070** | 79대 회귀, 문서 동기화, 기능 동결 | `go test -race ./...`, `run --scenario all` 종료 코드 0 | - |
 
-## 8. 선행 조건·결정 확정 사항
+## 8. 결정 확정 사항
 
-- **선행 조건**: [로드맵 11](../11-os-수준-격리-및-악의-워커-차단/ROADMAP.md) `Done` 필수. [ADR 0003](../../adr/0003-차기-로드맵-범위-개정-비목표-조건부-해제.md) C-2, C-3 `Accepted`. [로드맵 14](../14-감사-확장-및-관측성-포트/ROADMAP.md) `030`(인자 해시) 권장.
-- **사전 확정된 설계 결정 (구현 시 혼선 방지)**:
-  1. **거부 종료 코드**: 앱 수준 가드 거부는 `ExitAuthzDenied(12)` + 신규 Reason 3종(`EGRESS_DENIED`, `EXEC_NOT_ALLOWED`, `EXEC_ARG_REJECTED`)으로 매핑한다. 자원 한계(출력 바이트·타임아웃) 초과는 로드맵 10의 `ExitResourceExhausted(17)`(`RESOURCE_OUTPUT_LIMIT`, `RESOURCE_TIMEOUT`), OS 커널 격리 위반은 로드맵 11의 `ExitPathViolation(13)`(`CONFINEMENT_VIOLATION`)으로 매핑한다.
-  2. **결정론적 가짜 서버·바이너리 구성**: `net:fetch`는 표준 라이브러리 `net/http/httptest` 루프백 서버(`127.0.0.1:<port>`)를 사용하고, `exec:run`의 기본 등록 ID `"echo-safe"`는 `/bin/echo`(최대 인자 1개, 정규식 `^[a-zA-Z0-9_.-]{1,64}$`)로 고정하여 외부 의존성 없이 모든 macOS/POSIX 환경에서 100% 결정론적으로 동작하게 한다.
-  3. **allow-list 보관 위치**: 워커가 파일 수정으로 우회할 수 없도록 코드 내 불변 기본 스펙 + `pep.Config` 생성자 주입(`NetAllowList`, `ExecAllowList`)으로 고정한다.
-  4. **`net:fetch` 메서드·본문 범위**: `HTTP GET` 단일 메서드 전용(요청 본문 없음)으로 한정하며, 응답 본문은 `io.LimitReader`로 로드맵 10의 `MaxOutputBytes` 상한을 강제한다.
+대시보드 [§4 결정 표](README.md) D-01~D-11이 정본이다. 요점:
+1. 거부는 12(`EGRESS_DENIED`·`EXEC_NOT_ALLOWED`·`EXEC_ARG_REJECTED`·`TOOL_LIMIT_EXCEEDED`), 부모 상한은 17, 커널 차단은 부모 관찰 사실.
+2. 시험 서버는 `net/http/httptest`(무작위 포트), 실행 파일은 `/bin/echo` 하나.
+3. 네트워크 allow-list는 `-net-allow`, 실행 allow-list는 코드 고정.
+4. `net:fetch`는 GET 단일, 요청 본문 없음(`req.Data` 비어야 함).
 
 ## 9. 인수인계 (다음 에이전트용)
 
-- **코드 사실 확인 포인터**: [`domain/scope.go`](../../../internal/domain/scope.go), [`authn/exchange/validator.go`](../../../internal/authn/exchange/validator.go), [`pep/gateway.go`](../../../internal/authz/pep/gateway.go), [`subagent/worker.go`](../../../internal/subagent/worker.go), [`cli/grant.go`](../../../internal/cli/grant.go)·[`cli/pdp.go`](../../../internal/cli/pdp.go), [`mcp/protocol.go`](../../../internal/mcp/protocol.go)·[`mcp/executor.go`](../../../internal/mcp/executor.go).
-- **금지 사항**: 로드맵 11 `Done` 전 착수, 외부 네트워크 접속, 임의 셸·임의 인자 실행, DNS 조회, 리다이렉트 추종, 새 입구 신설, 기존 `file:*` 스코프 의미 변경, 어댑터의 직접 소켓·프로세스 호출.
-- **착수 순서**: 로드맵 11 `Done`과 ADR 0003 C-2·C-3 확인 → `010`부터 한 단계씩 순차 구현.
+- **코드 사실 확인 포인터**: [`pep/gateway.go`](../../../internal/authz/pep/gateway.go)(Gate 0 51행, Gate 2c 327행, Stage 3b 361행, Stage 5 391행), [`orchestrator/termination.go`](../../../internal/orchestrator/termination.go), [`confinement/policy.go`](../../../internal/confinement/policy.go), [`app/builder.go`](../../../internal/app/builder.go), [`cli/subagent.go`](../../../internal/cli/subagent.go)·[`cli/mcp.go`](../../../internal/cli/mcp.go), [`mcp/protocol.go`](../../../internal/mcp/protocol.go), [`subagent/worker.go`](../../../internal/subagent/worker.go), [`catalog/g10_os_confinement.go`](../../../internal/harness/catalog/g10_os_confinement.go).
+- **금지 사항**: 외부 네트워크 접속, DNS 조회, 리다이렉트 추종, 프록시 경유, 임의 셸·임의 실행 파일, 새 입구 신설, PDP·교환 검증 변경, `classifyExit` 변경, 어댑터의 직접 소켓·프로세스 호출, faultworker 모드 추가.
+- **착수 순서**: `010`부터 한 단계씩 순차 구현.
