@@ -120,6 +120,12 @@ func (rig *pepCLITestRig) issueToken(t *testing.T, sub, scope, aud string) strin
 // createGrant 는 테스트 헬퍼로 Grant를 등록한다.
 func (rig *pepCLITestRig) createGrant(t *testing.T, sub, role, action, resource string) {
 	t.Helper()
+	rig.createGrantID(t, sub, role, action, resource)
+}
+
+// createGrantID 는 Grant 를 만들고 출력에서 파싱한 Grant ID 를 돌려준다.
+func (rig *pepCLITestRig) createGrantID(t *testing.T, sub, role, action, resource string) string {
+	t.Helper()
 	rig.out.Reset()
 	rig.errOut.Reset()
 
@@ -133,6 +139,23 @@ func (rig *pepCLITestRig) createGrant(t *testing.T, sub, role, action, resource 
 	code := rig.grantRunner.Run(context.Background(), createArgs)
 	if code != domain.ExitSuccess {
 		t.Fatalf("failed to create grant: %d, err: %s", code, rig.errOut.String())
+	}
+	head := strings.TrimSpace(strings.Split(rig.out.String(), "|")[0])
+	toks := strings.Split(head, "ID: ")
+	if len(toks) < 2 {
+		t.Fatalf("failed to parse grant ID from stdout: %s", rig.out.String())
+	}
+	id := strings.TrimSpace(toks[1])
+	rig.out.Reset()
+	rig.errOut.Reset()
+	return id
+}
+
+// revokeGrant 는 PAP(grant revoke)로 Grant 를 회수한다.
+func (rig *pepCLITestRig) revokeGrant(t *testing.T, id string) {
+	t.Helper()
+	if code := rig.grantRunner.Run(context.Background(), []string{"revoke", "--id", id}); code != domain.ExitSuccess {
+		t.Fatalf("failed to revoke grant: %d, err: %s", code, rig.errOut.String())
 	}
 	rig.out.Reset()
 	rig.errOut.Reset()

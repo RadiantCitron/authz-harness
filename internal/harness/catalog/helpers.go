@@ -144,15 +144,14 @@ func issueTestToken(
 
 // ActionRequest 는 카탈로그 시나리오가 하네스 환경에서 액션을 실행할 때 전달하는 표준 요청 구조체다.
 type ActionRequest struct {
-	Token                string
-	Action               domain.Action
-	Resource             string
-	Data                 []byte
-	TraceID              string
-	CallerID             string
-	InjectAuditFailure   bool
-	InjectRevokeBeforeIO bool
-	ClockOffset          time.Duration // 0 이상만 허용(서브프로세스 경로·브리지는 음수를 ExitBadInput 으로 거부)
+	Token              string
+	Action             domain.Action
+	Resource           string
+	Data               []byte
+	TraceID            string
+	CallerID           string
+	InjectAuditFailure bool
+	ClockOffset        time.Duration // 0 이상만 허용(서브프로세스 경로·브리지는 음수를 ExitBadInput 으로 거부)
 }
 
 // executeHarnessAction 은 env.BinaryPath 유무에 따라 서브프로세스 또는 인메모리 PEP로 액션을 라우팅하여 실행하고 종료 코드를 반환한다.
@@ -176,13 +175,12 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 		}
 
 		res, err := spawner.Spawn(ctx, subagent.SubagentRequest{
-			TraceID:              req.TraceID,
-			Token:                req.Token,
-			Action:               string(req.Action),
-			FilePath:             req.Resource,
-			Data:                 string(req.Data),
-			InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
-			ClockOffsetSeconds:   int64(req.ClockOffset / time.Second),
+			TraceID:            req.TraceID,
+			Token:              req.Token,
+			Action:             string(req.Action),
+			FilePath:           req.Resource,
+			Data:               string(req.Data),
+			ClockOffsetSeconds: int64(req.ClockOffset / time.Second),
 		})
 		if err != nil {
 			// 감사 실패 등 도메인 에러 판정
@@ -197,14 +195,13 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 
 	// 2. InProc 모드 (또는 인메모리 에러 주입 테스트)
 	pepReq := pep.Request{
-		Token:                req.Token,
-		Action:               req.Action,
-		Resource:             req.Resource,
-		Data:                 req.Data,
-		TraceID:              req.TraceID,
-		InjectAuditFailure:   req.InjectAuditFailure,
-		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
-		ClockOffset:          req.ClockOffset,
+		Token:              req.Token,
+		Action:             req.Action,
+		Resource:           req.Resource,
+		Data:               req.Data,
+		TraceID:            req.TraceID,
+		InjectAuditFailure: req.InjectAuditFailure,
+		ClockOffset:        req.ClockOffset,
 	}
 
 	res, err := stack.PEP.Execute(ctx, pepReq)

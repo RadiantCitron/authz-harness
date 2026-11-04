@@ -67,18 +67,17 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	fs.SetOutput(r.stderr)
 
 	var (
-		tokenFlag        string
-		actionFlag       string
-		fileFlag         string
-		dataFlag         string
-		timeoutFlag      time.Duration
-		injectRevokeFlag bool
-		traceIDFlag      string
-		workspaceFlag    string
-		stateFlag        string
-		pubJWKSFlag      string
-		replayFlag       string
-		auditFlag        string
+		tokenFlag     string
+		actionFlag    string
+		fileFlag      string
+		dataFlag      string
+		timeoutFlag   time.Duration
+		traceIDFlag   string
+		workspaceFlag string
+		stateFlag     string
+		pubJWKSFlag   string
+		replayFlag    string
+		auditFlag     string
 	)
 
 	fs.StringVar(&tokenFlag, "token", "", "서브에이전트에 주입할 축소 위임 Access Token (필수)")
@@ -86,7 +85,6 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	fs.StringVar(&fileFlag, "file", "", "작업 대상 파일 상대 경로 (필수)")
 	fs.StringVar(&dataFlag, "data", "", "쓰기 작업 시 기록할 내용")
 	fs.DurationVar(&timeoutFlag, "timeout", 10*time.Second, "자식 프로세스 실행 타임아웃")
-	fs.BoolVar(&injectRevokeFlag, "inject-revoke-before-io", false, "Gate 1 통과 후 I/O 직전 Grant Revoke 결함 주입 스위치")
 	fs.StringVar(&traceIDFlag, "trace-id", "", "분산 추적 식별자 (미지정 시 자동 생성)")
 
 	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
@@ -176,13 +174,12 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 
 	// 4. 자식 워커 요청 프레임 구성
 	subReq := subagent.SubagentRequest{
-		Version:              "1.0",
-		TraceID:              traceID,
-		Token:                tokenFlag,
-		Action:               cleanAction,
-		FilePath:             fileFlag,
-		Data:                 dataFlag,
-		InjectRevokeBeforeIO: injectRevokeFlag,
+		Version:  "1.0",
+		TraceID:  traceID,
+		Token:    tokenFlag,
+		Action:   cleanAction,
+		FilePath: fileFlag,
+		Data:     dataFlag,
 	}
 
 	// 5. 프로세스 스폰 및 종료 코드 수거

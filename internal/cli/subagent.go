@@ -99,14 +99,13 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 
 	// 1. 단일 합성 루트(AppStack)를 통한 검증 전용 컴포넌트 조립
 	stack, err := app.BuildStack(app.AppConfig{
-		WorkspaceDir:             workspaceFlag,
-		StatePath:                stateFlag,
-		PubJWKSPath:              pubJWKSFlag,
-		ReplayPath:               replayFlag,
-		AuditPath:                auditFlag,
-		NetAllowList:             netAllow,
-		EnableRevokeBeforeIOHook: true, // 결함 주입: req.InjectRevokeBeforeIO 시 I/O 직전 모든 Grant 회수
-		VerifyOnly:               true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
+		WorkspaceDir: workspaceFlag,
+		StatePath:    stateFlag,
+		PubJWKSPath:  pubJWKSFlag,
+		ReplayPath:   replayFlag,
+		AuditPath:    auditFlag,
+		NetAllowList: netAllow,
+		VerifyOnly:   true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
 	})
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: failed to build subagent stack: %v\n", err)

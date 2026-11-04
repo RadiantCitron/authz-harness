@@ -158,15 +158,17 @@ func TestOrchestrateRunner_TC08_HarvestDeniedExitCode(t *testing.T) {
 	}
 }
 
-func TestOrchestrateRunner_TC09_TOCTOU_InjectRevokeBeforeIO(t *testing.T) {
+func TestOrchestrateRunner_TC09_RevokedBeforeSpawn(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
 	bin := getTestBinary(t)
 
 	// 준비: Grant 및 쓰기 대상 파일 준비
 	testFile := "toctou_target.txt"
 	sub := "subagent-worker-09"
-	rig.createGrant(t, sub, "operator", "file:write", testFile)
+	gid := rig.createGrantID(t, sub, "operator", "file:write", testFile)
 	tok := rig.issueToken(t, sub, "file:write", "authz-harness")
+	// 토큰 발급 뒤 PAP 로 Grant 회수 — 자식은 공유 장부에서 회수를 봐야 한다
+	rig.revokeGrant(t, gid)
 
 	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	if err != nil {
@@ -182,7 +184,6 @@ func TestOrchestrateRunner_TC09_TOCTOU_InjectRevokeBeforeIO(t *testing.T) {
 		"-action", "file:write",
 		"-file", testFile,
 		"-data", "race injection attack data",
-		"-inject-revoke-before-io",
 		"-trace-id", "tr-orch-toctou-09",
 	})
 

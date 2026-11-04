@@ -96,18 +96,15 @@ func TestTOCTOUWindow(t *testing.T) {
 	}
 
 	for _, in := range injections {
-		// Window A: Execute 진입 전 (WithBeforeIOHook)
+		// Window A: Execute 진입 전 — 회수/Epoch 증가가 끝난 뒤 관문을 부른다
 		t.Run("Window A/"+in.name, func(t *testing.T) {
 			h := setupTestHarness(t)
 			gw, ledger := windowGW(t, h, nil)
 			gid := createGrant(t, h, "worker-01", domain.ActionFileWrite, "docs/out.txt")
 			tok := issueBudgetToken(t, h, ledger, domain.Budget{MaxCalls: 5}, true)
-			hooked := pep.WithBeforeIOHook(gw, func(context.Context, pep.Request) error {
-				in.do(t, h, gid)
-				return nil
-			})
-			r, err := hooked.Execute(ctx, pep.Request{Token: tok.TokenString, Action: domain.ActionFileWrite,
-				Resource: "docs/out.txt", Data: []byte("new"), InjectRevokeBeforeIO: true})
+			in.do(t, h, gid)
+			r, err := gw.Execute(ctx, pep.Request{Token: tok.TokenString, Action: domain.ActionFileWrite,
+				Resource: "docs/out.txt", Data: []byte("new")})
 			if err != nil {
 				t.Fatal(err)
 			}

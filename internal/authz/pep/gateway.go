@@ -56,17 +56,16 @@ func NormalizeAction(act string) (domain.Action, error) {
 
 // Request 는 PEP에 파일 작업 집행을 요청하는 매개변수 명세다.
 type Request struct {
-	Token                string        // Bearer Access Token (RFC 9068)
-	Action               domain.Action // domain.ActionFileRead ("file:read") 또는 domain.ActionFileWrite ("file:write")
-	Resource             string        // 접근 대상 파일 경로 (상대 경로 권장)
-	Data                 []byte        // 쓰기 요청 시 기록할 바이트 데이터
-	InjectAuditFailure   bool          // 결함 주입 스위치: Pre-Commit 감사 실패 시뮬레이션
-	InjectRevokeBeforeIO bool          // 결함 주입 스위치: I/O 직전 Grant 전면 회수 시뮬레이션 (TOCTOU 테스트용)
-	ExpectedAudience     string        // 토큰 수신자 기대값 (기본값: "authz-harness")
-	ExpectedSubject      string        // 선택적 주체 기대값 검증
-	ClockOffset          time.Duration // 선택적 가상 시계 오프셋 (테스트 및 시간 시뮬레이션)
-	TraceID              string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
-	RequireTraceID       bool          // true 인 경우 TraceID 누락 시 Gate 0 에서 즉각 차단 (E2E-28 검증용)
+	Token              string        // Bearer Access Token (RFC 9068)
+	Action             domain.Action // domain.ActionFileRead ("file:read") 또는 domain.ActionFileWrite ("file:write")
+	Resource           string        // 접근 대상 파일 경로 (상대 경로 권장)
+	Data               []byte        // 쓰기 요청 시 기록할 바이트 데이터
+	InjectAuditFailure bool          // 결함 주입 스위치: Pre-Commit 감사 실패 시뮬레이션
+	ExpectedAudience   string        // 토큰 수신자 기대값 (기본값: "authz-harness")
+	ExpectedSubject    string        // 선택적 주체 기대값 검증
+	ClockOffset        time.Duration // 선택적 가상 시계 오프셋 (테스트 및 시간 시뮬레이션)
+	TraceID            string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
+	RequireTraceID     bool          // true 인 경우 TraceID 누락 시 Gate 0 에서 즉각 차단 (E2E-28 검증용)
 }
 
 // Result 는 PEP 관문 집행 결과 및 단계별 판정 세부 정보다.

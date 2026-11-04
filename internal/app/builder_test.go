@@ -268,14 +268,13 @@ func TestBuildStack_MissingWorkspace_FailsClosed(t *testing.T) {
 	}
 }
 
-// TC-030-06: 게이트웨이가 조립되지 않으면 회수 훅이 켜져 있어도 nil 을 감싼 데코레이터를 만들지 않는다.
-func TestBuildStack_RevokeHookWithoutGateway_StaysNil(t *testing.T) {
+// TC-030-06: VerifyOnly 이면서 게이트웨이를 조립할 재료가 없으면 PEP 는 nil 로 남는다.
+func TestBuildStack_VerifyOnlyWithoutGateway_StaysNil(t *testing.T) {
 	tmpDir := t.TempDir()
 	stack, err := app.BuildStack(app.AppConfig{
-		StatePath:                filepath.Join(tmpDir, "state.json"),
-		AuditPath:                filepath.Join(tmpDir, "audit.jsonl"),
-		EnableRevokeBeforeIOHook: true,
-		VerifyOnly:               true,
+		StatePath:  filepath.Join(tmpDir, "state.json"),
+		AuditPath:  filepath.Join(tmpDir, "audit.jsonl"),
+		VerifyOnly: true,
 	})
 	if err != nil {
 		t.Fatalf("BuildStack failed: %v", err)

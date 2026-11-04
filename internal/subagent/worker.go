@@ -46,14 +46,13 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 
 	// PEP Gateway 요청 조립 (RequireTraceID: true로 위임하여 Gate 0에서 동일하게 차단)
 	pepReq := pep.Request{
-		Token:                req.Token,
-		Action:               domain.Action(req.Action),
-		Resource:             req.FilePath,
-		Data:                 []byte(req.Data),
-		TraceID:              req.TraceID,
-		RequireTraceID:       true,
-		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
-		ClockOffset:          time.Duration(req.ClockOffsetSeconds) * time.Second,
+		Token:          req.Token,
+		Action:         domain.Action(req.Action),
+		Resource:       req.FilePath,
+		Data:           []byte(req.Data),
+		TraceID:        req.TraceID,
+		RequireTraceID: true,
+		ClockOffset:    time.Duration(req.ClockOffsetSeconds) * time.Second,
 	}
 
 	// PEP 5단계 관문 집행
