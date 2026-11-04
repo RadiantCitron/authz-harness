@@ -2,6 +2,7 @@
 package confinement
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +23,10 @@ type Policy struct {
 	ReadPaths     []string // ProtectedRoot 안에서 읽기만 허용할 경로
 	WritePaths    []string // 읽기·쓰기를 허용할 경로
 	AllowNetwork  bool     // 기본 false: 소켓 연결·바인드 거부
+
+	// AllowConnectPorts 는 AllowNetwork 가 false 일 때 outbound TCP 연결만 열어 줄 포트 목록이다.
+	// bind 는 계속 막힌다. seatbelt 는 localhost 로만, Landlock 은 호스트를 구분하지 못해 포트만 연다.
+	AllowConnectPorts []int
 }
 
 // Validate 는 정책의 구조적 유효성을 검사한다. 모호하면 거부한다(Fail-Closed).
@@ -46,7 +51,29 @@ func (p Policy) Validate() error {
 			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "write path must be absolute: "+wp, nil)
 		}
 	}
+	if p.AllowNetwork && len(p.AllowConnectPorts) > 0 {
+		return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "allow_network and allow_connect_ports are mutually exclusive", nil)
+	}
+	for _, port := range p.AllowConnectPorts {
+		if port < 1 || port > 65535 {
+			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, fmt.Sprintf("connect port out of range: %d", port), nil)
+		}
+	}
 	return nil
+}
+
+// uniquePorts 는 AllowConnectPorts 의 중복을 제거하고 입력 순서를 유지한다.
+func uniquePorts(ports []int) []int {
+	seen := make(map[int]struct{}, len(ports))
+	var out []int
+	for _, p := range ports {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 // within 은 path 가 root 자신이거나 그 아래인지 어휘적으로 판정한다.

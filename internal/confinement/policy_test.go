@@ -82,3 +82,26 @@ func TestWorkerPolicy(t *testing.T) { // TC-010-05
 		t.Fatalf("worker policy must validate: %v", err)
 	}
 }
+
+// 로드맵 16 / 055 TC-055-01
+func TestPolicyValidate_ConnectPorts(t *testing.T) {
+	base := confinement.Policy{ProtectedRoot: "/r/sb"}
+	for _, ports := range [][]int{{0}, {65536}, {-1}, {80, 0}} {
+		p := base
+		p.AllowConnectPorts = ports
+		if err := p.Validate(); err == nil || domain.ExitCodeFromError(err, 0) != domain.ExitBadInput {
+			t.Errorf("ports %v: expected 14, got %v", ports, err)
+		}
+	}
+	p := base
+	p.AllowNetwork = true
+	p.AllowConnectPorts = []int{8080}
+	if err := p.Validate(); err == nil || domain.ExitCodeFromError(err, 0) != domain.ExitBadInput {
+		t.Errorf("allow_network + ports: expected 14, got %v", err)
+	}
+	p = base
+	p.AllowConnectPorts = []int{8080, 8080}
+	if err := p.Validate(); err != nil {
+		t.Errorf("duplicate ports must pass: %v", err)
+	}
+}

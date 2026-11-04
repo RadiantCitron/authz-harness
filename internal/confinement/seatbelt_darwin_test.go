@@ -211,3 +211,80 @@ func TestSeatbeltConfiner(t *testing.T) {
 		}
 	})
 }
+
+// 로드맵 16 / 055 TC-055-02
+func TestRenderSeatbelt_ConnectPorts(t *testing.T) {
+	root := t.TempDir()
+	base := confinement.WorkerPolicy(root, filepath.Join(root, "workspace"), filepath.Join(root, "zone_b"), filepath.Join(root, "audit.jsonl"))
+	none, err := confinement.RenderSeatbeltProfile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(none, "network-outbound") || !strings.Contains(none, "(deny network*)\n(deny file-write*)") {
+		t.Fatalf("no-port profile must be unchanged:\n%s", none)
+	}
+	base.AllowConnectPorts = []int{18080, 18080}
+	with, err := confinement.RenderSeatbeltProfile(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := `(allow network-outbound (remote ip "localhost:18080"))`
+	if strings.Count(with, rule) != 1 || strings.Index(with, rule) < strings.Index(with, "(deny network*)") {
+		t.Fatalf("rule must appear once after deny:\n%s", with)
+	}
+}
+
+// 로드맵 16 / 055 TC-055-03: 허용 포트만 열리고 다른 포트·대조군은 기존 동작
+func TestSeatbeltConnectPorts_Live(t *testing.T) {
+	c := confinement.SeatbeltConfiner{}
+	if !c.Available() {
+		t.Skip("seatbelt unavailable: nested sandbox")
+	}
+	real, _ := filepath.EvalSymlinks(t.TempDir())
+	root := filepath.Join(real, "sb")
+	ws, zb := filepath.Join(root, "workspace"), filepath.Join(root, "zone_b")
+	for _, d := range []string{ws, zb} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	listen := func() (net.Listener, chan struct{}) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ch := make(chan struct{}, 8)
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				conn.Close()
+				ch <- struct{}{}
+			}
+		}()
+		t.Cleanup(func() { ln.Close() })
+		return ln, ch
+	}
+	lp, accP := listen()
+	lq, accQ := listen()
+	pol := confinement.WorkerPolicy(root, ws, zb, filepath.Join(root, "audit.jsonl"))
+	pol.AllowConnectPorts = []int{lp.Addr().(*net.TCPAddr).Port}
+
+	dial := func(addr string) {
+		cmd := helperCmd("dial", addr)
+		if err := c.Prepare(cmd, pol); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cmd.Output(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dial(lp.Addr().String())
+	dial(lq.Addr().String())
+	time.Sleep(300 * time.Millisecond)
+	if len(accP) != 1 || len(accQ) != 0 {
+		t.Fatalf("accepts P=%d Q=%d; want 1,0", len(accP), len(accQ))
+	}
+}

@@ -62,8 +62,9 @@ func sbplPath(p string) (string, error) {
 }
 
 // RenderSeatbeltProfile 은 Policy 를 SBPL 로 변환한다. Seatbelt 는 뒤 규칙이 앞 규칙을 덮는다.
-// 실측(2026-11-04): ProtectedRoot 자체에 대한 file-read-metadata 허용 규칙은 없어도
-// 허용 경로 읽기·쓰기가 동작하므로 두지 않는다.
+// 실측(2026-11-04): 허용 경로 읽기·쓰기는 루트 메타데이터 규칙 없이도 동작했으나,
+// 격리 하 정직 워커의 os.MkdirAll(루트)가 stat 거부를 EEXIST 로 오판해 기동하지 못했다(로드맵 16 / 055).
+// 그래서 루트 자체의 file-read-metadata 만 허용한다.
 func RenderSeatbeltProfile(p Policy) (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
@@ -80,6 +81,9 @@ func RenderSeatbeltProfile(p Policy) (string, error) {
 	b.WriteString("(version 1)\n(allow default)\n")
 	if !p.AllowNetwork {
 		b.WriteString("(deny network*)\n")
+		for _, port := range uniquePorts(p.AllowConnectPorts) {
+			fmt.Fprintf(&b, "(allow network-outbound (remote ip \"localhost:%d\"))\n", port)
+		}
 	}
 	b.WriteString("(deny file-write*)\n")
 	b.WriteString("(allow file-write* (literal \"/dev/null\") (literal \"/dev/tty\"))\n")
@@ -91,6 +95,9 @@ func RenderSeatbeltProfile(p Policy) (string, error) {
 		fmt.Fprintf(&b, "(allow file-write* %s)\n", f)
 	}
 	fmt.Fprintf(&b, "(deny file-read* (subpath %s))\n", rootQ)
+	// 루트 디렉터리 자체의 존재 확인(stat)만 허용한다. 정직 워커의 MkdirAll(루트)가 EEXIST 로 오판하지 않게 하며,
+	// 루트 안의 파일 내용·목록 읽기는 계속 거부된다.
+	fmt.Fprintf(&b, "(allow file-read-metadata (literal %s))\n", rootQ)
 	for _, r := range append(append([]string{}, p.ReadPaths...), p.WritePaths...) {
 		f, err := sbplPath(r)
 		if err != nil {

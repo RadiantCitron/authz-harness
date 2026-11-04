@@ -47,6 +47,8 @@ const (
 
 	netBindTCP    = 1 << 0 // ABI 4
 	netConnectTCP = 1 << 1
+
+	sysRuleNetPort = 2 // LANDLOCK_RULE_NET_PORT
 )
 
 var systemReadPaths = []string{"/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/proc/self"}
@@ -54,6 +56,11 @@ var systemReadPaths = []string{"/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc"
 type rulesetAttr struct {
 	handledFS  uint64
 	handledNet uint64
+}
+
+type netPortAttr struct {
+	allowed uint64
+	port    uint64
 }
 
 type pathBeneath struct {
@@ -182,6 +189,14 @@ func ApplySelf(p Policy, execPaths ...string) error {
 	}
 	if err := add("/dev/null", fsReadFile|fsWriteFile|fsTruncate|fsIoctlDev, false); err != nil {
 		return err
+	}
+
+	// 포트 단위 connect 허용(ABI ≥ 4). bind 는 handledNet 에 있으므로 계속 막힌다.
+	for _, r := range landlockNetRules(p) {
+		na := netPortAttr{allowed: r.access, port: uint64(r.port)}
+		if _, _, e := syscall.Syscall6(sysLandlockAddRule, fd, sysRuleNetPort, uintptr(unsafe.Pointer(&na)), 0, 0, 0); e != 0 {
+			return unavailable("landlock_add_rule(net_port) failed", e)
+		}
 	}
 
 	if _, _, e := syscall.Syscall6(syscall.SYS_PRCTL, 38 /* PR_SET_NO_NEW_PRIVS */, 1, 0, 0, 0, 0); e != 0 {
