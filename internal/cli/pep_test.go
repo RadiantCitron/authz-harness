@@ -436,3 +436,35 @@ func TestExitCodeName_ResourceLimit(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+// TC-010-07: pep CLI 는 음수 --clock-offset 을 PEP 호출 없이 ExitBadInput 으로 거부하고, 양수는 기존대로 동작한다.
+func TestPEPCLI_ClockOffsetNegativeRejected(t *testing.T) {
+	cases := []struct {
+		name   string
+		offset string
+		want   domain.ExitCode
+	}{
+		{"음수 -10m 거부", "-10m", domain.ExitBadInput},
+		{"양수 10s 허용", "10s", domain.ExitSuccess},
+	}
+	for _, tc := range cases {
+		for _, op := range []string{"read", "write"} {
+			t.Run(tc.name+"/"+op, func(t *testing.T) {
+				rig := setupPEPCLITestRig(t)
+				if err := os.WriteFile(filepath.Join(rig.workspaceDir, "n.txt"), []byte("x"), 0644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+				action := "file:" + op
+				rig.createGrant(t, "w-clock", "r", action, "n.txt")
+				tok := rig.issueToken(t, "w-clock", action+":n.txt", "authz-harness")
+				args := []string{op, "n.txt", "--token", tok, "--clock-offset", tc.offset}
+				if op == "write" {
+					args = append(args, "--data", "y")
+				}
+				if got := rig.runner.Run(context.Background(), args); got != tc.want {
+					t.Fatalf("exit = %d, want %d, stderr: %s", got, tc.want, rig.errOut.String())
+				}
+			})
+		}
+	}
+}

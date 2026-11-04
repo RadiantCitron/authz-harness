@@ -172,7 +172,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	var pdpSvc pdp.Service
 
 	if cfg.StatePath != "" {
-		st, err := state.NewFileStore(cfg.StatePath)
+		st, err := state.NewFileStore(cfg.StatePath, state.WithClock(cfg.Clock))
 		if err != nil {
 			_ = auditWriter.Close()
 			return nil, fmt.Errorf("app builder: state store: %w", err)
@@ -182,8 +182,8 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		if !cfg.VerifyOnly {
 			papSvc = pap.NewService(stateStore, auditWriter, pap.WithClock(cfg.Clock))
 		}
-		pipSvc = pip.NewService(stateStore)
-		pdpSvc = pdp.NewService(pipSvc, auditWriter)
+		pipSvc = pip.NewService(stateStore, pip.WithClock(cfg.Clock))
+		pdpSvc = pdp.NewService(pipSvc, auditWriter, pdp.WithClock(cfg.Clock))
 	}
 
 	// 6. 워크스페이스 격리(Jail) 및 PEP 게이트웨이

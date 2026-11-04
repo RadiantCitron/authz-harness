@@ -20,11 +20,11 @@ type GrantsState struct {
 	Epochs    domain.SecurityEpochs `json:"epochs"`
 }
 
-// NewEmptyGrantsState 는 기본 버전 1을 가진 비어있는 GrantsState 구조체를 반환한다.
-func NewEmptyGrantsState() *GrantsState {
+// NewEmptyGrantsState 는 주어진 시각을 UpdatedAt 으로 하는 기본 버전 1의 비어있는 GrantsState 구조체를 반환한다.
+func NewEmptyGrantsState(now time.Time) *GrantsState {
 	return &GrantsState{
 		Version:   1,
-		UpdatedAt: time.Now().UTC(),
+		UpdatedAt: now.UTC(),
 		Grants:    make([]domain.Grant, 0),
 		Epochs:    make(domain.SecurityEpochs),
 	}
@@ -46,10 +46,23 @@ type Store interface {
 type FileStore struct {
 	store *storage.AtomicFileStore[GrantsState]
 	mu    sync.Mutex
+	clock domain.Clock
+}
+
+// Option 은 FileStore 생성 옵션이다.
+type Option func(*FileStore)
+
+// WithClock 은 UpdatedAt 에 쓸 시계를 주입한다 (미주입 시 RealClock).
+func WithClock(c domain.Clock) Option {
+	return func(s *FileStore) {
+		if c != nil {
+			s.clock = c
+		}
+	}
 }
 
 // NewFileStore 는 지정된 경로를 관리하는 FileStore 인스턴스를 생성한다.
-func NewFileStore(path string) (*FileStore, error) {
+func NewFileStore(path string, opts ...Option) (*FileStore, error) {
 	if path == "" {
 		return nil, errors.New("state: path must not be empty")
 	}
@@ -59,17 +72,20 @@ func NewFileStore(path string) (*FileStore, error) {
 		return nil, fmt.Errorf("state: failed to create directory %s: %w", dir, err)
 	}
 
-	store := storage.NewAtomicFileStore[GrantsState](
+	fs := &FileStore{clock: domain.RealClock{}}
+	for _, o := range opts {
+		o(fs)
+	}
+
+	fs.store = storage.NewAtomicFileStore[GrantsState](
 		path,
 		storage.WithPerm[GrantsState](0644),
 		storage.WithDefault(func() *GrantsState {
-			return NewEmptyGrantsState()
+			return NewEmptyGrantsState(fs.clock.Now())
 		}),
 	)
 
-	return &FileStore{
-		store: store,
-	}, nil
+	return fs, nil
 }
 
 // Load 는 공유 락(LOCK_SH) 하에서 상태 파일을 읽어 역직렬화한다.
@@ -83,7 +99,7 @@ func (s *FileStore) Load() (*GrantsState, error) {
 		return nil, err
 	}
 	if state == nil {
-		state = NewEmptyGrantsState()
+		state = NewEmptyGrantsState(s.clock.Now())
 	}
 	ensureStateFields(state)
 	return state, nil
@@ -98,7 +114,7 @@ func (s *FileStore) Save(state *GrantsState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	normalizeState(state)
+	s.normalizeState(state)
 	return s.store.Write(state)
 }
 
@@ -116,7 +132,7 @@ func (s *FileStore) Update(fn func(state *GrantsState) error) error {
 		if err := fn(state); err != nil {
 			return err
 		}
-		normalizeState(state)
+		s.normalizeState(state)
 		return nil
 	})
 }
@@ -130,8 +146,8 @@ func ensureStateFields(state *GrantsState) {
 	}
 }
 
-func normalizeState(state *GrantsState) {
-	state.UpdatedAt = time.Now().UTC()
+func (s *FileStore) normalizeState(state *GrantsState) {
+	state.UpdatedAt = s.clock.Now().UTC()
 	if state.Version == 0 {
 		state.Version = 1
 	}

@@ -254,13 +254,13 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 
 		prohibited := map[string]bool{
-			`"os"`:                                 true,
-			`"io/fs"`:                              true,
-			`"path/filepath"`:                      true,
-			`"authz-harness/internal/authz/pdp"`:   true,
-			`"authz-harness/internal/authz/pip"`:   true,
-			`"authz-harness/internal/jail"`:        true,
-			`"authz-harness/internal/authn/keys"`:   true,
+			`"os"`:                                true,
+			`"io/fs"`:                             true,
+			`"path/filepath"`:                     true,
+			`"authz-harness/internal/authz/pdp"`:  true,
+			`"authz-harness/internal/authz/pip"`:  true,
+			`"authz-harness/internal/jail"`:       true,
+			`"authz-harness/internal/authn/keys"`: true,
 		}
 
 		for _, pkg := range pkgs {
@@ -367,6 +367,54 @@ func TestArchitectureGuardrails(t *testing.T) {
 						r, _ := filepath.Rel(root, path)
 						t.Errorf("TC-110-01 violation: %s imports internal/confinement", r)
 					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("failed to walk %s: %v", dir, err)
+			}
+		}
+	})
+
+	// TC-130-01: 코어 패키지는 time.Now 를 직접 쓰지 않는다 (허용: RealClock.Now, measureWall).
+	t.Run("TC-130-01: 코어 패키지 비제어 time.Now 0건", func(t *testing.T) {
+		allowed := map[string]bool{
+			"internal/domain/token.go#Now":                 true, // domain.RealClock.Now
+			"internal/orchestrator/spawner.go#measureWall": true, // 프로세스 실행 벽시계 측정
+		}
+		var targets []string
+		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail"} {
+			targets = append(targets, filepath.Join(root, "internal", rel))
+		}
+		for _, dir := range targets {
+			err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+				if err != nil {
+					return err
+				}
+				if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+					return nil
+				}
+				f, perr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+				if perr != nil {
+					return perr
+				}
+				r, _ := filepath.Rel(root, path)
+				r = filepath.ToSlash(r)
+				for _, decl := range f.Decls {
+					fd, ok := decl.(*ast.FuncDecl)
+					if !ok || fd.Body == nil {
+						continue
+					}
+					ast.Inspect(fd.Body, func(n ast.Node) bool {
+						sel, ok := n.(*ast.SelectorExpr)
+						if !ok || sel.Sel.Name != "Now" {
+							return true
+						}
+						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "time" && !allowed[r+"#"+fd.Name.Name] {
+							t.Errorf("TC-130-01 violation: %s %s uses time.Now", r, fd.Name.Name)
+						}
+						return true
+					})
 				}
 				return nil
 			})

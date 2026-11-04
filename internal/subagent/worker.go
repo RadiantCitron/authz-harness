@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
@@ -35,6 +36,14 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		FilePath: req.FilePath,
 	}
 
+	// 음수 오프셋은 만료된 토큰을 되살리는 손잡이이므로 PEP 호출 전에 거부한다 (Fail-Closed).
+	if req.ClockOffsetSeconds < 0 {
+		resp.ExitCode = int(domain.ExitBadInput)
+		resp.Reason = string(domain.ReasonInvalidArguments)
+		resp.Error = "clock_offset_sec must not be negative"
+		return resp, resp.ExitCode
+	}
+
 	// PEP Gateway 요청 조립 (RequireTraceID: true로 위임하여 Gate 0에서 동일하게 차단)
 	pepReq := pep.Request{
 		Token:                req.Token,
@@ -44,6 +53,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		TraceID:              req.TraceID,
 		RequireTraceID:       true,
 		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
+		ClockOffset:          time.Duration(req.ClockOffsetSeconds) * time.Second,
 	}
 
 	// PEP 5단계 관문 집행

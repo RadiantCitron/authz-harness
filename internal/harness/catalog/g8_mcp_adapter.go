@@ -143,12 +143,28 @@ type inProcSpawnerBridge struct {
 }
 
 func (b *inProcSpawnerBridge) Spawn(ctx context.Context, req subagent.SubagentRequest) (*orchestrator.SpawnResult, error) {
+	// 워커와 같은 규칙: 음수 오프셋은 PEP 호출 없이 거부한다.
+	if req.ClockOffsetSeconds < 0 {
+		return &orchestrator.SpawnResult{
+			TraceID:  req.TraceID,
+			ExitCode: int(domain.ExitBadInput),
+			Response: &subagent.SubagentResponse{
+				TraceID:  req.TraceID,
+				ExitCode: int(domain.ExitBadInput),
+				Action:   req.Action,
+				FilePath: req.FilePath,
+				Reason:   string(domain.ReasonInvalidArguments),
+				Error:    "clock_offset_sec must not be negative",
+			},
+		}, nil
+	}
 	exitCode, err := executeHarnessAction(ctx, b.stack.Env, b.stack, ActionRequest{
-		Token:    req.Token,
-		Action:   domain.Action(req.Action),
-		Resource: req.FilePath,
-		Data:     []byte(req.Data),
-		TraceID:  req.TraceID,
+		Token:       req.Token,
+		Action:      domain.Action(req.Action),
+		Resource:    req.FilePath,
+		Data:        []byte(req.Data),
+		TraceID:     req.TraceID,
+		ClockOffset: time.Duration(req.ClockOffsetSeconds) * time.Second,
 	})
 	if err != nil {
 		return &orchestrator.SpawnResult{

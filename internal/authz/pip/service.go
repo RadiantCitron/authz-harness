@@ -34,13 +34,31 @@ type Service interface {
 // pipService 는 PIP Service의 기본 구현체다.
 type pipService struct {
 	store state.Store
+	clock domain.Clock
+}
+
+// Option 은 PIP 서비스 생성 옵션이다.
+type Option func(*pipService)
+
+// WithClock 은 스냅샷 시각에 쓸 시계를 주입한다 (미주입 시 RealClock).
+func WithClock(c domain.Clock) Option {
+	return func(s *pipService) {
+		if c != nil {
+			s.clock = c
+		}
+	}
 }
 
 // NewService 는 PIP 서비스를 생성한다.
-func NewService(store state.Store) Service {
-	return &pipService{
+func NewService(store state.Store, opts ...Option) Service {
+	s := &pipService{
 		store: store,
+		clock: domain.RealClock{},
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // GetSubjectSnapshot 은 대상 주체의 현재 Epoch 및 활성 Grant 목록을 읽어 스냅샷으로 반환한다.
@@ -74,7 +92,7 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 		CurrentEpoch:  epoch,
 		ActiveGrants:  activeGrants,
 		RevokedGrants: revokedGrants,
-		Timestamp:     time.Now().UTC(),
+		Timestamp:     s.clock.Now().UTC(),
 	}, nil
 }
 

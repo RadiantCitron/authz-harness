@@ -140,6 +140,7 @@ type ActionRequest struct {
 	CallerID             string
 	InjectAuditFailure   bool
 	InjectRevokeBeforeIO bool
+	ClockOffset          time.Duration // 0 이상만 허용(서브프로세스 경로·브리지는 음수를 ExitBadInput 으로 거부)
 }
 
 // executeHarnessAction 은 env.BinaryPath 유무에 따라 서브프로세스 또는 인메모리 PEP로 액션을 라우팅하여 실행하고 종료 코드를 반환한다.
@@ -169,6 +170,7 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 			FilePath:             req.Resource,
 			Data:                 string(req.Data),
 			InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
+			ClockOffsetSeconds:   int64(req.ClockOffset / time.Second),
 		})
 		if err != nil {
 			// 감사 실패 등 도메인 에러 판정
@@ -190,6 +192,7 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 		TraceID:              req.TraceID,
 		InjectAuditFailure:   req.InjectAuditFailure,
 		InjectRevokeBeforeIO: req.InjectRevokeBeforeIO,
+		ClockOffset:          req.ClockOffset,
 	}
 
 	res, err := stack.PEP.Execute(ctx, pepReq)

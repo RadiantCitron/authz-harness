@@ -23,6 +23,7 @@ type SpawnConfig struct {
 	Args       []string     // 명령행 인자 (주의: 토큰 노출 금지)
 	Limits     Limits       // 자원·수명 한계 (영값은 기본값으로 정규화)
 	Audit      audit.Writer // 부모 감사 로거 (선택적)
+	Clock      domain.Clock // 감사 시각용 시계 (nil 이면 RealClock)
 	ExtraEnv   []string     // 추가 안전 환경변수 (선택적)
 
 	// Confiner·Confinement 의 영값(nil, Require=false)은 격리 꺼짐이며 기존 동작과 같다.
@@ -71,6 +72,9 @@ func NewSubprocessSpawner(cfg SpawnConfig) (*SubprocessSpawner, error) {
 		return nil, err
 	}
 	cfg.Limits = limits
+	if cfg.Clock == nil {
+		cfg.Clock = domain.RealClock{}
+	}
 	return &SubprocessSpawner{cfg: cfg}, nil
 }
 
@@ -88,7 +92,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 	// 1. 부모 사전 감사 이벤트 (ORCHESTRATE_SPAWN)
 	if s.cfg.Audit != nil {
 		if err := s.cfg.Audit.Log(audit.Event{
-			Timestamp: time.Now(),
+			Timestamp: s.cfg.Clock.Now(),
 			TraceID:   req.TraceID,
 			Step:      "ORCHESTRATE_SPAWN",
 			Actor:     "orchestrator",
@@ -130,7 +134,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 		perr := c.Prepare(cmd, s.cfg.Confinement)
 		if s.cfg.Audit != nil {
 			ev := audit.Event{
-				Timestamp: time.Now(),
+				Timestamp: s.cfg.Clock.Now(),
 				TraceID:   req.TraceID,
 				Step:      "ORCHESTRATE_CONFINE",
 				Actor:     "orchestrator",
@@ -165,9 +169,9 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 		}
 	}
 
-	startTime := time.Now()
-	_ = cmd.Run() // 종료 형태는 아래에서 관찰된 사실(버퍼·ctx·ProcessState)로만 판정한다.
-	duration := time.Since(startTime)
+	var runErr error
+	duration := measureWall(func() { runErr = cmd.Run() })
+	_ = runErr // 종료 형태는 아래에서 관찰된 사실(버퍼·ctx·ProcessState)로만 판정한다.
 
 	// 종료 형태 관찰 (순서 중요: 출력 초과가 그룹 SIGKILL 을 일으키므로 먼저 본다)
 	term := TermExited
@@ -218,7 +222,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 	// 3. 부모 사후 감사 이벤트 (단일 지점)
 	if s.cfg.Audit != nil {
 		ev := audit.Event{
-			Timestamp: time.Now(),
+			Timestamp: s.cfg.Clock.Now(),
 			TraceID:   req.TraceID,
 			Actor:     "orchestrator",
 			Action:    req.Action,
@@ -250,4 +254,12 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 	}
 
 	return result, nil
+}
+
+// measureWall 은 프로세스 실행의 실제 경과 시간을 잰다.
+// 가상 시계가 아닌 벽시계여야 하므로 TC-130-01 허용 목록에 있는 유일한 time.Now 사용처다.
+func measureWall(fn func()) time.Duration {
+	start := time.Now()
+	fn()
+	return time.Since(start)
 }

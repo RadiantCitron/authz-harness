@@ -62,7 +62,7 @@ func ComputeEventHash(prevHash string, ev Event) string {
 // NormalizeEvent 는 감사 이벤트의 최상위 필드를 정규화한다.
 func NormalizeEvent(ev *Event) {
 	if ev.Timestamp.IsZero() {
-		ev.Timestamp = time.Now().UTC()
+		ev.Timestamp = domain.RealClock{}.Now()
 	} else {
 		ev.Timestamp = ev.Timestamp.UTC()
 	}

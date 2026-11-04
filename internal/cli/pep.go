@@ -153,6 +153,10 @@ func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode 
 			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset: %v\n", err)
 			return domain.ExitBadInput
 		}
+		if parsed < 0 {
+			fmt.Fprintf(r.errOut, "Error: --clock-offset must not be negative (만료 토큰 부활 방지)\n")
+			return domain.ExitBadInput
+		}
 		clockOffset = parsed
 	}
 
@@ -261,6 +265,10 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 		parsed, err := time.ParseDuration(clockOffsetStr)
 		if err != nil {
 			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset: %v\n", err)
+			return domain.ExitBadInput
+		}
+		if parsed < 0 {
+			fmt.Fprintf(r.errOut, "Error: --clock-offset must not be negative (만료 토큰 부활 방지)\n")
 			return domain.ExitBadInput
 		}
 		clockOffset = parsed
