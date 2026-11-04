@@ -81,9 +81,10 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 
 		prohibited := map[string]bool{
-			`"authz-harness/internal/authz/state"`: true,
-			`"authz-harness/internal/authz/pap"`:   true,
-			`"authz-harness/internal/authn/keys"`:  true,
+			`"authz-harness/internal/authz/state"`:      true,
+			`"authz-harness/internal/authz/pap"`:        true,
+			`"authz-harness/internal/authn/keys"`:       true,
+			`"authz-harness/internal/audit/checkpoint"`: true,
 		}
 
 		for _, pkg := range pkgs {

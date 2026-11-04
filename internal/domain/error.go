@@ -114,7 +114,9 @@ func ExitCodeForReason(r Reason) ExitCode {
 		ReasonMissingTraceContext:
 		return ExitBadInput // 14
 	case ReasonAuditLogFailed,
-		ReasonAuditIntegrityBroken:
+		ReasonAuditIntegrityBroken,
+		ReasonAuditTruncationDetected,
+		ReasonAuditCheckpointMismatch:
 		return ExitAuditFailure // 15
 	case ReasonResourceTimeout,
 		ReasonResourceOutputLimit:

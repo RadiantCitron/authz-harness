@@ -146,6 +146,12 @@ const (
 	// ReasonAuditIntegrityBroken 은 감사 로그 해시 체인 무결성이 훼손되었음을 나타낸다.
 	ReasonAuditIntegrityBroken Reason = "AUDIT_INTEGRITY_BROKEN"
 
+	// ReasonAuditTruncationDetected 는 서명 체크포인트보다 감사 기록이 짧아졌음(꼬리 절단·삭제)을 나타낸다.
+	ReasonAuditTruncationDetected Reason = "AUDIT_TRUNCATION_DETECTED"
+
+	// ReasonAuditCheckpointMismatch 는 서명 체크포인트가 없거나 위조되었거나 기록과 맞지 않음을 나타낸다.
+	ReasonAuditCheckpointMismatch Reason = "AUDIT_CHECKPOINT_MISMATCH"
+
 	// ReasonInternalError 는 시스템 예외, I/O 실패 등 내부 복구 불가능 오류를 나타낸다.
 	ReasonInternalError Reason = "INTERNAL_ERROR"
 

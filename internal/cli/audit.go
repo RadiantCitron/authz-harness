@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"authz-harness/internal/audit"
+	"authz-harness/internal/audit/checkpoint"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/ui"
 )
@@ -20,14 +22,21 @@ type AuditRunner struct {
 	out       io.Writer
 	errOut    io.Writer
 	auditPath string
+	privPath  string // Zone A 감사 체크포인트 서명 키
+	pubPath   string // Zone B 감사 체크포인트 검증 키
+	ckptPath  string // Zone B 기본 체크포인트 위치
 }
 
 // NewAuditRunner 는 AuditRunner 인스턴스를 생성한다.
-func NewAuditRunner(out, errOut io.Writer, auditPath string) *AuditRunner {
+// privKeyPath, pubJWKSPath 는 토큰 서명 키 위치이며, 감사 전용 키와 체크포인트의 기본 위치를 같은 구역에 둔다.
+func NewAuditRunner(out, errOut io.Writer, auditPath, privKeyPath, pubJWKSPath string) *AuditRunner {
 	return &AuditRunner{
 		out:       out,
 		errOut:    errOut,
 		auditPath: auditPath,
+		privPath:  filepath.Join(filepath.Dir(privKeyPath), "audit_signing_key.priv.json"),
+		pubPath:   filepath.Join(filepath.Dir(pubJWKSPath), "audit_verification_key.pub.json"),
+		ckptPath:  filepath.Join(filepath.Dir(pubJWKSPath), "audit_checkpoint.json"),
 	}
 }
 
@@ -44,6 +53,8 @@ func (r *AuditRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		return r.runTimeline(ctx, args[1:])
 	case "verify":
 		return r.runVerify(ctx, args[1:])
+	case "checkpoint":
+		return r.runCheckpoint(args[1:])
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown audit command '%s'\n", subcmd)
 		r.printUsage()
@@ -134,6 +145,23 @@ func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.Exi
 }
 
 func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitCode {
+	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
+	fs.SetOutput(r.errOut)
+	var ckpt string
+	fs.StringVar(&ckpt, "checkpoint", "", "서명 체크포인트 파일 (지정 시 꼬리 절단·재작성·삭제도 검사)")
+	if err := fs.Parse(args); err != nil {
+		return domain.ExitBadInput
+	}
+
+	if ckpt != "" {
+		if err := checkpoint.Verify(r.auditPath, ckpt, r.pubPath); err != nil {
+			fmt.Fprintf(r.out, "FAIL: audit checkpoint verification failed: %v\n", err)
+			return domain.ExitCodeFromError(err, domain.ExitAuditFailure)
+		}
+		fmt.Fprintln(r.out, "PASS: audit hash chain and signed checkpoint verified successfully")
+		return domain.ExitSuccess
+	}
+
 	if err := audit.VerifyHashChain(r.auditPath); err != nil {
 		fmt.Fprintf(r.out, "FAIL: audit hash chain is invalid or tampered: %v\n", err)
 		return domain.ExitAuditFailure
@@ -142,9 +170,27 @@ func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 	return domain.ExitSuccess
 }
 
+func (r *AuditRunner) runCheckpoint(args []string) domain.ExitCode {
+	fs := flag.NewFlagSet("audit checkpoint", flag.ContinueOnError)
+	fs.SetOutput(r.errOut)
+	out := r.ckptPath
+	fs.StringVar(&out, "out", r.ckptPath, "체크포인트 출력 경로")
+	if err := fs.Parse(args); err != nil {
+		return domain.ExitBadInput
+	}
+	c, err := checkpoint.Create(r.auditPath, r.privPath, r.pubPath, out, domain.RealClock{})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to create audit checkpoint: %v\n", err)
+		return domain.ExitCodeFromError(err, domain.ExitAuditFailure)
+	}
+	fmt.Fprintf(r.out, "OK: checkpoint written to %s (records=%d, kid=%s)\n", out, c.LineCount, c.KeyID)
+	return domain.ExitSuccess
+}
+
 func (r *AuditRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "Usage: authz-harness audit <command> [options]")
 	fmt.Fprintln(r.errOut, "\nCommands:")
 	fmt.Fprintln(r.errOut, "  timeline  단일 TraceID에 속한 다중 프로세스 감사 타임라인 및 계보 트리 시각화")
-	fmt.Fprintln(r.errOut, "  verify    전체 audit.jsonl의 SHA-256 해시 체인 및 무결성 검증")
+	fmt.Fprintln(r.errOut, "  verify    전체 audit.jsonl의 SHA-256 해시 체인 및 무결성 검증 (--checkpoint <path>: 서명 체크포인트 대조)")
+	fmt.Fprintln(r.errOut, "  checkpoint 감사 체인 서명 체크포인트 생성 (--out <path>)")
 }

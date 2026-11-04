@@ -104,6 +104,8 @@ func TestTC_010_04_AllReasonsMappedToExitCode(t *testing.T) {
 		{domain.ReasonMissingTraceContext, domain.ExitBadInput},
 		{domain.ReasonAuditLogFailed, domain.ExitAuditFailure},
 		{domain.ReasonAuditIntegrityBroken, domain.ExitAuditFailure},
+		{domain.ReasonAuditTruncationDetected, domain.ExitAuditFailure},
+		{domain.ReasonAuditCheckpointMismatch, domain.ExitAuditFailure},
 		{domain.ReasonConfinementUnavailable, domain.ExitInternalError},
 		{domain.Reason("UNKNOWN_RANDOM_REASON"), domain.ExitInternalError},
 	}

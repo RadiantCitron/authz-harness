@@ -123,7 +123,7 @@ func main() {
 			exitCode := runRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "audit":
-			auditRunner := cli.NewAuditRunner(os.Stdout, os.Stderr, auditPath)
+			auditRunner := cli.NewAuditRunner(os.Stdout, os.Stderr, auditPath, privKeyPath, pubJWKSPath)
 			exitCode := auditRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "mcp":
