@@ -162,3 +162,22 @@ func TestAuditCheckpointCLI(t *testing.T) { // TC-040-07
 		t.Fatalf("truncated verify: %v", c)
 	}
 }
+
+func TestAuditTreeCLI(t *testing.T) { // TC-050-05
+	dir := t.TempDir()
+	auditFile := filepath.Join(dir, "audit.jsonl")
+	w, _ := audit.NewJSONLWriter(auditFile)
+	_ = w.Log(audit.Event{TraceID: "tr-1", Actor: "o", Action: "token.exchanged", Success: true, Decision: "allow",
+		Metadata: map[string]interface{}{"parent_jti": "pj", "parent_sub": "Root", "child_jti": "cj", "child_sub": "w1", "delegation_depth": 1}})
+	_ = w.Close()
+
+	var out, errOut bytes.Buffer
+	r := cli.NewAuditRunner(&out, &errOut, auditFile, filepath.Join(dir, "p", "k"), filepath.Join(dir, "q", "j"))
+	if c := r.Run(context.Background(), []string{"tree"}); c != domain.ExitSuccess || !strings.Contains(out.String(), "[w1] jti=cj depth=1") {
+		t.Fatalf("latest: %v\n%s", c, out.String())
+	}
+	errOut.Reset()
+	if c := r.Run(context.Background(), []string{"tree", "--trace-id", "nope"}); c != domain.ExitBadInput || !strings.Contains(errOut.String(), "no audit events found for trace ID") {
+		t.Fatalf("missing: %v %s", c, errOut.String())
+	}
+}

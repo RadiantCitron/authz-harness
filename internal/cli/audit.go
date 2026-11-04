@@ -53,6 +53,8 @@ func (r *AuditRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		return r.runTimeline(ctx, args[1:])
 	case "verify":
 		return r.runVerify(ctx, args[1:])
+	case "tree":
+		return r.runTree(args[1:])
 	case "checkpoint":
 		return r.runCheckpoint(args[1:])
 	default:
@@ -170,6 +172,68 @@ func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 	return domain.ExitSuccess
 }
 
+// runTree 는 토큰(jti) 계보 기반 위임 트리를 출력한다. 보기 전용이며 해시로 검증되지 않은 metadata 필드를 포함한다.
+func (r *AuditRunner) runTree(args []string) domain.ExitCode {
+	fs := flag.NewFlagSet("audit tree", flag.ContinueOnError)
+	fs.SetOutput(r.errOut)
+	var traceID string
+	fs.StringVar(&traceID, "trace-id", "", "대상 TraceID (생략 시 가장 최근 trace)")
+	if err := fs.Parse(args); err != nil {
+		return domain.ExitBadInput
+	}
+
+	f, err := os.Open(r.auditPath)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to open audit file '%s': %v\n", r.auditPath, err)
+		return domain.ExitAuditFailure
+	}
+	defer f.Close()
+
+	var all []audit.Event
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var ev audit.Event
+		if json.Unmarshal([]byte(line), &ev) == nil {
+			all = append(all, ev)
+		}
+	}
+	if len(all) == 0 {
+		fmt.Fprintf(r.errOut, "Error: no audit events found in %s\n", r.auditPath)
+		return domain.ExitAuditFailure
+	}
+
+	target := strings.TrimSpace(traceID)
+	if target == "" {
+		for i := len(all) - 1; i >= 0; i-- {
+			if all[i].TraceID != "" {
+				target = all[i].TraceID
+				break
+			}
+		}
+	}
+	if target == "" {
+		fmt.Fprintf(r.errOut, "Error: --trace-id is required or no valid trace found\n")
+		return domain.ExitBadInput
+	}
+	var matched []audit.Event
+	for _, ev := range all {
+		if ev.TraceID == target {
+			matched = append(matched, ev)
+		}
+	}
+	if len(matched) == 0 {
+		fmt.Fprintf(r.errOut, "Error: no audit events found for trace ID '%s'\n", target)
+		return domain.ExitBadInput
+	}
+	ui.NewTreeFormatter(r.out).Render(target, ui.BuildDelegationTree(matched))
+	return domain.ExitSuccess
+}
+
 func (r *AuditRunner) runCheckpoint(args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("audit checkpoint", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -192,5 +256,6 @@ func (r *AuditRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "\nCommands:")
 	fmt.Fprintln(r.errOut, "  timeline  단일 TraceID에 속한 다중 프로세스 감사 타임라인 및 계보 트리 시각화")
 	fmt.Fprintln(r.errOut, "  verify    전체 audit.jsonl의 SHA-256 해시 체인 및 무결성 검증 (--checkpoint <path>: 서명 체크포인트 대조)")
+	fmt.Fprintln(r.errOut, "  tree      토큰(jti) 계보 기반 위임 트리 (보기 전용, 해시로 검증되지 않은 metadata 필드 포함)")
 	fmt.Fprintln(r.errOut, "  checkpoint 감사 체인 서명 체크포인트 생성 (--out <path>)")
 }

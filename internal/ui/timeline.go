@@ -100,30 +100,5 @@ func (f *TimelineFormatter) RenderTimeline(traceID string, chainValid bool, even
 
 func (f *TimelineFormatter) renderProcessTree(events []audit.Event) {
 	fmt.Fprintln(f.out, "Process Tree & Delegation Genealogy:")
-
-	// 이벤트에서 주체 및 계보 정보 수집
-	var actors []string
-	seen := make(map[string]bool)
-	for _, ev := range events {
-		actor := ev.Actor
-		if actor != "" && !seen[actor] {
-			seen[actor] = true
-			actors = append(actors, actor)
-		}
-		if ev.AgentID != "" && !seen[ev.AgentID] {
-			seen[ev.AgentID] = true
-			actors = append(actors, ev.AgentID)
-		}
-	}
-
-	if len(actors) == 0 {
-		fmt.Fprintln(f.out, "└─ [Process] Single Process Execution")
-		return
-	}
-
-	indent := "└─ "
-	for i, act := range actors {
-		prefix := strings.Repeat("   ", i) + indent
-		fmt.Fprintf(f.out, "%s[Subject: %s]\n", prefix, act)
-	}
+	NewTreeFormatter(f.out).RenderNodes(BuildDelegationTree(events))
 }
