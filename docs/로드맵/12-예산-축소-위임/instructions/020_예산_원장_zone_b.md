@@ -1,6 +1,6 @@
 # [구현지시서 020] Zone B 예산 원장(`internal/authn/budget`) 구현
 
-> **문서 상태**: `Draft`
+> **문서 상태**: `Done` (2026-11-04)
 > **상위 대시보드**: [12번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md) | 교정 근거: [021번 보고서](../../../보고서/021-12번로드맵_구조결함_및_진행가능성_검증보고서.md) B-1·B-6·B-7
 > **선행 조건**: [010_예산_모델_adr_및_도메인_정의.md](010_예산_모델_adr_및_도메인_정의.md) 완료
 > **후속 단계**: [030_교환_서비스_단조_축소_검증.md](030_교환_서비스_단조_축소_검증.md)
@@ -107,6 +107,6 @@ func NewFileLedger(path string, clock domain.Clock) (*FileLedger, error)
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `internal/authn/budget` `FileLedger`(`Init`/`Reserve`/`Consume`/`Refund`/`Get`, 만료 회수) 구현
-- [ ] 고루틴·다중 프로세스 경합, 만료 회수, 손상 Fail-Closed 테스트 통과
-- [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
+- [x] `internal/authn/budget` `FileLedger`(`Init`/`Reserve`/`Consume`/`Refund`/`Get`, 만료 회수) 구현
+- [x] 고루틴·다중 프로세스 경합, 만료 회수, 손상 Fail-Closed 테스트 통과
+- [x] 대시보드 상태 갱신 및 변경 파일 단독 커밋
