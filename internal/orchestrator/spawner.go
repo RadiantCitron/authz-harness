@@ -97,7 +97,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			Step:      "ORCHESTRATE_SPAWN",
 			Actor:     "orchestrator",
 			Action:    req.Action,
-			Resource:  req.FilePath,
+			Resource:  auditResource(req),
 			Success:   true,
 			Metadata: map[string]interface{}{
 				"binary": s.cfg.BinaryPath,
@@ -139,7 +139,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 				Step:      "ORCHESTRATE_CONFINE",
 				Actor:     "orchestrator",
 				Action:    AuditActionAgentConfined,
-				Resource:  req.FilePath,
+				Resource:  auditResource(req),
 				Decision:  "allow",
 				Success:   true,
 				Metadata: map[string]interface{}{
@@ -226,7 +226,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			TraceID:   req.TraceID,
 			Actor:     "orchestrator",
 			Action:    req.Action,
-			Resource:  req.FilePath,
+			Resource:  auditResource(req),
 			Success:   result.ExitCode == 0,
 			Metadata: map[string]interface{}{
 				"exit_code":   result.ExitCode,
@@ -262,4 +262,13 @@ func measureWall(fn func()) time.Duration {
 	start := time.Now()
 	fn()
 	return time.Since(start)
+}
+
+// auditResource 는 부모 감사 이벤트의 resource 를 정한다. net:fetch 의 URL 은 자격 정보·질의 문자열을 담을 수 있으므로
+// 원문 대신 지문만 기록한다(PEP 가 <invalid-url> 로 가리는 것과 같은 원칙). 다른 액션은 그대로다.
+func auditResource(req subagent.SubagentRequest) string {
+	if req.Action == string(domain.ActionNetFetch) {
+		return "net-url:" + domain.DataDigest([]byte(req.FilePath))
+	}
+	return req.FilePath
 }

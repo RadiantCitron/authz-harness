@@ -16,7 +16,7 @@ import (
 )
 
 // lastScenarioID 는 카탈로그의 마지막 시나리오 번호다. 로드맵이 시나리오를 추가할 때 이 상수만 바꾼다.
-const lastScenarioID = 73
+const lastScenarioID = 79
 
 // TestCatalog_ScenarioCount 는 카탈로그 ID 집합이 E2E-01~E2E-<lastScenarioID> 와 정확히 같은지 검증한다.
 func TestCatalog_ScenarioCount(t *testing.T) {

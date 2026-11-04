@@ -153,6 +153,17 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 		} else {
 			sb.WriteString(fmt.Sprintf("  - 해설: 승인이 없거나, 만료되었거나, 다른 토큰·다른 인자에 묶인 승인이라 %s에서 사람 승인 필요(18)로 멈췄다. 파일은 한 바이트도 바뀌지 않았다.\n", gateName))
 		}
+	case "G15":
+		switch {
+		case meta.Expected.ExitCode == domain.ExitSuccess:
+			sb.WriteString("  - 해설: allow-list 에 있는 루프백 포트로의 GET 이 통과했다. 감사에는 URL 원문이 아니라 정규화한 host:port 와 SHA-256 지문만 남는다.\n")
+		case meta.Expected.ExitCode == domain.ExitPathViolation:
+			sb.WriteString("  - 해설: 격리된 정직 워커는 허용 포트에서 응답을 받았고, PEP 를 건너뛰는 악의 워커는 다른 포트에 연결하지 못했다(대조군 쌍).\n          차단은 앱 코드가 아니라 OS 커널이 했으며 판정은 부모가 관찰한 리스너 accept 수로 내렸다.\n")
+		case meta.Expected.ExitCode == domain.ExitResourceLimit:
+			sb.WriteString("  - 해설: 새 도구의 큰 응답도 부모가 정한 출력 한계(17)에서 끝났다. 가드 자체의 상한 초과(TOOL_LIMIT_EXCEEDED, 12)와는 다른 층이다.\n")
+		default:
+			sb.WriteString(fmt.Sprintf("  - 해설: %s에서 거부되었다(종료 코드 %d). 사유는 EGRESS_DENIED(허용 목록 밖·표기 우회·리다이렉트), EXEC_NOT_ALLOWED(미등록 실행 ID),\n          EXEC_ARG_REJECTED(인자 형식 위반), TOOL_LIMIT_EXCEEDED(가드 상한) 중 하나이며 모두 인가 거부(12)다. 서버는 호출되지 않았고 워크스페이스는 바뀌지 않았다.\n", gateName, actualExit))
+		}
 	case "G10":
 		if meta.Expected.Audit.ExpectedReason == domain.ReasonConfinementUnavailable {
 			sb.WriteString("  - 해설: 격리 필수 모드인데 OS 격리(CONFINEMENT_UNAVAILABLE)를 적용할 수 없어 부모가 자식을 기동하지 않고 거부(Fail-Closed, 16)했다.\n")

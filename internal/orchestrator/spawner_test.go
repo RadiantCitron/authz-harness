@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -500,5 +501,17 @@ func TestSpawner_FailClosedOnAuditError(t *testing.T) {
 	// 서브프로세스가 실제로 실행되지 않아 파일이 생성되지 않았음을 보장
 	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
 		t.Fatal("fail-closed violated: subprocess ran and created file despite audit failure")
+	}
+}
+
+// 로드맵 16 / 060: net:fetch URL 원문(자격 정보 포함 가능)은 부모 감사 resource 에 남기지 않는다.
+func TestAuditResource_RedactsNetFetchURL(t *testing.T) {
+	raw := "http://user:s3cr3t@127.0.0.1:80/?token=abc"
+	got := auditResource(subagent.SubagentRequest{Action: "net:fetch", FilePath: raw})
+	if strings.Contains(got, "s3cr3t") || strings.Contains(got, "token") || got != "net-url:"+domain.DataDigest([]byte(raw)) {
+		t.Fatalf("resource not redacted: %q", got)
+	}
+	if got := auditResource(subagent.SubagentRequest{Action: "file:read", FilePath: "docs/a.txt"}); got != "docs/a.txt" {
+		t.Fatalf("file resource must be unchanged: %q", got)
 	}
 }
