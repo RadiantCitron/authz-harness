@@ -1,6 +1,6 @@
-# [구현지시서 040] 스포너 격리 배선, Fail-Closed 모드 및 `agent.confined` 감사 기록
+# [구현지시서 040] 스포너 격리 배선, Fail-Closed 및 `agent.confined` 감사 기록
 
-> **문서 상태**: `Draft`
+> **문서 상태**: `Draft` (2026-11-04 [020번 보고서](../../../보고서/020-11번로드맵_구조결함_및_진행가능성_검증보고서.md) 기준 교정)
 > **상위 대시보드**: [11번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **선행 조건**: [030_linux_어댑터_및_검증_환경.md](030_linux_어댑터_및_검증_환경.md) 완료
 > **후속 단계**: [050_g10_악의_워커_시나리오.md](050_g10_악의_워커_시나리오.md)
@@ -9,8 +9,11 @@
 
 ## 1. 목적 및 배경
 
-`010`~`030`에서 만든 `confinement.Confiner`와 `confinement.ConfinementPolicy`를 오케스트레이터 스포너(`internal/orchestrator/spawner.go`)와 단일 합성 루트(`internal/app`)에 배선한다.
-격리 필수 모드(`RequireConfinement: true`)에서 어댑터가 없거나(`nil` 또는 `NoopConfiner`) 프로파일/커널 격리 적용(`Prepare`)이 실패하면 자식 프로세스를 아예 기동하지 않고 `ExitInternalError(16)`로 거부(Fail-Closed)하며, 악의 워커가 커널 격리에 의해 차단되었을 때 `Action: "agent.confined"`, `Decision: "deny"`, `Reason: "CONFINEMENT_VIOLATION"` 감사 이벤트를 기록하여 하네스 Quad-Assertion(`assertion.go`)과 정확히 맞물리게 한다.
+010~030의 `Confiner`·`Policy`를 오케스트레이터 스포너([`spawner.go`](../../../../internal/orchestrator/spawner.go)) **한 파일**에 배선한다. 이 단계는 `orchestrator` 모듈만 고친다(모듈 경계 단계, 020번 보고서 L-8). 악의 워커 모드와 시나리오는 050에서 만든다.
+
+**배선 지점은 `SpawnConfig`다.** 스포너를 만드는 곳은 7곳이다([`cli/orchestrate.go`](../../../../internal/cli/orchestrate.go) 165행, [`cli/mcp.go`](../../../../internal/cli/mcp.go) 146행, [`catalog/helpers.go`](../../../../internal/harness/catalog/helpers.go) 143행, [`g8_mcp_adapter.go`](../../../../internal/harness/catalog/g8_mcp_adapter.go) 35행, [`g9_resource_limits.go`](../../../../internal/harness/catalog/g9_resource_limits.go) 3곳, [`multi_hop.go`](../../../../internal/orchestrator/multi_hop.go) 118행). `internal/app`은 스포너를 만들지 않는다. 새 필드의 영값을 "격리 꺼짐"으로 정해 7곳을 고치지 않는다(L-6).
+
+**스포너는 부모가 아는 사실만 감사한다.** 부모가 아는 것은 "격리를 적용했는가/할 수 없었는가"다. 커널이 자식의 어떤 시스템콜을 막았는지는 부모가 알 수 없다. 그래서 교정 전 설계의 "격리 중 자식이 `13`으로 끝나면 `CONFINEMENT_VIOLATION`으로 기록"은 폐기한다. `13`은 PEP 경로 위반([`error.go`](../../../../internal/domain/error.go) 110행)과 같은 코드라서, 정직한 워커의 PEP 거부를 커널 차단으로 오기록하기 때문이다(L-3). [`termination.go`](../../../../internal/orchestrator/termination.go)의 `classifyExit`는 **수정하지 않는다**.
 
 ---
 
@@ -18,60 +21,72 @@
 
 - **변경**:
   - `internal/orchestrator/spawner.go`:
-    - `SpawnConfig`에 `Confiner confinement.Confiner` 및 `ConfinementPolicy confinement.ConfinementPolicy` 필드 추가
-    - 스폰 직전 `Confiner.Prepare(cmd, policy)` 호출 및 `defer cleanup()` 보장
-    - 격리 적용 실패 시 자식 미기동 Fail-Closed(`ExitInternalError = 16`, `ReasonConfinementUnavailable`) 및 감사 기록
-    - 격리 활성 상태에서 자식이 `ExitPathViolation(13)`(`ReasonConfinementViolation`) 등으로 차단 종료되면 사후 감사 이벤트(`Action: "agent.confined"`, `Decision: "deny"`, `Reason: "CONFINEMENT_VIOLATION"`) 기록
-  - `internal/subagent/testworker_enabled.go` (`//go:build testworker`) 및 `internal/cli/subagent.go`:
-    - `-test-fault` 및 `-test-target <path>` 플래그를 통해 PEP를 완전히 건너뛰고 직접 OS 시스템콜을 호출하는 악의 워커 모드 4종(`bypass_read_zone_a`, `bypass_write_outside`, `bypass_open_socket`, `bypass_child_read_zone_a`) 추가
-  - `internal/orchestrator/spawner_confinement_test.go` [신규]: 스포너 격리 배선·Fail-Closed·정직한 워커 비회귀 단위 테스트
+    - `SpawnConfig`에 `Confiner confinement.Confiner`, `Confinement confinement.Policy` 추가
+    - `cmd` 조립(Env·프로세스 그룹·stdin·출력 버퍼) 후, `cmd.Run()` 직전에 격리 적용 블록 1곳
+  - `internal/orchestrator/termination.go`: 상수 `AuditActionAgentConfined = "agent.confined"` 추가(`AuditActionLimitExceeded` 옆, L-9)
+  - `internal/orchestrator/spawner_confinement_test.go` [신규]
 - **무영향**:
-  - `Confiner == nil`이고 `RequireConfinement == false`인 기본 설정에서는 기존 스포너 동작 및 `ORCHESTRATE_SPAWN` / `ORCHESTRATE_COLLECT` 2이벤트 구조와 100% 동일하여 기존 `E2E-01`~`E2E-44` 시나리오에 영향을 주지 않는다.
+  - `Confiner == nil && !Confinement.Require`(영값)이면 격리 블록을 건너뛴다. 감사는 기존과 같은 `ORCHESTRATE_SPAWN` / `ORCHESTRATE_COLLECT`(또는 `ORCHESTRATE_LIMIT_EXCEEDED`) 2이벤트이며 `E2E-01`~`E2E-44`에 영향이 없다.
+  - `classifyExit`, 출력 상한, 그룹 종료는 그대로다. 래퍼는 `exec`로 대상이 되므로(010 §3.2) PID·그룹이 같다.
 
 ---
 
 ## 3. 세부 명세
 
-### 3.1 스포너 격리 적용 및 `agent.confined` 감사 기록 (`internal/orchestrator/spawner.go`)
-1. **사전 검증 및 `Prepare` 호출**:
-   - `s.cfg.ConfinementPolicy.RequireConfinement == true`인데 `s.cfg.Confiner == nil`이거나 `!s.cfg.Confiner.Available()`이면:
-     - `s.cfg.Audit != nil`일 때 `Action: domain.AuditActionAgentConfined`(`"agent.confined"`), `Step: "ORCHESTRATE_CONFINEMENT_FAILED"`, `Decision: "deny"`, `Reason: string(domain.ReasonConfinementUnavailable)`, `Success: false` 감사 이벤트를 기록한다 (감사 기록 자체가 실패하면 `ExitAuditFailure = 15` 반환).
-     - 자식 프로세스를 기동하지 않고 `&SpawnResult{TraceID: req.TraceID, ExitCode: int(domain.ExitInternalError), Reason: domain.ReasonConfinementUnavailable}, nil`(또는 대응 에러)을 반환한다.
-   - `s.cfg.Confiner != nil`이면 `cleanup, err := s.cfg.Confiner.Prepare(cmd, s.cfg.ConfinementPolicy)`를 호출하고 `defer cleanup()`을 등록한다.
-2. **사후 감사 기록**:
-   - 격리가 적용된 스폰(`s.cfg.Confiner != nil && s.cfg.Confiner.Available()`)에서 자식이 `ReasonConfinementViolation`(`ExitCode == 13`)으로 차단 종료된 경우, 사후 감사 이벤트를 `Action: domain.AuditActionAgentConfined`(`"agent.confined"`), `Step: "ORCHESTRATE_CONFINED_BLOCK"`, `Decision: "deny"`, `Reason: string(domain.ReasonConfinementViolation)`, `Success: false`, `Metadata: {"confiner": s.cfg.Confiner.Name(), "exit_code": result.ExitCode}`로 기록하여 `assertion.go`의 `ExpectedAction: "agent.confined"` 검증과 100% 일치시킨다.
+### 3.1 격리 적용 블록 (`Spawn` 내부, 단일 지점)
 
-### 3.2 테스트 전용 악의 워커 모드 4종 (`internal/subagent/testworker_enabled.go`)
-1. `bypass_read_zone_a`: PEP를 전혀 거치지 않고 `os.ReadFile(targetPath)`로 Zone A 개인키 파일을 직접 읽는다.
-   - 커널이 차단(`err != nil`)하면 `SubagentResponse{ExitCode: 13, Reason: "CONFINEMENT_VIOLATION", Error: err.Error()}`를 출력하고 종료 코드 `13`(`ExitPathViolation`)을 반환한다.
-   - 읽기에 성공하면(격리 끔 대조군) 종료 코드 `0`을 반환한다.
-2. `bypass_write_outside`: PEP를 거치지 않고 `os.WriteFile(targetPath, []byte("pwned"), 0600)`으로 외부 경로에 직접 파일 쓰기를 시도한다. 차단 시 `13`(`CONFINEMENT_VIOLATION`), 성공 시 `0`을 반환한다.
-3. `bypass_open_socket`: PEP를 거치지 않고 루프백 TCP 소켓 생성을 시도한다. 커널/격리에 의해 차단되면 `13`(`CONFINEMENT_VIOLATION`), 성공 시 소켓을 닫고 `0`을 반환한다.
-4. `bypass_child_read_zone_a`: 자식(손자) 프로세스를 한 단계 더 띄워 그 손자 프로세스가 `bypass_read_zone_a`를 수행하게 하고 손자의 종료 코드를 그대로 반환한다(커널 격리 프로파일/DAC가 손자 프로세스에도 상속되어 우회할 수 없음을 증명).
+`ORCHESTRATE_SPAWN` 감사 뒤, `cmd` 조립 뒤, `cmd.Run()` 앞에 둔다.
+
+```text
+active := cfg.Confiner != nil || cfg.Confinement.Require
+if active:
+    c := cfg.Confiner ; if c == nil { c = confinement.NoopConfiner{} }
+    err := c.Prepare(cmd, cfg.Confinement)
+    감사 1건: Step "ORCHESTRATE_CONFINE", Action AuditActionAgentConfined,
+             Metadata {confiner: c.Name(), protected_root, write_paths 개수, allow_network}
+       - err == nil  → Decision "allow", Success true
+       - err != nil  → Decision "deny",  Success false, Reason = ReasonFromError(err, ReasonConfinementUnavailable)
+    감사 기록 실패 → ReasonAuditLogFailed(15) 에러 반환 (자식 미기동)
+    err != nil → 자식 미기동. SpawnResult{TraceID, ExitCode: ExitCodeFromError(err, 16), Reason, Termination: TermExited, RawExitCode: -1} 반환
+                 (이 경우 ORCHESTRATE_COLLECT 는 기록하지 않는다: 수거할 자식이 없다)
+```
+
+1. `Require == false`이고 `Confiner == NoopConfiner`(대조군)이면 `Prepare`가 `nil`을 반환하므로 감사는 `allow` + `confiner: "none"`이다. 대조군 실행 기록이 감사에 남는다.
+2. `Validate` 실패(`14`)도 같은 경로로 거부되며 `Reason`은 `INVALID_ARGUMENTS`가 된다.
+3. 정책에는 경로만 있고 토큰·비밀값은 없다. 감사 메타데이터에 경로 목록 전체 대신 개수와 루트만 남긴다.
+
+### 3.2 `SpawnResult`
+
+- 필드를 추가하지 않는다. 부모가 적용한 어댑터 이름은 감사에 있다. 시나리오는 자체 스포너를 만들므로 자신이 무엇을 주입했는지 안다.
 
 ---
 
-## 4. 인수 테스트 시나리오
+## 4. 인수 테스트 시나리오 (요구사항에서 도출)
 
 | ID | 입력 | 기대 결과 |
 |:---:|---|---|
-| **TC-040-01** | `RequireConfinement: true` + `NoopConfiner`로 스폰 실행 | 자식 미기동, `ExitCode == 16`, 감사에 `Action: "agent.confined"`, `Reason: "CONFINEMENT_UNAVAILABLE"` 기록 |
-| **TC-040-02** | `DefaultConfiner()` 활성 상태에서 정직한 워커로 `file:read` / `file:write` 실행 | `ExitCode == 0`, 정상 파일 읽기·쓰기 성공 |
-| **TC-040-03** | `DefaultConfiner()` 활성 상태에서 `bypass_read_zone_a` 악의 워커 스폰 | 커널 차단으로 `ExitCode == 13`, 감사에 `Action: "agent.confined"`, `Reason: "CONFINEMENT_VIOLATION"` 기록 |
+| **TC-040-01** | `Confinement.Require: true`, `Confiner: nil` | 자식 미기동(헬퍼가 남기는 표식 파일 없음), `ExitCode == 16`, `Reason == CONFINEMENT_UNAVAILABLE`, 감사에 `agent.confined`/`deny` 1건, `ORCHESTRATE_COLLECT` 0건 |
+| **TC-040-02** | `Require: true`, `NoopConfiner` | TC-040-01과 동일 |
+| **TC-040-03** | `Require: false`, `NoopConfiner` (대조군) | 자식 정상 실행, 감사에 `agent.confined`/`allow`/`confiner: "none"` |
+| **TC-040-04** | 영값 `SpawnConfig` | 감사 이벤트 Step 목록이 정확히 `[ORCHESTRATE_SPAWN, ORCHESTRATE_COLLECT]` |
+| **TC-040-05** | `Prepare`가 `cmd.Path`를 `/usr/bin/env`로 감싸는 가짜 `Confiner`(테스트 전용) | 자식 정상 실행, `classifyExit` 결과와 출력 수거가 래핑 없을 때와 동일 (래핑 투명성) |
+| **TC-040-06** | 격리 적용 상태에서 헬퍼가 `exit 13` | `ExitCode == 13`, 사후 감사는 `ORCHESTRATE_COLLECT`. `agent.confined`는 Prepare 시점 `allow` 1건뿐 (13 재해석 없음) |
+| **TC-040-07** | (darwin, 프로브 가능 시) `Platform()` + `WorkerPolicy`로 정직한 헬퍼가 workspace 쓰기 | `ExitCode == 0`, 부모가 파일 내용 확인. 프로브 불가 시 Skip |
 
 ---
 
 ## 5. 4층위 검증 기준
 
-1. `go test -v -tags testworker ./internal/orchestrator -run TestSpawnerConfinement` PASS
-2. `go test -v ./internal/subagent -run TestWorkerSymbolAbsence` PASS (일반 빌드 심볼 0건 유지)
+1. `go test -v ./internal/orchestrator -run 'TestSpawnerConfinement'` PASS
+2. `go test -race ./internal/orchestrator` PASS
 3. `go test -v ./internal/harness -run TestArchitectureGuardrails` PASS
-4. `go test ./...` 전체 회귀 0건
+4. `go test ./...` 회귀 0건 (기존 44대 시나리오 포함)
 
 ---
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `Spawner` 내 `Confiner.Prepare` 및 `defer cleanup()` 배선 완료
-- [ ] `agent.confined` 감사 기록 및 `testworker` 악의 모드 4종 구현 완료
+- [ ] `SpawnConfig` 필드와 격리 적용 블록 1곳 구현, `classifyExit` 무수정
+- [ ] `AuditActionAgentConfined`를 `orchestrator`에 정의
+- [ ] TC-040-01~07 통과
 - [ ] 대시보드 상태 갱신 및 변경 파일 단독 커밋
