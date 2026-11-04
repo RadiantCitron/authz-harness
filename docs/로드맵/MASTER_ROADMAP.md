@@ -172,7 +172,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 요청이 최종 허용(`ALLOW`, `EXIT_SUCCESS = 0`)되어 실제 도구 I/O가 집행되려면 다음 9가지 조건이 동시에 참(True)이어야 한다:
 1. **토큰 무결성 및 수명 유효 (Gate 1)**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
 2. **주체 바인딩 및 비재사용 (Gate 1 & Pre-Commit)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(단, Gate 2에서 `DecisionAsk(18)` 반환 시에는 재시도를 위해 `jti`를 소진하지 않음).
-3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]` 이상이어야 함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
+3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]`와 **일치**해야 하며 고리 Epoch가 1 미만이면 거부함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
 4. **Scope 포함 (Gate 2 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
 5. **실시간 활성 Grant 존재 (Gate 2)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
 6. **예산(Budget) 잔량 충분 (PEP `StageBudget`·읽기 직후 — Phase 12)**: 토큰에 `Budget`이 설정된 경우 Zone B 예산 원장(`budget_ledger.json`)의 잔여 호출 횟수·읽기/쓰기 바이트가 충분하고 PEP의 원자적 차감(`Consume`: 쓰기는 사전 차감, 읽기는 `ReadFile` 직후 사후 차감)을 통과함. PDP·PIP는 예산을 판정하지 않음.
@@ -397,8 +397,8 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [12-예산-축소-위임](12-예산-축소-위임/README.md), `internal/domain/budget.go`(`Budget`), [ADR 0004](../adr/0004-예산-축소-위임-예약-및-정산-모델.md), `internal/authn/budget`, `G11` 시나리오(`E2E-50`~`54`).
 
 ### Phase 13: 장기 실행 세션 수명주기, `act` 계보 연쇄 회수 및 재교환 (`G12`: `E2E-55`~`E2E-60`)
-* **목적**: 다회차 장기 세션(`SessionRunner`) 중 토큰 만료·Grant 회수·서명키 폐기·상위 에이전트 Epoch 갱신(`ActorClaim.Epoch` 분리 및 `pdp.Evaluate` 조상 계보 연쇄 검증)에 따른 실시간 차단과 부모 기반 재교환(`re-exchange`), 결정론적 TOCTOU 창 측정을 증명한다. 코어 패키지 `time.Now()` 직접 호출을 전면 제거하고 `TC-130-01` AST 가드로 고정한다.
-* **주요 산출물**: [13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md), `internal/orchestrator/session.go`, `G12` 시나리오(`E2E-55`~`60`).
+* **목적**: 다회차 장기 세션(`SessionDriver`) 중 토큰 만료·Grant 회수·서명키 폐기·상위 에이전트 Epoch 갱신(`ActorClaim.Epoch` 분리 및 `pdp.Evaluate` 조상 계보 연쇄 검증)에 따른 실시간 차단과 부모 기반 재교환(`re-exchange`), 결정론적 TOCTOU 창 측정을 증명한다. 코어 패키지 `time.Now()` 직접 호출을 전면 제거하고 `TC-130-01` AST 가드로 고정한다.
+* **주요 산출물**: [13-장기-실행-및-토큰-수명-검증](13-장기-실행-및-토큰-수명-검증/README.md), `internal/harness/catalog/session_helper.go`, `G12` 시나리오(`E2E-55`~`60`).
 
 ### Phase 14: 감사 확장(v2 해시·서명 체크포인트·위임 트리) 및 관측성 포트 분리 (`G13`: `E2E-61`~`E2E-66`)
 * **목적**: 코어에서 `log/slog` 의존을 끊고 `internal/observe`(`slogadapter`/`otel`/`noop`) 포트로 분리하며(`TC-140-01`), 컨트롤 플레인 SESE 감사 단일화(`TC-080-01` 전 패키지 확대), 감사 스키마 v2(`ArgHash`, `ResultHash`), Zone A Ed25519 서명 체크포인트(꼬리 절단·전체 재작성 탐지), `audit tree` 위임 계보 시각화를 완성한다.
