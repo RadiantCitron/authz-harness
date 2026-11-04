@@ -531,6 +531,46 @@ func TestArchitectureGuardrails(t *testing.T) {
 			t.Errorf("allow-list guard false positive: %v", got)
 		}
 	})
+
+	// TC-170-06: 관문(pep) 직접 import 허용 목록 — 장부 원본·조립·OS 패키지를 직접 가져다 쓰지 않는다
+	t.Run("TC-170-06: pep 직접 import 허용 목록 검증", func(t *testing.T) {
+		graph := loadInternalImportGraph(t, root)
+		pkg := modulePrefix + "internal/authz/pep"
+		if _, ok := graph[pkg]; !ok {
+			t.Fatalf("package not found in import graph: %s", pkg)
+		}
+		for _, imp := range findDisallowedImports(graph, pkg, pepAllowedImports) {
+			t.Errorf("TC-170-06 violation: %s imports %q (not in allow list)", pkg, imp)
+		}
+	})
+
+	// TC-170-07: pep 허용 목록 가드 변이 시험 (AT-02·AT-03·AT-04)
+	t.Run("TC-170-07: pep 허용 목록 가드 변이 검출", func(t *testing.T) {
+		pkg := modulePrefix + "internal/authz/pep"
+		base := make([]string, 0, len(pepAllowedImports)+1)
+		for imp := range pepAllowedImports {
+			base = append(base, imp)
+		}
+		cases := []struct {
+			name  string
+			extra string
+			want  []string
+		}{
+			{"OS 패키지 주입", "os", []string{"os"}},
+			{"장부 원본 주입", modulePrefix + "internal/authz/state", []string{modulePrefix + "internal/authz/state"}},
+			{"현재 집합 그대로", "", nil},
+		}
+		for _, tc := range cases {
+			imports := append([]string{}, base...)
+			if tc.extra != "" {
+				imports = append(imports, tc.extra)
+			}
+			got := findDisallowedImports(map[string][]string{pkg: imports}, pkg, pepAllowedImports)
+			if len(got) != len(tc.want) || (len(got) == 1 && got[0] != tc.want[0]) {
+				t.Errorf("%s: want %v, got %v", tc.name, tc.want, got)
+			}
+		}
+	})
 }
 
 const modulePrefix = "authz-harness/"
@@ -543,6 +583,24 @@ var pdpAllowedImports = map[string]bool{
 	"strings":                        true,
 	"time":                           true,
 	modulePrefix + "internal/domain": true,
+}
+
+// 관문(pep) 직접 import 허용 목록. 표준 4개와 내부 어댑터·도메인 9개로 고정한다.
+// 추가 시 설명서 007편 Q4·Q5 도 함께 갱신한다.
+var pepAllowedImports = map[string]bool{
+	"context":                              true,
+	"fmt":                                  true,
+	"strings":                              true,
+	"time":                                 true,
+	modulePrefix + "internal/audit":        true,
+	modulePrefix + "internal/authn/budget": true,
+	modulePrefix + "internal/authn/token":  true,
+	modulePrefix + "internal/authz/pdp":    true,
+	modulePrefix + "internal/domain":       true,
+	modulePrefix + "internal/execguard":    true,
+	modulePrefix + "internal/jail":         true,
+	modulePrefix + "internal/netguard":     true,
+	modulePrefix + "internal/observe":      true,
 }
 
 var domainAllowedImports = map[string]bool{
