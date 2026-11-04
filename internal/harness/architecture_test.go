@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -206,39 +207,37 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 	})
 
-	// TC-080-01: Orchestrator 및 Control Plane 비즈니스 코드 내부의 _ = Audit.Log 무시 0건 검증
-	t.Run("TC-080-01: Orchestrator 비즈니스 코드의 감사 에러 무시(_ = s.cfg.Audit.Log) 0건 검증", func(t *testing.T) {
-		orchDir := filepath.Join(root, "internal", "orchestrator")
-		fset := token.NewFileSet()
-		pkgs, err := parser.ParseDir(fset, orchDir, func(fi fs.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, parser.ParseComments)
-		if err != nil {
-			t.Fatalf("failed to parse orchestrator dir: %v", err)
+	// TC-080-01: internal/ 전체 프로덕션 코드의 `_ = <expr>.Log(` 감사 오류 무시 0건 검증
+	t.Run("TC-080-01: internal 전체 비즈니스 코드의 감사 에러 무시(_ = ...Log) 0건 검증", func(t *testing.T) {
+		if v := findIgnoredAuditLog(t, filepath.Join(root, "internal")); len(v) > 0 {
+			t.Errorf("forbidden audit error ignoring '_ = ...Log':\n%s", strings.Join(v, "\n"))
 		}
+	})
 
-		for _, pkg := range pkgs {
-			for fname, file := range pkg.Files {
-				ast.Inspect(file, func(n ast.Node) bool {
-					assign, ok := n.(*ast.AssignStmt)
-					if !ok {
-						return true
-					}
-					// _ = ... 형태 검사
-					if len(assign.Lhs) == 1 {
-						if ident, ok := assign.Lhs[0].(*ast.Ident); ok && ident.Name == "_" {
-							for _, rhs := range assign.Rhs {
-								if call, ok := rhs.(*ast.CallExpr); ok {
-									if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Log" {
-										t.Errorf("forbidden audit error ignoring '_ = ...Log' found in %s:%d", fname, fset.Position(assign.Pos()).Line)
-									}
-								}
-							}
-						}
-					}
-					return true
-				})
+	// TC-140-01: 코어 패키지의 log/slog·OTel import 금지 (ADR 0002 B-8)
+	// 제외(의도): internal/confinement(OS 어댑터, seatbelt_darwin.go 가 slog 사용), internal/mcp, internal/cli,
+	// internal/app(합성 루트), cmd — 코어가 아닌 어댑터/조립 계층이다. observe/slogadapter 도 어댑터라 제외한다.
+	t.Run("TC-140-01: 코어 패키지의 log/slog·OTel import 0건 검증", func(t *testing.T) {
+		for _, d := range []string{"domain", "authn", "authz", "jail", "audit", "storage", "observe"} {
+			recursive := d != "observe"
+			if v := findForbiddenLogImports(t, filepath.Join(root, "internal", d), recursive); len(v) > 0 {
+				t.Errorf("forbidden logger import in core package %s:\n%s", d, strings.Join(v, "\n"))
 			}
+		}
+	})
+
+	// TC-020-04: 가드 변이 시험 — 위반 코드를 심으면 검출되어야 한다.
+	t.Run("TC-020-04: 가드 변이 시험(slog import, _ = w.Log 검출)", func(t *testing.T) {
+		dir := t.TempDir()
+		src := "package x\n\nimport \"log/slog\"\n\nvar _ = slog.Default\n\nfunc f(w interface{ Log(int) error }) {\n\t_ = w.Log(1)\n}\n"
+		if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if len(findForbiddenLogImports(t, dir, true)) != 1 {
+			t.Error("slog import not detected")
+		}
+		if len(findIgnoredAuditLog(t, dir)) != 1 {
+			t.Error("ignored Log error not detected")
 		}
 	})
 
@@ -423,4 +422,76 @@ func TestArchitectureGuardrails(t *testing.T) {
 			}
 		}
 	})
+}
+
+func findForbiddenLogImports(t *testing.T, dir string, recursive bool) []string {
+	t.Helper()
+	var out []string
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != dir && !recursive {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, perr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if perr != nil {
+			return perr
+		}
+		for _, imp := range f.Imports {
+			p := strings.Trim(imp.Path.Value, `"`)
+			if p == "log/slog" || strings.HasPrefix(p, "go.opentelemetry.io/") {
+				out = append(out, path+": "+p)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return out
+}
+
+func findIgnoredAuditLog(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, perr := parser.ParseFile(fset, path, nil, 0)
+		if perr != nil {
+			return perr
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			as, ok := n.(*ast.AssignStmt)
+			if !ok || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+				return true
+			}
+			if id, ok := as.Lhs[0].(*ast.Ident); ok && id.Name == "_" {
+				if call, ok := as.Rhs[0].(*ast.CallExpr); ok {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Log" {
+						out = append(out, fmt.Sprintf("%s:%d", path, fset.Position(as.Pos()).Line))
+					}
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return out
 }

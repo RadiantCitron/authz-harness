@@ -114,7 +114,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 			if actor == "" {
 				actor = req.ClientID
 			}
-			_ = s.auditWriter.Log(audit.Event{
+			if aerr := s.auditWriter.Log(audit.Event{
 				Timestamp: s.clock.Now().UTC(),
 				TraceID:   traceID,
 				Step:      "020-issue-authn",
@@ -128,7 +128,9 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 					"error":     err.Error(),
 					"reason":    string(reason),
 				},
-			})
+			}); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "issue", "failed to record issue deny audit log", aerr)
+			}
 		}
 		return nil, fmt.Errorf("client authentication failed: %w", err)
 	}

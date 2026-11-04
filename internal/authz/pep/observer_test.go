@@ -3,9 +3,11 @@ package pep_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
+	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authz/pdp"
 	"authz-harness/internal/authz/pep"
@@ -108,4 +110,49 @@ func TestStageObserver_PanicNotSwallowed(t *testing.T) { // TC-010-06
 		}
 	}()
 	_, _ = gw.Execute(context.Background(), pep.Request{Token: "t", Action: domain.ActionFileRead, Resource: "a.txt"})
+}
+
+type nthFailWriter struct {
+	okCount int
+	calls   int
+}
+
+func (w *nthFailWriter) Log(audit.Event) error {
+	w.calls++
+	if w.calls > w.okCount {
+		return errors.New("audit down")
+	}
+	return nil
+}
+func (w *nthFailWriter) Close() error { return nil }
+
+func TestFinalize_BlockAuditFailureReports15(t *testing.T) { // TC-020-05
+	v, p, j, _ := obsStubs(false)
+	p.decisionToReturn = &pdp.Decision{Decision: pdp.DecisionDeny, Reason: domain.ReasonNoActiveGrant}
+	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: &nthFailWriter{}})
+	r, _ := gw.Execute(context.Background(), pep.Request{Token: "t", Action: domain.ActionFileRead, Resource: "a.txt"})
+	if r.Allowed || r.Reason != domain.ReasonAuditLogFailed || r.ExitCode != domain.ExitAuditFailure || r.Stage != pep.StageGate2AuthZ ||
+		!strings.Contains(r.Details, string(domain.ReasonNoActiveGrant)) {
+		t.Fatalf("got %+v", r)
+	}
+}
+
+func TestFinalize_CompletionAuditFailureUnchanged(t *testing.T) { // TC-020-06
+	v, p, j, _ := obsStubs(false)
+	rec := &recObserver{}
+	// Stage 4 사전 감사(1회)만 성공, 완료 감사부터 실패
+	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: &nthFailWriter{okCount: 1}, Observer: rec})
+	r, _ := gw.Execute(context.Background(), pep.Request{Token: "t", Action: domain.ActionFileWrite, Resource: "a.txt", Data: []byte("abc")})
+	if !r.Allowed || r.ExitCode != domain.ExitSuccess || j.callsWrite != 1 {
+		t.Fatalf("got %+v writes=%d", r, j.callsWrite)
+	}
+	n := 0
+	for _, m := range rec.errors {
+		if m == "failed to record completion audit event" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("errors=%v", rec.errors)
+	}
 }

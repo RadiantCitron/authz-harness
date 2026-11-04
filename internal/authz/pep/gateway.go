@@ -400,12 +400,17 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 		exitCode := domain.ExitCodeFromError(runErr, domain.ExitCodeForReason(reason))
 		failedStage := state.failedStage
 
-		// 단일 출구 차단 감사 기록 (Stage4 감사 실패 시 중복 기록 시도 방지)
+		// 단일 출구 차단 감사 기록 (Stage4 감사 실패 시 중복 기록 시도 방지).
+		// 감사 없이 거부를 끝내지 않는다: 기록 실패 시 AUDIT_LOG_FAILED(15)로 마감하되 거부 결론은 유지한다.
+		details := runErr.Error()
 		if failedStage != Stage4Audit {
 			if auditErr := g.logEvent(state, failedStage, false, reason, runErr.Error()); auditErr != nil {
 				g.obs.OnError(ctx, state.traceID, "failed to record block audit event",
 					observe.Attr{Key: "error", Value: auditErr.Error()},
 				)
+				details = fmt.Sprintf("%s; block audit failed: %s", runErr.Error(), auditErr.Error())
+				reason = domain.ReasonAuditLogFailed
+				exitCode = domain.ExitAuditFailure
 			}
 		}
 
@@ -423,7 +428,7 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 			ExitCode: exitCode,
 			Stage:    failedStage,
 			Reason:   reason,
-			Details:  runErr.Error(),
+			Details:  details,
 			Subject:  state.subject,
 			TokenJTI: state.tokenJTI,
 			SafePath: state.safePath,

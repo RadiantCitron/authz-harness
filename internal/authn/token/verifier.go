@@ -117,13 +117,17 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 
 	// 1단계: 3단 점 분리 형식 검증
 	if strings.TrimSpace(tokenStr) == "" {
-		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token is missing or empty")
+		if aerr := v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token is missing or empty"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", "token is missing or empty", ErrTokenMalformed)
 	}
 
 	parts := strings.Split(tokenStr, ".")
 	if len(parts) != 3 {
-		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token format error")
+		if aerr := v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "token format error"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("must contain 3 parts, got %d", len(parts)), ErrTokenMalformed)
 	}
 
@@ -133,24 +137,32 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	// 2단계: 헤더 디코딩 및 typ 검증 (RFC 9068: at+jwt)
 	headerBytes, err := base64.RawURLEncoding.DecodeString(headerB64)
 	if err != nil {
-		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "header base64 decode fail")
+		if aerr := v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "header base64 decode fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("header b64 decode: %v", err), ErrTokenMalformed)
 	}
 
 	var header JWTHeader
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "header json unmarshal fail")
+		if aerr := v.logAudit(now, auditCtx, "", "", false, domain.ReasonTokenMalformed, "header json unmarshal fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("header json unmarshal: %v", err), ErrTokenMalformed)
 	}
 
 	if strings.ToLower(header.Type) != "at+jwt" {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenInvalidType, fmt.Sprintf("invalid typ: %s", header.Type))
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenInvalidType, fmt.Sprintf("invalid typ: %s", header.Type)); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenInvalidType, "gate1", fmt.Sprintf("got %s", header.Type), ErrInvalidType)
 	}
 
 	// 3단계: 알고리즘 화이트리스트 대조 (alg: EdDSA)
 	if header.Algorithm != "EdDSA" {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenAlgNotAllowed, fmt.Sprintf("disallowed alg: %s", header.Algorithm))
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenAlgNotAllowed, fmt.Sprintf("disallowed alg: %s", header.Algorithm)); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenAlgNotAllowed, "gate1", fmt.Sprintf("alg %s is rejected", header.Algorithm), ErrAlgNotAllowed)
 	}
 
@@ -161,71 +173,95 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 		if errors.Is(err, keys.ErrKeyRetired) {
 			reason = domain.ReasonTokenKeyRetired
 		}
-		v.logAudit(now, auditCtx, "", header.KeyID, false, reason, err.Error())
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, reason, err.Error()); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(reason, "gate1", "verification key check failed", err)
 	}
 
 	// 5단계: 암호학적 디지털 서명 검증
 	pubKeyBytes, err := base64.RawURLEncoding.DecodeString(jwk.PublicKey)
 	if err != nil {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "jwk pubkey b64 decode fail")
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "jwk pubkey b64 decode fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("failed to decode jwk pubkey: %v", err), ErrTokenMalformed)
 	}
 
 	sigBytes, err := base64.RawURLEncoding.DecodeString(sigB64)
 	if err != nil {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "sig b64 decode fail")
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "sig b64 decode fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("sig b64 decode: %v", err), ErrTokenMalformed)
 	}
 
 	if len(pubKeyBytes) != ed25519.PublicKeySize || !ed25519.Verify(ed25519.PublicKey(pubKeyBytes), []byte(signingInput), sigBytes) {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenInvalidSignature, "signature mismatch")
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenInvalidSignature, "signature mismatch"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenInvalidSignature, "gate1", "signature mismatch", ErrInvalidSignature)
 	}
 
 	// 6단계: 클레임 디코딩 및 필수값 검증
 	claimsBytes, err := base64.RawURLEncoding.DecodeString(claimsB64)
 	if err != nil {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "claims b64 decode fail")
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "claims b64 decode fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("claims b64 decode: %v", err), ErrTokenMalformed)
 	}
 
 	var claims domain.TokenClaims
 	if err := json.Unmarshal(claimsBytes, &claims); err != nil {
-		v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "claims json unmarshal fail")
+		if aerr := v.logAudit(now, auditCtx, "", header.KeyID, false, domain.ReasonTokenMalformed, "claims json unmarshal fail"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("claims json unmarshal: %v", err), ErrTokenMalformed)
 	}
 
 	if err := claims.Validate(); err != nil {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenMalformed, err.Error())
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenMalformed, err.Error()); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenMalformed, "gate1", fmt.Sprintf("validation fail: %v", err), ErrTokenMalformed)
 	}
 
 	// 7단계: 주체 및 수신자 대조
 	if claims.Issuer != v.expectedIss {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenInvalidIssAud, "issuer mismatch")
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenInvalidIssAud, "issuer mismatch"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenInvalidIssAud, "gate1", fmt.Sprintf("expected iss %s, got %s", v.expectedIss, claims.Issuer), ErrInvalidIssAud)
 	}
 
 	if opts.ExpectedAudience != "" && claims.Audience != opts.ExpectedAudience {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenInvalidIssAud, "audience mismatch")
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenInvalidIssAud, "audience mismatch"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenInvalidIssAud, "gate1", fmt.Sprintf("expected aud %s, got %s", opts.ExpectedAudience, claims.Audience), ErrInvalidIssAud)
 	}
 
 	if opts.ExpectedSubject != "" && claims.Subject != opts.ExpectedSubject {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenSubjectMismatch, "subject mismatch")
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenSubjectMismatch, "subject mismatch"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenSubjectMismatch, "gate1", fmt.Sprintf("expected sub %s, got %s", opts.ExpectedSubject, claims.Subject), ErrSubjectMismatch)
 	}
 
 	// 8단계: 시간 유효성 검증
 	nowUnix := now.Unix()
 	if claims.NotBefore > 0 && nowUnix < claims.NotBefore {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenNotYetValid, "token not yet valid")
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenNotYetValid, "token not yet valid"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenNotYetValid, "gate1", fmt.Sprintf("nbf %d > now %d", claims.NotBefore, nowUnix), ErrTokenNotYetValid)
 	}
 
 	if nowUnix >= claims.ExpiresAt {
-		v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenExpired, "token expired")
+		if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenExpired, "token expired"); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
 		return nil, domain.NewError(domain.ReasonTokenExpired, "gate1", fmt.Sprintf("exp %d <= now %d", claims.ExpiresAt, nowUnix), ErrTokenExpired)
 	}
 
@@ -234,13 +270,17 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	if opts.RecordReplay && v.replayLedger != nil && claims.Budget == nil {
 		expTime := time.Unix(claims.ExpiresAt, 0).UTC()
 		if err := v.replayLedger.CheckAndConsume(claims.JWTID, expTime); err != nil {
-			v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenReplayDetected, err.Error())
+			if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, false, domain.ReasonTokenReplayDetected, err.Error()); aerr != nil {
+				return nil, auditFailure(aerr)
+			}
 			return nil, domain.NewError(domain.ReasonTokenReplayDetected, "gate1", "token replay detected", err)
 		}
 	}
 
 	// 검증 성공 감사 이벤트 기록
-	v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, true, domain.ReasonAuthorized, "gate 1 verified successfully")
+	if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, true, domain.ReasonAuthorized, "gate 1 verified successfully"); aerr != nil {
+		return nil, auditFailure(aerr)
+	}
 
 	return &domain.VerifiedClaims{
 		Claims:     claims,
@@ -250,9 +290,9 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	}, nil
 }
 
-func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid string, success bool, reason domain.Reason, msg string) {
+func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid string, success bool, reason domain.Reason, msg string) error {
 	if v.auditWriter == nil {
-		return
+		return nil
 	}
 	traceID := ctx.TraceID
 	if traceID == "" {
@@ -273,7 +313,7 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 		meta["token_jti"] = jti
 	}
 
-	_ = v.auditWriter.Log(audit.Event{
+	return v.auditWriter.Log(audit.Event{
 		Timestamp: now,
 		TraceID:   traceID,
 		Step:      "020-verify",
@@ -285,4 +325,9 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 		Success:   success,
 		Metadata:  meta,
 	})
+}
+
+// auditFailure 는 감사 기록 실패를 Fail-Closed 오류로 변환한다. 감사 없이 검증을 끝내지 않는다.
+func auditFailure(err error) error {
+	return domain.NewError(domain.ReasonAuditLogFailed, "gate1", "audit log write failed", err)
 }

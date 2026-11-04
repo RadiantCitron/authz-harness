@@ -106,19 +106,25 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	// 1. 클라이언트 인증
 	clientInfo, err := s.clients.AuthenticateClient(req.ClientID, req.ClientSecret)
 	if err != nil {
-		s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonAuthnInvalidSecret, err.Error())
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonAuthnInvalidSecret, err.Error()); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, fmt.Errorf("client authentication failed: %w", err)
 	}
 
 	// 2. Child Subject 허용 여부 검사
 	if strings.TrimSpace(req.ChildSubject) == "" {
-		s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonInvalidToken, "child subject is required")
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonInvalidToken, "child subject is required"); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, errors.New("child subject is required")
 	}
 	if !clientInfo.IsSubjectAllowed(req.ChildSubject) {
 		err := fmt.Errorf("client %s is not authorized to request tokens for subject %s (%s)",
 			req.ClientID, req.ChildSubject, domain.ReasonNoActiveGrant)
-		s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonNoActiveGrant, err.Error())
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonNoActiveGrant, err.Error()); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, err
 	}
 
@@ -129,7 +135,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	}, auditCtx)
 	if err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
-		s.recordAuditDenied(now, traceID, actor, req, "", reason, err.Error())
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", reason, err.Error()); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, domain.NewError(reason, "exchange", "parent token verification failed", err)
 	}
 
@@ -138,7 +146,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	// 4. 축소 위임(Downscoping) 불변식 검증
 	if err := s.validator.ValidateDownscope(&parentClaims, req.ChildSubject, req.Scope, req.TTL, now); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
-		s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, domain.NewError(reason, "exchange", "downscope validation failed", err)
 	}
 
@@ -147,12 +157,16 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	if budgetInvolved {
 		if err := ValidateBudgetDownscope(parentClaims.Budget, req.Budget); err != nil {
 			reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
-			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
+			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			}
 			return nil, domain.NewError(reason, "exchange", "budget downscope validation failed", err)
 		}
 		if s.budgets == nil {
 			err := errors.New("budget ledger is not configured")
-			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, err.Error())
+			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, err.Error()); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			}
 			return nil, domain.NewError(domain.ReasonInternalError, "exchange", "budget exchange requires a budget ledger", err)
 		}
 	}
@@ -192,7 +206,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 
 	childResult, err := s.issuer.IssueToken(issueReq, token.IssueOptions{}, auditCtx)
 	if err != nil {
-		s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInvalidToken, err.Error())
+		if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInvalidToken, err.Error()); aerr != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+		}
 		return nil, fmt.Errorf("failed to issue child token: %w", err)
 	}
 
@@ -200,7 +216,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	if budgetInvolved {
 		if err := s.budgets.Reserve(parentClaims.JWTID, childResult.Claims.JWTID, *req.Budget, childResult.Claims.ExpiresAt); err != nil {
 			reason := domain.ReasonFromError(err, domain.ReasonInternalError)
-			s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error())
+			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			}
 			return nil, domain.NewError(reason, "exchange", "budget reservation failed", err)
 		}
 	}
@@ -242,9 +260,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	}, nil
 }
 
-func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string, req ExchangeRequest, parentJTI string, reason domain.Reason, details string) {
+func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string, req ExchangeRequest, parentJTI string, reason domain.Reason, details string) error {
 	if s.auditWriter == nil {
-		return
+		return nil
 	}
 	auditEv := audit.Event{
 		Timestamp: now,
@@ -264,5 +282,5 @@ func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string
 			"details":    details,
 		},
 	}
-	_ = s.auditWriter.Log(auditEv)
+	return s.auditWriter.Log(auditEv)
 }
