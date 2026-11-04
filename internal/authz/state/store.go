@@ -18,6 +18,7 @@ type GrantsState struct {
 	UpdatedAt time.Time             `json:"updated_at"`
 	Grants    []domain.Grant        `json:"grants"`
 	Epochs    domain.SecurityEpochs `json:"epochs"`
+	Approvals []domain.Approval     `json:"approvals,omitempty"`
 }
 
 // NewEmptyGrantsState 는 주어진 시각을 UpdatedAt 으로 하는 기본 버전 1의 비어있는 GrantsState 구조체를 반환한다.
@@ -143,6 +144,9 @@ func ensureStateFields(state *GrantsState) {
 	}
 	if state.Epochs == nil {
 		state.Epochs = make(domain.SecurityEpochs)
+	}
+	if state.Approvals == nil {
+		state.Approvals = make([]domain.Approval, 0)
 	}
 }
 

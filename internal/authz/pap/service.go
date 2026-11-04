@@ -21,6 +21,19 @@ type CreateGrantRequest struct {
 	Subject  string        `json:"subject"`
 	Action   domain.Action `json:"action"`
 	Resource string        `json:"resource"`
+
+	// RequiresApproval 이 true 이면 이 Grant 로 허용되는 요청도 사람 승인이 필요하다(ask).
+	RequiresApproval bool `json:"requires_approval,omitempty"`
+}
+
+// CreateApprovalRequest 는 사람 승인 발급 요청 명세다. ArgHash 가 비면 인자 바인딩이 없다.
+type CreateApprovalRequest struct {
+	Subject  string
+	Action   domain.Action
+	Resource string
+	TokenJTI string
+	ArgHash  string
+	TTL      time.Duration // 0 이면 기본값(5m)
 }
 
 // GrantFilter 는 권한 목록 조회 시 필터 조건이다.
@@ -42,6 +55,12 @@ type Service interface {
 
 	// ListGrants 는 조건에 부합하는 Grant 목록을 반환한다.
 	ListGrants(ctx context.Context, filter GrantFilter) ([]domain.Grant, error)
+
+	// CreateApproval 은 (주체, 액션, 리소스, jti, 선택적 arg_hash)에 묶인 1회용 승인을 발급하고 감사 로그를 남긴다.
+	CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error)
+
+	// ListApprovals 는 승인 목록을 반환한다(subject 가 비면 전체).
+	ListApprovals(ctx context.Context, subject string) ([]domain.Approval, error)
 }
 
 // papService 는 PAP Service의 기본 구현체다.
@@ -86,6 +105,8 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 		Resource:  strings.TrimSpace(req.Resource),
 		Status:    domain.GrantStatusActive,
 		CreatedAt: now,
+
+		RequiresApproval: req.RequiresApproval,
 	}
 
 	if err := grant.Validate(); err != nil {
@@ -115,6 +136,8 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 				"grant_id": grant.ID,
 				"subject":  grant.Subject,
 				"action":   string(grant.Action),
+
+				"requires_approval": grant.RequiresApproval,
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
@@ -243,4 +266,76 @@ func (s *papService) ListGrants(ctx context.Context, filter GrantFilter) ([]doma
 	}
 
 	return result, nil
+}
+
+// CreateApproval 은 TTL·ArgHash 를 검증하고 승인을 원장에 저장한 뒤 approval.granted 감사를 남긴다.
+func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
+	ttl, err := domain.ValidateApprovalTTL(req.TTL)
+	if err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateArgHash(req.ArgHash); err != nil {
+		return nil, err
+	}
+	sub, res, jti := strings.TrimSpace(req.Subject), strings.TrimSpace(req.Resource), strings.TrimSpace(req.TokenJTI)
+	if sub == "" || strings.TrimSpace(string(req.Action)) == "" || res == "" || jti == "" {
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: approval requires subject, action, resource, jti", nil)
+	}
+
+	now := s.clock.Now().UTC()
+	a := domain.Approval{
+		ID:        fmt.Sprintf("approval-%d", now.UnixNano()),
+		Subject:   sub,
+		Action:    req.Action,
+		Resource:  res,
+		TokenJTI:  jti,
+		ArgHash:   req.ArgHash,
+		CreatedAt: now,
+		ExpiresAt: now.Add(ttl),
+	}
+	if err := state.CreateApproval(s.store, a, now); err != nil {
+		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store approval", err)
+	}
+
+	// 감사는 잠금(Update)을 반환한 뒤에만 기록한다.
+	if s.audit != nil {
+		ev := audit.Event{
+			Timestamp: now,
+			TraceID:   fmt.Sprintf("pap-approval-%s", a.ID),
+			Step:      "pap.create_approval",
+			Actor:     "admin",
+			Action:    "approval.granted",
+			Resource:  a.Resource,
+			Decision:  "allow",
+			Success:   true,
+			Metadata: map[string]interface{}{
+				"approval_id": a.ID,
+				"subject":     a.Subject,
+				"action":      string(a.Action),
+				"token_jti":   a.TokenJTI,
+				"arg_hash":    a.ArgHash,
+				"expires_at":  a.ExpiresAt.Format(time.RFC3339),
+			},
+		}
+		if err := s.audit.Log(ev); err != nil {
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
+		}
+	}
+	return &a, nil
+}
+
+// ListApprovals 는 승인 목록을 반환한다(subject 가 비면 전체).
+func (s *papService) ListApprovals(ctx context.Context, subject string) ([]domain.Approval, error) {
+	st, err := s.store.Load()
+	if err != nil {
+		return nil, fmt.Errorf("pap: failed to load state: %w", err)
+	}
+	out := make([]domain.Approval, 0)
+	for _, a := range st.Approvals {
+		if subject != "" && a.Subject != subject {
+			continue
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }

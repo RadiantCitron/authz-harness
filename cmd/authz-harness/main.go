@@ -68,6 +68,14 @@ func main() {
 			}
 			exitCode := grantRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
+		case "approval":
+			approvalRunner, err := cli.NewApprovalRunner(os.Stdout, os.Stderr, statePath, auditPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: failed to initialize approval runner: %v\n", err)
+				os.Exit(int(domain.ExitInternalError))
+			}
+			exitCode := approvalRunner.Run(context.Background(), args[1:])
+			os.Exit(int(exitCode))
 		case "pdp":
 			pdpRunner, err := cli.NewPDPRunner(os.Stdout, os.Stderr, statePath, auditPath)
 			if err != nil {

@@ -76,6 +76,8 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 	fs.SetOutput(r.errOut)
 
 	var sub, act, res string
+	var requiresApproval bool
+	fs.BoolVar(&requiresApproval, "requires-approval", false, "이 Grant 로 허용되는 요청에 사람 승인을 요구한다")
 	fs.StringVar(&sub, "sub", "", "권한 부여 대상 주체 (Subject)")
 	fs.StringVar(&act, "action", "", "허용할 액션 (file:read, file:write)")
 	fs.StringVar(&res, "resource", "", "허용할 리소스 경로")
@@ -99,6 +101,8 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 		Subject:  sub,
 		Action:   action,
 		Resource: res,
+
+		RequiresApproval: requiresApproval,
 	})
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
