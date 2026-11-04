@@ -264,6 +264,10 @@ func (r *AuditRunner) runRecover() domain.ExitCode {
 		fmt.Fprintln(r.out, "OK: nothing to recover (audit tail is intact)")
 		return domain.ExitSuccess
 	}
+	if res.Kind == "newline_appended" {
+		fmt.Fprintf(r.out, "OK: appended missing newline (1 byte) to complete record #%d; no data removed\n", res.RecordNumber)
+		return domain.ExitSuccess
+	}
 	fmt.Fprintf(r.out, "OK: recovered incomplete tail (%d bytes, sha256=%s) saved to %s\n", res.TruncatedBytes, res.TruncatedSHA, res.PartialPath)
 	return domain.ExitSuccess
 }
