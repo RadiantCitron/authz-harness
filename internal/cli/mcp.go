@@ -14,6 +14,7 @@ import (
 	"authz-harness/internal/app"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
+	"authz-harness/internal/observe/slogadapter"
 	"authz-harness/internal/orchestrator"
 )
 
@@ -109,7 +110,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 		return domain.ExitBadInput
 	}
 
-	logger := slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: slogadapter.RedactReplaceAttr}))
 
 	executor := r.executor
 	if executor == nil {

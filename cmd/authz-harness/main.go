@@ -11,6 +11,7 @@ import (
 	"authz-harness/internal/audit"
 	"authz-harness/internal/cli"
 	"authz-harness/internal/domain"
+	"authz-harness/internal/observe/slogadapter"
 )
 
 const Version = "0.1.0"
@@ -42,7 +43,7 @@ func main() {
 	if verbose {
 		logLevel = slog.LevelDebug
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel, ReplaceAttr: slogadapter.RedactReplaceAttr}))
 	slog.SetDefault(logger)
 
 	// 2. CLI 포매터 (인간 대상 표준 출력)
