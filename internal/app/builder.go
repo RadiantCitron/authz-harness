@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -26,17 +27,18 @@ import (
 
 // AppConfig 는 하네스 및 전체 런타임 스택 구동에 필요한 파일 경로 및 주입 요소를 포함한다.
 type AppConfig struct {
-	StatePath    string
-	PrivKeyPath  string
-	PubJWKSPath  string
-	ReplayPath   string
-	BudgetPath   string // 비면 filepath.Dir(ReplayPath)/budget_ledger.json
-	AuditPath    string
-	WorkspaceDir string
-	NetAllowList []string // net:fetch 허용 host:port (정규 형태). 비면 net:fetch 는 전부 거부
-	VerifyOnly   bool     // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
-	Clock        domain.Clock
-	Observer     observe.Observer
+	StatePath                string
+	PrivKeyPath              string
+	PubJWKSPath              string
+	ReplayPath               string
+	BudgetPath               string // 비면 filepath.Dir(ReplayPath)/budget_ledger.json
+	AuditPath                string
+	WorkspaceDir             string
+	NetAllowList             []string // net:fetch 허용 host:port (정규 형태). 비면 net:fetch 는 전부 거부
+	EnableRevokeBeforeIOHook bool     // true: req.InjectRevokeBeforeIO 활성 시 I/O 직전 모든 Grant 회수 훅 장착
+	VerifyOnly               bool     // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
+	Clock                    domain.Clock
+	Observer                 observe.Observer
 }
 
 // AppStack 은 단일 합성 루트(Composition Root)를 통해 생성된 일원화된 컴포넌트 집합이다.
@@ -73,7 +75,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		cfg.Clock = domain.RealClock{}
 	}
 
-	if cfg.BudgetPath == "" {
+	if cfg.BudgetPath == "" && cfg.ReplayPath != "" {
 		cfg.BudgetPath = filepath.Join(filepath.Dir(cfg.ReplayPath), "budget_ledger.json")
 	}
 
@@ -115,20 +117,26 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		privPath = "" // Zone A 접근 차단
 	}
 
-	keyStore, err := keys.NewFileStore(privPath, cfg.PubJWKSPath)
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: key store: %w", err)
+	var keyStore keys.Store
+	var keyMgr keys.KeyManager
+	if cfg.PubJWKSPath != "" {
+		ks, err := keys.NewFileStore(privPath, cfg.PubJWKSPath)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: key store: %w", err)
+		}
+		keyStore = ks
+
+		km, err := keys.NewManager(keyStore, auditWriter, keys.WithClock(cfg.Clock))
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: key manager: %w", err)
+		}
+		keyMgr = km
 	}
 
-	keyMgr, err := keys.NewManager(keyStore, auditWriter, keys.WithClock(cfg.Clock))
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: key manager: %w", err)
-	}
-
-	// 서명 키 초기 확인 및 자동 회전 (VerifyOnly 모드가 아닐 때만)
-	if !cfg.VerifyOnly {
+	// 서명 키 초기 확인 및 자동 회전 (토큰 발급 스택에서만: keys CLI 등 부분 경로는 제외)
+	if !cfg.VerifyOnly && keyMgr != nil && cfg.ReplayPath != "" {
 		activeKey, err := keyMgr.GetActiveSigningKey()
 		if err != nil || activeKey == nil {
 			if _, err := keyMgr.RotateKey(domain.AuditContext{
@@ -142,32 +150,39 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		}
 	}
 
-	// 4. 토큰 발급기 및 검증기
-	budgetLedger, err := budget.NewFileLedger(cfg.BudgetPath, cfg.Clock)
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: budget ledger: %w", err)
-	}
-
+	// 4. 토큰 발급기 및 검증기 (키 + 리플레이 경로가 있을 때만)
+	var budgetLedger budget.Ledger
 	var clientReg *token.InMemoryClientRegistry
 	var tokenIssuer token.TokenIssuer
-	if !cfg.VerifyOnly {
-		clientReg = token.NewInMemoryClientRegistry()
-		tokenIssuer = token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock, token.WithBudgetLedger(budgetLedger))
-	}
-
-	replayLedger, err := token.NewFileReplayLedger(cfg.ReplayPath, cfg.Clock)
-	if err != nil {
-		_ = auditWriter.Close()
-		return nil, fmt.Errorf("app builder: replay ledger: %w", err)
-	}
-
-	tokenVerifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, cfg.Clock)
-
+	var replayLedger token.ReplayLedger
+	var tokenVerifier token.TokenVerifier
 	var exchangeSvc exchange.Service
-	if !cfg.VerifyOnly {
-		exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock,
-			exchange.WithBudgetLedger(budgetLedger))
+	if cfg.PubJWKSPath != "" && cfg.ReplayPath != "" {
+		bl, err := budget.NewFileLedger(cfg.BudgetPath, cfg.Clock)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: budget ledger: %w", err)
+		}
+		budgetLedger = bl
+
+		if !cfg.VerifyOnly {
+			clientReg = token.NewInMemoryClientRegistry()
+			tokenIssuer = token.NewService(keyMgr, clientReg, auditWriter, cfg.Clock, token.WithBudgetLedger(budgetLedger))
+		}
+
+		rl, err := token.NewFileReplayLedger(cfg.ReplayPath, cfg.Clock)
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: replay ledger: %w", err)
+		}
+		replayLedger = rl
+
+		tokenVerifier = token.NewVerifier(keyMgr, replayLedger, auditWriter, cfg.Clock)
+
+		if !cfg.VerifyOnly {
+			exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock,
+				exchange.WithBudgetLedger(budgetLedger))
+		}
 	}
 
 	// 5. 인가 상태 저장소 및 PAP / PIP / PDP
@@ -212,7 +227,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	if stateStore != nil {
 		approvalConsumer = state.NewApprovalConsumer(stateStore)
 	}
-	if pdpSvc != nil {
+	if pdpSvc != nil && tokenVerifier != nil {
 		netGuard, err := netguard.NewGuard(cfg.NetAllowList, 0, 0)
 		if err != nil {
 			_ = auditWriter.Close()
@@ -240,6 +255,16 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 			return nil, fmt.Errorf("app builder: pep gateway: %w", err)
 		}
 		pepGateway = gw
+		if cfg.EnableRevokeBeforeIOHook && stateStore != nil && pepGateway != nil {
+			pepGateway = pep.WithBeforeIOHook(pepGateway, func(ctx context.Context, req pep.Request) error {
+				return stateStore.Update(func(st *state.GrantsState) error {
+					for i := range st.Grants {
+						st.Grants[i].Status = domain.GrantStatusRevoked
+					}
+					return nil
+				})
+			})
+		}
 	}
 
 	return &AppStack{

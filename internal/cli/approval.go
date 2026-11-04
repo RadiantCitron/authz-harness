@@ -7,30 +7,31 @@ import (
 	"io"
 	"time"
 
-	"authz-harness/internal/audit"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authz/pap"
-	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 )
 
 // ApprovalRunner 는 사람 승인자를 대역하는 `approval` 하위 명령어 러너다.
 type ApprovalRunner struct {
 	papSvc pap.Service
+	stack  *app.AppStack
 	out    io.Writer
 	errOut io.Writer
 }
 
 // NewApprovalRunner 는 상태 파일·감사 파일 경로로 ApprovalRunner 를 생성한다.
 func NewApprovalRunner(out, errOut io.Writer, statePath, auditPath string) (*ApprovalRunner, error) {
-	st, err := state.NewFileStore(statePath)
+	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init state store: %w", err)
+		return nil, err
 	}
-	w, err := audit.NewJSONLWriter(auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit writer: %w", err)
-	}
-	return &ApprovalRunner{papSvc: pap.NewService(st, w), out: out, errOut: errOut}, nil
+	return &ApprovalRunner{papSvc: stack.PAP, stack: stack, out: out, errOut: errOut}, nil
+}
+
+// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
+func (r *ApprovalRunner) Close() error {
+	return r.stack.Close()
 }
 
 // Run 은 `approval grant|list` 를 라우팅한다.

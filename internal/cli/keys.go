@@ -8,7 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"authz-harness/internal/audit"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/domain"
 )
@@ -16,6 +16,7 @@ import (
 // KeysRunner 는 `keys` 하위 명령어 실행을 주관하는 러너다.
 type KeysRunner struct {
 	mgr       keys.KeyManager
+	stack     *app.AppStack
 	out       io.Writer
 	errOut    io.Writer
 	privPath  string
@@ -25,29 +26,25 @@ type KeysRunner struct {
 
 // NewKeysRunner 는 지정된 입출력 스트림과 키 파일 경로로 KeysRunner를 생성한다.
 func NewKeysRunner(out, errOut io.Writer, privPath, pubPath, auditPath string) (*KeysRunner, error) {
-	st, err := keys.NewFileStore(privPath, pubPath)
+	stack, err := app.BuildStack(app.AppConfig{PrivKeyPath: privPath, PubJWKSPath: pubPath, AuditPath: auditPath})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init keys store: %w", err)
-	}
-
-	auditWriter, err := audit.NewJSONLWriter(auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit writer: %w", err)
-	}
-
-	mgr, err := keys.NewManager(st, auditWriter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init keys manager: %w", err)
+		return nil, err
 	}
 
 	return &KeysRunner{
-		mgr:       mgr,
+		mgr:       stack.KeyManager,
+		stack:     stack,
 		out:       out,
 		errOut:    errOut,
 		privPath:  privPath,
 		pubPath:   pubPath,
 		auditPath: auditPath,
 	}, nil
+}
+
+// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
+func (r *KeysRunner) Close() error {
+	return r.stack.Close()
 }
 
 // Run 은 전달받은 인자(args)를 바탕으로 `keys` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.

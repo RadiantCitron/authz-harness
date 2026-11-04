@@ -9,8 +9,6 @@ import (
 	"strings"
 
 	"authz-harness/internal/app"
-	"authz-harness/internal/authz/pep"
-	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/netguard"
 	"authz-harness/internal/subagent"
@@ -101,13 +99,14 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 
 	// 1. 단일 합성 루트(AppStack)를 통한 검증 전용 컴포넌트 조립
 	stack, err := app.BuildStack(app.AppConfig{
-		WorkspaceDir: workspaceFlag,
-		StatePath:    stateFlag,
-		PubJWKSPath:  pubJWKSFlag,
-		ReplayPath:   replayFlag,
-		AuditPath:    auditFlag,
-		NetAllowList: netAllow,
-		VerifyOnly:   true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
+		WorkspaceDir:             workspaceFlag,
+		StatePath:                stateFlag,
+		PubJWKSPath:              pubJWKSFlag,
+		ReplayPath:               replayFlag,
+		AuditPath:                auditFlag,
+		NetAllowList:             netAllow,
+		EnableRevokeBeforeIOHook: true, // 결함 주입: req.InjectRevokeBeforeIO 시 I/O 직전 모든 Grant 회수
+		VerifyOnly:               true, // 자식 서브에이전트는 Zone A(개인키) 미접근 원칙 준수
 	})
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: failed to build subagent stack: %v\n", err)
@@ -115,17 +114,7 @@ func (r *SubagentRunner) Run(ctx context.Context, args []string) domain.ExitCode
 	}
 	defer stack.Close()
 
-	// 결함 주입 데코레이터 적용: req.InjectRevokeBeforeIO 시 I/O 직전 모든 Grant 회수 시뮬레이션
-	decoratedGW := pep.WithBeforeIOHook(stack.PEP, func(ctx context.Context, req pep.Request) error {
-		return stack.StateStore.Update(func(st *state.GrantsState) error {
-			for i := range st.Grants {
-				st.Grants[i].Status = domain.GrantStatusRevoked
-			}
-			return nil
-		})
-	})
-
-	worker, err := subagent.NewWorker(decoratedGW)
+	worker, err := subagent.NewWorker(stack.PEP)
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: failed to init subagent worker: %v\n", err)
 		return domain.ExitInternalError

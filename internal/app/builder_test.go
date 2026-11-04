@@ -180,3 +180,108 @@ func TestBuildStack_BudgetPathDerivedFromReplayPath(t *testing.T) {
 		t.Error("VerifyOnly stack must see the shared ledger")
 	}
 }
+
+// TC-030-03: 상태·감사 경로만 준 부분 경로 조립은 불필요한 원장·키 파일을 만들지 않는다.
+func TestBuildStack_PartialPaths_NoStrayFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath: filepath.Join(tmpDir, "state.json"),
+		AuditPath: filepath.Join(tmpDir, "audit.jsonl"),
+	})
+	if err != nil {
+		t.Fatalf("BuildStack failed: %v", err)
+	}
+	defer stack.Close()
+
+	if stack.PAP == nil || stack.PDP == nil {
+		t.Error("PAP/PDP must be assembled for state-only config")
+	}
+	if stack.PEP != nil || stack.KeyManager != nil || stack.TokenVerifier != nil {
+		t.Error("PEP/KeyManager/TokenVerifier must not be assembled without key paths")
+	}
+	for _, name := range []string{"budget_ledger.json", "replay_ledger.json"} {
+		if _, err := os.Stat(filepath.Join(tmpDir, name)); err == nil {
+			t.Errorf("unexpected file created: %s", name)
+		}
+	}
+	if _, err := os.Stat("budget_ledger.json"); err == nil {
+		t.Error("budget_ledger.json must not be created in the working directory")
+	}
+}
+
+// TC-030-04: 활성 키가 폐기된 뒤에도 토큰 발급 스택은 자동 회전하고, keys 부분 경로 스택은 회전하지 않는다.
+func TestBuildStack_RotationOnlyForIssuingStack(t *testing.T) {
+	tmpDir := t.TempDir()
+	base := app.AppConfig{
+		PrivKeyPath: filepath.Join(tmpDir, "priv.json"),
+		PubJWKSPath: filepath.Join(tmpDir, "pub.json"),
+		AuditPath:   filepath.Join(tmpDir, "audit.jsonl"),
+	}
+
+	keysStack, err := app.BuildStack(base) // keys CLI 형태 (ReplayPath 없음)
+	if err != nil {
+		t.Fatalf("keys stack: %v", err)
+	}
+	active, err := keysStack.KeyManager.GetActiveSigningKey()
+	if err != nil || active == nil {
+		t.Fatalf("bootstrap active key missing: %v", err)
+	}
+	if err := keysStack.KeyManager.RevokeKey(active.KID, domain.AuditContext{TraceID: "t", Actor: "test", Reason: "test"}); err != nil {
+		t.Fatalf("RevokeKey: %v", err)
+	}
+	keysStack.Close()
+
+	again, err := app.BuildStack(base)
+	if err != nil {
+		t.Fatalf("keys stack again: %v", err)
+	}
+	if k, _ := again.KeyManager.GetActiveSigningKey(); k != nil {
+		t.Error("keys-only stack must not auto-rotate a new active key")
+	}
+	again.Close()
+
+	issuing := base
+	issuing.ReplayPath = filepath.Join(tmpDir, "replay.json")
+	stack, err := app.BuildStack(issuing)
+	if err != nil {
+		t.Fatalf("issuing stack: %v", err)
+	}
+	defer stack.Close()
+	if k, err := stack.KeyManager.GetActiveSigningKey(); err != nil || k == nil {
+		t.Errorf("issuing stack must rotate to a new active key: %v", err)
+	}
+}
+
+// TC-030-05: PDP·검증기가 있는데 워크스페이스가 없으면 조용히 건너뛰지 않고 거부한다(Fail-Closed).
+func TestBuildStack_MissingWorkspace_FailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:   filepath.Join(tmpDir, "state.json"),
+		PrivKeyPath: filepath.Join(tmpDir, "priv.json"),
+		PubJWKSPath: filepath.Join(tmpDir, "pub.json"),
+		ReplayPath:  filepath.Join(tmpDir, "replay.json"),
+		AuditPath:   filepath.Join(tmpDir, "audit.jsonl"),
+	})
+	// 에러 문구 매칭은 AP-10 가드가 금지하므로 거부 사실(에러 + nil 스택)만 단언한다.
+	if err == nil || stack != nil {
+		t.Fatalf("expected BuildStack to reject missing workspace, got stack=%v err=%v", stack, err)
+	}
+}
+
+// TC-030-06: 게이트웨이가 조립되지 않으면 회수 훅이 켜져 있어도 nil 을 감싼 데코레이터를 만들지 않는다.
+func TestBuildStack_RevokeHookWithoutGateway_StaysNil(t *testing.T) {
+	tmpDir := t.TempDir()
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:                filepath.Join(tmpDir, "state.json"),
+		AuditPath:                filepath.Join(tmpDir, "audit.jsonl"),
+		EnableRevokeBeforeIOHook: true,
+		VerifyOnly:               true,
+	})
+	if err != nil {
+		t.Fatalf("BuildStack failed: %v", err)
+	}
+	defer stack.Close()
+	if stack.PEP != nil {
+		t.Error("stack.PEP must be nil when no gateway is assembled")
+	}
+}

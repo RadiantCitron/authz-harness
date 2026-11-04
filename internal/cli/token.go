@@ -38,19 +38,9 @@ func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditP
 		return nil, fmt.Errorf("failed to build token stack: %w", err)
 	}
 
-	validator := exchange.NewDownscopeValidator()
-	exchangeSvc := exchange.NewExchangeService(
-		stack.TokenIssuer,
-		stack.TokenVerifier,
-		stack.ClientReg,
-		validator,
-		stack.AuditWriter,
-		domain.RealClock{},
-	)
-
 	return &TokenRunner{
 		stack:      stack,
-		exchange:   exchangeSvc,
+		exchange:   stack.ExchangeService,
 		out:        out,
 		errOut:     errOut,
 		privPath:   privPath,
@@ -305,15 +295,7 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		}
 		defer offsetStack.Close()
 
-		validator := exchange.NewDownscopeValidator()
-		exchangeService = exchange.NewExchangeService(
-			offsetStack.TokenIssuer,
-			offsetStack.TokenVerifier,
-			offsetStack.ClientReg,
-			validator,
-			offsetStack.AuditWriter,
-			offsetClock,
-		)
+		exchangeService = offsetStack.ExchangeService
 	}
 
 	req := exchange.ExchangeRequest{

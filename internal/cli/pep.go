@@ -107,26 +107,7 @@ func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode 
 
 	// flag.FlagSet 은 non-flag 인자(resource)를 만나면 파싱을 중단하므로,
 	// args 에서 플래그와 resource 경로를 분리하거나 맨 뒤/앞의 resource를 식별한다.
-	var flagArgs []string
-	var resource string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flagArgs = append(flagArgs, arg)
-			// 플래그에 값이 오는 경우 (--flag val)
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				// bool 플래그인 --inject-audit-failure 제외
-				if arg != "-inject-audit-failure" && arg != "--inject-audit-failure" {
-					flagArgs = append(flagArgs, args[i+1])
-					i++
-				}
-			}
-		} else if resource == "" {
-			resource = arg
-		} else {
-			flagArgs = append(flagArgs, arg)
-		}
-	}
+	resource, flagArgs := splitPEPResourceAndFlags(args)
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return domain.ExitBadInput
@@ -146,18 +127,10 @@ func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode 
 		return domain.ExitBadInput
 	}
 
-	var clockOffset time.Duration
-	if strings.TrimSpace(clockOffsetStr) != "" {
-		parsed, err := time.ParseDuration(clockOffsetStr)
-		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset: %v\n", err)
-			return domain.ExitBadInput
-		}
-		if parsed < 0 {
-			fmt.Fprintf(r.errOut, "Error: --clock-offset must not be negative (만료 토큰 부활 방지)\n")
-			return domain.ExitBadInput
-		}
-		clockOffset = parsed
+	clockOffset, err := parseNonNegativeClockOffset(clockOffsetStr)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitBadInput
 	}
 
 	if traceID == "" {
@@ -211,24 +184,7 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 	fs.StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
 	fs.StringVar(&traceID, "trace-id", "", "Explicit transaction trace ID")
 
-	var flagArgs []string
-	var resource string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flagArgs = append(flagArgs, arg)
-			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				if arg != "-inject-audit-failure" && arg != "--inject-audit-failure" {
-					flagArgs = append(flagArgs, args[i+1])
-					i++
-				}
-			}
-		} else if resource == "" {
-			resource = arg
-		} else {
-			flagArgs = append(flagArgs, arg)
-		}
-	}
+	resource, flagArgs := splitPEPResourceAndFlags(args)
 
 	if err := fs.Parse(flagArgs); err != nil {
 		return domain.ExitBadInput
@@ -260,18 +216,10 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 		writeBytes = []byte(dataStr)
 	}
 
-	var clockOffset time.Duration
-	if strings.TrimSpace(clockOffsetStr) != "" {
-		parsed, err := time.ParseDuration(clockOffsetStr)
-		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset: %v\n", err)
-			return domain.ExitBadInput
-		}
-		if parsed < 0 {
-			fmt.Fprintf(r.errOut, "Error: --clock-offset must not be negative (만료 토큰 부활 방지)\n")
-			return domain.ExitBadInput
-		}
-		clockOffset = parsed
+	clockOffset, err := parseNonNegativeClockOffset(clockOffsetStr)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitBadInput
 	}
 
 	if traceID == "" {
@@ -455,4 +403,42 @@ func exitCodeName(c domain.ExitCode) string {
 	default:
 		return "Unknown"
 	}
+}
+
+// splitPEPResourceAndFlags 는 flag.FlagSet 이 non-flag 인자를 만나면 파싱을 중단하는 제약 때문에,
+// args 에서 위치 인자(resource)와 플래그(값 포함)를 분리한다.
+func splitPEPResourceAndFlags(args []string) (resource string, flagArgs []string) {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flagArgs = append(flagArgs, arg)
+			// 플래그에 값이 오는 경우 (--flag val). bool 플래그 --inject-audit-failure 는 제외.
+			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				if arg != "-inject-audit-failure" && arg != "--inject-audit-failure" {
+					flagArgs = append(flagArgs, args[i+1])
+					i++
+				}
+			}
+		} else if resource == "" {
+			resource = arg
+		} else {
+			flagArgs = append(flagArgs, arg)
+		}
+	}
+	return resource, flagArgs
+}
+
+// parseNonNegativeClockOffset 은 --clock-offset 값을 파싱하며 빈 값은 0, 음수는 거부한다(만료 토큰 부활 방지).
+func parseNonNegativeClockOffset(raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --clock-offset: %w", err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("--clock-offset must not be negative (만료 토큰 부활 방지)")
+	}
+	return d, nil
 }

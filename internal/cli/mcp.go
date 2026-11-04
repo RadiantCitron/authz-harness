@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"authz-harness/internal/audit"
+	"authz-harness/internal/app"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
 	"authz-harness/internal/orchestrator"
@@ -114,12 +114,13 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 	executor := r.executor
 	if executor == nil {
 		// 1. 감사 로그 기록기 초기화
-		auditWriter, err := audit.NewJSONLWriter(auditFlag)
+		stack, err := app.BuildStack(app.AppConfig{AuditPath: auditFlag, VerifyOnly: true})
 		if err != nil {
 			fmt.Fprintf(r.errOut, "Error: failed to init audit writer: %v\n", err)
 			return domain.ExitInternalError
 		}
-		defer auditWriter.Close()
+		defer stack.Close()
+		auditWriter := stack.AuditWriter
 
 		// 2. 바이너리 결정
 		binPath := r.workerBin

@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	"authz-harness/internal/audit"
+	"authz-harness/internal/app"
 	"authz-harness/internal/authz/pap"
-	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 )
 
 // GrantRunner 는 `grant` 하위 명령어 실행을 주관하는 러너다.
 type GrantRunner struct {
 	papSvc    pap.Service
+	stack     *app.AppStack
 	out       io.Writer
 	errOut    io.Writer
 	auditPath string
@@ -25,25 +25,24 @@ type GrantRunner struct {
 
 // NewGrantRunner 는 지정된 입출력 스트림과 파일 경로로 GrantRunner를 생성한다.
 func NewGrantRunner(out, errOut io.Writer, statePath, auditPath string) (*GrantRunner, error) {
-	st, err := state.NewFileStore(statePath)
+	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath})
 	if err != nil {
-		return nil, fmt.Errorf("failed to init state store: %w", err)
+		return nil, err
 	}
-
-	auditWriter, err := audit.NewJSONLWriter(auditPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to init audit writer: %w", err)
-	}
-
-	papSvc := pap.NewService(st, auditWriter)
 
 	return &GrantRunner{
-		papSvc:    papSvc,
+		papSvc:    stack.PAP,
+		stack:     stack,
 		out:       out,
 		errOut:    errOut,
 		auditPath: auditPath,
 		statePath: statePath,
 	}, nil
+}
+
+// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
+func (r *GrantRunner) Close() error {
+	return r.stack.Close()
 }
 
 // Run 은 전달받은 인자(args)를 바탕으로 `grant` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.
