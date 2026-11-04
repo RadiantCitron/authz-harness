@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,10 @@ import (
 
 // Event 는 domain.AuditEvent 의 별칭이다(DIP: 스키마 정의는 도메인에 있다). ROADMAP.md §15 감사 모델 준수.
 type Event = domain.AuditEvent
+
+// MaxRecordBytes 는 감사 한 줄(줄바꿈 제외 JSON 바이트)의 상한이다.
+// Writer·검증기·체크포인트가 같은 값을 쓴다(plan-008 W4).
+const MaxRecordBytes = 1 << 20
 
 // ComputeEventHash 는 prevHash 와 이벤트의 불변 핵심 필드들을 결정론적으로 결합하여 SHA-256 해시를 계산한다.
 // [결정론적 정규화 공식]:
@@ -145,7 +150,8 @@ func readLastEvent(f *os.File) (*Event, error) {
 		return nil, nil
 	}
 
-	readSize := int64(65536)
+	// 줄바꿈 포함 마지막 줄(MaxRecordBytes+1) + 그 앞 줄바꿈 1바이트를 덮는 창.
+	readSize := int64(MaxRecordBytes + 2)
 	if size < readSize {
 		readSize = size
 	}
@@ -166,16 +172,7 @@ func readLastEvent(f *os.File) (*Event, error) {
 	if idx != -1 {
 		lastLine = strings.TrimSpace(trimmed[idx+1:])
 	} else if size > readSize {
-		// 한 줄이 64KB를 초과하는 극단적 경우 전체 읽기 폴백
-		allBytes, err := os.ReadFile(f.Name())
-		if err != nil {
-			return nil, err
-		}
-		lines := strings.Split(strings.TrimRight(string(allBytes), "\r\n "), "\n")
-		if len(lines) == 0 {
-			return nil, nil
-		}
-		lastLine = strings.TrimSpace(lines[len(lines)-1])
+		return nil, fmt.Errorf("last audit record exceeds MaxRecordBytes (%d)", MaxRecordBytes)
 	}
 
 	if lastLine == "" {
@@ -248,6 +245,9 @@ func (w *JSONLWriter) Log(event Event) error {
 	if err != nil {
 		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to marshal audit event: %v", err), err)
 	}
+	if len(data) > MaxRecordBytes {
+		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("audit record is %d bytes, exceeds MaxRecordBytes %d", len(data), MaxRecordBytes), nil)
+	}
 
 	data = append(data, '\n')
 	if _, err := w.file.Write(data); err != nil {
@@ -291,8 +291,7 @@ func VerifyHashChain(path string) error {
 	defer f.Close()
 
 	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
+	scanner.Buffer(make([]byte, 64*1024), MaxRecordBytes+1)
 
 	var expectedPrevHash string
 	lineNum := 0
@@ -356,6 +355,9 @@ func VerifyHashChain(path string) error {
 	}
 
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d exceeds MaxRecordBytes %d", lineNum+1, MaxRecordBytes), err)
+		}
 		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("error scanning audit file %s: %v", path, err), err)
 	}
 

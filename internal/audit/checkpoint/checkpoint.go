@@ -139,7 +139,7 @@ func readLines(path string) ([]string, error) {
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 64*1024), audit.MaxRecordBytes+1)
 	var lines []string
 	for sc.Scan() {
 		if l := strings.TrimSpace(sc.Text()); l != "" {
