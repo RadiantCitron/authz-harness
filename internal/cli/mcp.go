@@ -110,7 +110,12 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 		return domain.ExitBadInput
 	}
 
-	logger := slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: slogadapter.RedactReplaceAttr}))
+	// 전역 로거(main 의 -verbose)가 Debug 를 허용하면 MCP 로거도 Debug 로 맞춘다.
+	logLevel := slog.LevelInfo
+	if slog.Default().Enabled(ctx, slog.LevelDebug) {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(r.errOut, &slog.HandlerOptions{Level: logLevel, ReplaceAttr: slogadapter.RedactReplaceAttr}))
 
 	executor := r.executor
 	if executor == nil {

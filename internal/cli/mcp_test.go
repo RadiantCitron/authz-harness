@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -61,5 +63,37 @@ func TestMCPWorkerArgs_NetAllowPassthrough(t *testing.T) {
 		if a == "-net-allow" {
 			t.Fatal("-net-allow must be absent when flag is empty")
 		}
+	}
+}
+
+// 보고서 029 P-2: MCP 로거 레벨은 전역 로거(-verbose)를 따른다.
+func TestMCPRunner_LogLevelFollowsGlobalLogger(t *testing.T) {
+	// id 없는 notification 프레임은 서버가 Debug 로그만 남기고 무시한다.
+	const frame = `{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
+	const debugMsg = "ignoring notification frame without id"
+
+	tests := []struct {
+		name      string
+		level     slog.Level
+		wantDebug bool
+	}{
+		{"전역 Debug면 MCP Debug 로그 출력", slog.LevelDebug, true},
+		{"전역 Info면 MCP Debug 로그 미출력", slog.LevelInfo, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := slog.Default()
+			t.Cleanup(func() { slog.SetDefault(prev) })
+			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: tc.level})))
+
+			errOut := &bytes.Buffer{}
+			runner := NewMCPRunner(strings.NewReader(frame), &bytes.Buffer{}, errOut, "", "", "", "", "", &dummyMCPExecutor{})
+			if code := runner.Run(context.Background(), []string{"serve"}); code != domain.ExitSuccess {
+				t.Fatalf("expected ExitSuccess, got %v (stderr: %s)", code, errOut.String())
+			}
+			if got := strings.Contains(errOut.String(), debugMsg); got != tc.wantDebug {
+				t.Errorf("debug log present=%v, want %v (stderr: %q)", got, tc.wantDebug, errOut.String())
+			}
+		})
 	}
 }
