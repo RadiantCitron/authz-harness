@@ -16,6 +16,8 @@ const (
 	// 도구 식별자 (MCP Tool Name)
 	ToolFileRead  = "file_read"
 	ToolFileWrite = "file_write"
+	ToolNetFetch  = "net_fetch"
+	ToolExecRun   = "exec_run"
 
 	// 최대 요청 프레임 크기 (1MB)
 	MaxFrameSize = 1024 * 1024
@@ -29,6 +31,8 @@ var (
 	ErrMissingMethod      = errors.New("mcp: missing method")
 	ErrMissingPath        = errors.New("mcp: missing required argument 'path'")
 	ErrMissingData        = errors.New("mcp: missing required argument 'data' for file_write")
+	ErrMissingURL         = errors.New("mcp: missing required argument 'url'")
+	ErrMissingCommandID   = errors.New("mcp: missing required argument 'command_id'")
 	ErrUnexpectedArgument = errors.New("mcp: unexpected argument in tool parameters")
 	ErrFrameTooLarge      = errors.New("mcp: frame exceeds maximum allowed size")
 )
@@ -95,6 +99,10 @@ func MapToolToAction(toolName string) (domain.Action, error) {
 		return domain.ActionFileRead, nil
 	case ToolFileWrite:
 		return domain.ActionFileWrite, nil
+	case ToolNetFetch:
+		return domain.ActionNetFetch, nil
+	case ToolExecRun:
+		return domain.ActionExecRun, nil
 	default:
 		return "", fmt.Errorf("%w: %s", ErrUnknownTool, toolName)
 	}
@@ -123,36 +131,78 @@ func ParseToolCallParams(raw json.RawMessage) (*ToolCallRequest, error) {
 		return nil, ErrMissingAuthzToken
 	}
 
-	// 3. 인자 스키마 엄격 검증 (DisallowUnknownFields)
-	decoder := json.NewDecoder(strings.NewReader(string(params.Arguments)))
-	decoder.DisallowUnknownFields()
-
-	var args struct {
-		Path *string `json:"path"`
-		Data *string `json:"data"`
-	}
-
-	if err := decoder.Decode(&args); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnexpectedArgument, err)
-	}
-
-	if args.Path == nil || strings.TrimSpace(*args.Path) == "" {
-		return nil, ErrMissingPath
-	}
-
-	var dataVal string
-	if action == domain.ActionFileWrite {
-		if args.Data == nil {
+	// 3. 도구별 인자 스키마 엄격 검증 (DisallowUnknownFields). URL·ID 형식은 PEP 가 검사한다.
+	var path, data string
+	switch action {
+	case domain.ActionFileRead:
+		var a struct {
+			Path *string `json:"path"`
+		}
+		if err := decodeStrict(params.Arguments, &a); err != nil {
+			return nil, err
+		}
+		if a.Path == nil || strings.TrimSpace(*a.Path) == "" {
+			return nil, ErrMissingPath
+		}
+		path = *a.Path
+	case domain.ActionFileWrite:
+		var a struct {
+			Path *string `json:"path"`
+			Data *string `json:"data"`
+		}
+		if err := decodeStrict(params.Arguments, &a); err != nil {
+			return nil, err
+		}
+		if a.Path == nil || strings.TrimSpace(*a.Path) == "" {
+			return nil, ErrMissingPath
+		}
+		if a.Data == nil {
 			return nil, ErrMissingData
 		}
-		dataVal = *args.Data
+		path, data = *a.Path, *a.Data
+	case domain.ActionNetFetch:
+		var a struct {
+			URL *string `json:"url"`
+		}
+		if err := decodeStrict(params.Arguments, &a); err != nil {
+			return nil, err
+		}
+		if a.URL == nil || strings.TrimSpace(*a.URL) == "" {
+			return nil, ErrMissingURL
+		}
+		path = *a.URL
+	case domain.ActionExecRun:
+		var a struct {
+			CommandID *string `json:"command_id"`
+			Arg       *string `json:"arg"`
+		}
+		if err := decodeStrict(params.Arguments, &a); err != nil {
+			return nil, err
+		}
+		if a.CommandID == nil || strings.TrimSpace(*a.CommandID) == "" {
+			return nil, ErrMissingCommandID
+		}
+		path = *a.CommandID
+		if a.Arg != nil {
+			data = *a.Arg
+		}
 	}
 
 	return &ToolCallRequest{
 		ToolName:   params.Name,
 		Action:     action,
-		Path:       *args.Path,
-		Data:       dataVal,
+		Path:       path,
+		Data:       data,
 		AuthzToken: params.Meta.AuthzToken,
 	}, nil
+}
+
+// decodeStrict 는 알 수 없는 필드를 거부하며 도구 인자를 v 로 해석한다.
+func decodeStrict(raw json.RawMessage, v any) error {
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnexpectedArgument, err)
+	}
+	return nil
 }

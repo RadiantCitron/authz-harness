@@ -100,8 +100,8 @@ func TestServer_ToolsList(t *testing.T) {
 	if !ok {
 		t.Fatalf("tools is not slice: %v", resMap)
 	}
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %d", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("expected 4 tools, got %d", len(tools))
 	}
 
 	toolNames := []string{}
@@ -109,7 +109,7 @@ func TestServer_ToolsList(t *testing.T) {
 		m := tool.(map[string]any)
 		toolNames = append(toolNames, m["name"].(string))
 	}
-	if toolNames[0] != "file_read" || toolNames[1] != "file_write" {
+	if toolNames[0] != "file_read" || toolNames[1] != "file_write" || toolNames[2] != "net_fetch" || toolNames[3] != "exec_run" {
 		t.Errorf("unexpected tool names: %v", toolNames)
 	}
 }

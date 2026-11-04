@@ -261,6 +261,11 @@ func TestArchitectureGuardrails(t *testing.T) {
 			`"authz-harness/internal/authz/pip"`:  true,
 			`"authz-harness/internal/jail"`:       true,
 			`"authz-harness/internal/authn/keys"`: true,
+			`"net"`:                               true,
+			`"net/http"`:                          true,
+			`"os/exec"`:                           true,
+			`"authz-harness/internal/netguard"`:   true,
+			`"authz-harness/internal/execguard"`:  true,
 		}
 
 		for _, pkg := range pkgs {

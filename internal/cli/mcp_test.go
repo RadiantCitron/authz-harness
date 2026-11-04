@@ -49,3 +49,17 @@ func TestMCPRunner_InvalidCommand(t *testing.T) {
 		t.Fatalf("expected ExitBadInput(14), got %v", code)
 	}
 }
+
+// 로드맵 16 / 050 TC-050-04
+func TestMCPWorkerArgs_NetAllowPassthrough(t *testing.T) {
+	with := mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080")
+	n := len(with)
+	if with[n-2] != "-net-allow" || with[n-1] != "127.0.0.1:18080" {
+		t.Fatalf("expected trailing -net-allow, got %v", with)
+	}
+	for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "") {
+		if a == "-net-allow" {
+			t.Fatal("-net-allow must be absent when flag is empty")
+		}
+	}
+}

@@ -189,6 +189,40 @@ func (s *Server) handleToolsList(id any) {
 				"additionalProperties": false,
 			},
 		},
+		{
+			"name":        ToolNetFetch,
+			"description": "루프백 allow-list 에 있는 주소로 HTTP GET 을 보낸다. (_meta.authz_token 필수)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{
+						"type":        "string",
+						"description": "요청할 루프백 URL (예: http://127.0.0.1:18080/status)",
+					},
+				},
+				"required":             []string{"url"},
+				"additionalProperties": false,
+			},
+		},
+		{
+			"name":        ToolExecRun,
+			"description": "코드에 고정된 allow-list 의 실행 ID 를 실행한다. (_meta.authz_token 필수)",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"command_id": map[string]any{
+						"type":        "string",
+						"description": "등록된 실행 ID (예: echo-safe)",
+					},
+					"arg": map[string]any{
+						"type":        "string",
+						"description": "선택 인자 하나",
+					},
+				},
+				"required":             []string{"command_id"},
+				"additionalProperties": false,
+			},
+		},
 	}
 
 	s.writeResult(id, map[string]any{
