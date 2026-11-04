@@ -1,6 +1,6 @@
 # [구현지시서 010] PDP-PIP·Audit 의존성 역전(DIP) 완결 및 도메인 스냅샷·감사 포트 순수화
 
-> **문서 상태**: `Draft` ([026번 보고서](../../../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md) 검증, [027번 보고서](../../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md) 재검증·교정 완료 — 착수 가능)
+> **문서 상태**: `Done` (2026-11-04, `cef8fd5`; [026번 보고서](../../../보고서/026-17번로드맵_구조결함_및_진행가능성_검증보고서.md) 검증, [027번 보고서](../../../보고서/027-17번로드맵_026교정_재검증_및_잔여결함_교정보고서.md) 재검증·교정 완료 — 착수 가능)
 > **상위 대시보드**: [17번 README.md](../README.md) | [ROADMAP.md](../ROADMAP.md)
 > **선행 조건**: [로드맵 16](../../16-도구-종류-확장-및-egress-통제/README.md) `Done` (79대 PASS)
 > **후속 단계**: [030_cli_합성루트_일원화_및_중복_제거.md](030_cli_합성루트_일원화_및_중복_제거.md) (`020`은 과잉 추상화 배제를 위해 `Dropped`)
@@ -129,5 +129,5 @@ type AuditWriter interface {
 
 ## 6. 완료 판정 체크리스트
 
-- [ ] `internal/domain/snapshot.go`(`SubjectSnapshot`, `SnapshotProvider`)·`internal/domain/audit.go`(`AuditEvent`, `AuditWriter`) 생성 및 `pip`·`audit` 타입 별칭(`=`) 선언 완료
-- [ ] `internal/authz/pdp/service.go`에서 `pip`·`audit` import 제거 및 프로젝트 내부 전이 의존성(`domain` 단독) 확인 후 단독 커밋
+- [x] `internal/domain/snapshot.go`(`SubjectSnapshot`, `SnapshotProvider`)·`internal/domain/audit.go`(`AuditEvent`, `AuditWriter`) 생성 및 `pip`·`audit` 타입 별칭(`=`) 선언 완료
+- [x] `internal/authz/pdp/service.go`에서 `pip`·`audit` import 제거 및 프로젝트 내부 전이 의존성(`domain` 단독) 확인 후 단독 커밋
