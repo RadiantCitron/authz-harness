@@ -2,16 +2,22 @@ package catalog
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
+	"time"
+
+	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
+	"authz-harness/internal/orchestrator"
 )
 
-// TestCatalog_ScenarioCount39 는 카탈로그에 39개의 고유 시나리오가 등록되어 있는지 검증한다.
-func TestCatalog_ScenarioCount39(t *testing.T) {
+// TestCatalog_ScenarioCount 는 카탈로그에 44개의 고유 시나리오가 등록되어 있는지 검증한다.
+func TestCatalog_ScenarioCount(t *testing.T) {
 	scenarios := AllScenarios()
-	if len(scenarios) != 39 {
-		t.Fatalf("expected 39 scenarios, got %d", len(scenarios))
+	if len(scenarios) != 44 {
+		t.Fatalf("expected 44 scenarios, got %d", len(scenarios))
 	}
 
 	seen := make(map[string]bool)
@@ -37,7 +43,7 @@ func TestCatalog_ScenarioCount39(t *testing.T) {
 	}
 }
 
-// TestCatalog_RegisterAll 은 Runner에 39개 시나리오가 정상 등록되는지 검증한다.
+// TestCatalog_RegisterAll 은 Runner에 44개 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -45,8 +51,8 @@ func TestCatalog_RegisterAll(t *testing.T) {
 	}
 
 	list := runner.List()
-	if len(list) != 39 {
-		t.Fatalf("expected 39 registered scenarios, got %d", len(list))
+	if len(list) != 44 {
+		t.Fatalf("expected 44 registered scenarios, got %d", len(list))
 	}
 }
 
@@ -202,7 +208,7 @@ func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 	}
 }
 
-// TestCatalog_RunAll_QuadAssertion 은 39개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
+// TestCatalog_RunAll_QuadAssertion 은 44개 전체 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
 	if err := RegisterAll(runner); err != nil {
@@ -214,8 +220,8 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 		t.Fatalf("RunAll failed: %v", err)
 	}
 
-	if len(results) != 39 {
-		t.Fatalf("expected 39 results, got %d", len(results))
+	if len(results) != 44 {
+		t.Fatalf("expected 44 results, got %d", len(results))
 	}
 
 	failedCount := 0
@@ -236,5 +242,86 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 
 	if failedCount > 0 {
 		t.Fatalf("Total %d / 30 scenarios failed", failedCount)
+	}
+}
+
+// TestCatalog_Group_G9_ResourceLimits 는 G9 그룹 (E2E-40 ~ E2E-44) 실행 검증
+func TestCatalog_Group_G9_ResourceLimits(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	for _, sc := range g9Scenarios() {
+		_ = runner.Register(sc)
+	}
+	for _, sc := range g9Scenarios() {
+		id := sc.Metadata().ID
+		res, err := runner.RunScenario(context.Background(), id)
+		if err != nil {
+			t.Fatalf("scenario %s failed with error: %v", id, err)
+		}
+		if !res.Passed {
+			t.Errorf("Scenario %s FAILED: reasons=%v err=%s", id, res.Assertion.FailureReasons, res.Error)
+		}
+	}
+}
+
+// mutatedExpectation 은 기대 종료 코드를 바꾼 변이 시나리오다 (TC-050-02).
+type mutatedExpectation struct {
+	harness.Scenario
+	code domain.ExitCode
+}
+
+func (m mutatedExpectation) Metadata() harness.ScenarioMetadata {
+	meta := m.Scenario.Metadata()
+	meta.Expected.ExitCode = m.code
+	return meta
+}
+
+// TC-050-02: 기대 코드를 0 으로 바꾸면 FAIL 이어야 한다 (동어반복 판정 방지).
+func TestG9_MutationExpectedExitCodeFails(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	_ = runner.Register(mutatedExpectation{Scenario: g9Scenarios()[0], code: domain.ExitSuccess})
+	res, err := runner.RunScenario(context.Background(), "E2E-40")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Fatal("mutated scenario must FAIL")
+	}
+}
+
+// TC-050-03: 확인 대상 PID 를 살아 있는 프로세스로 바꾸면 불변식 위반으로 FAIL 이어야 한다.
+func TestG9_MutationLivePIDFailsByInvariant(t *testing.T) {
+	sc := &g9FaultScenario{id: "E2E-41", name: "mut", mode: "spawn_child_hang",
+		limits: orchestrator.Limits{Timeout: 300 * time.Millisecond},
+		reason: domain.ReasonResourceTimeout, term: orchestrator.TermTimedOut, checkGrandchild: true,
+		pidOverride: func(int) int { return os.Getpid() }}
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	_ = runner.Register(sc)
+	res, err := runner.RunScenario(context.Background(), "E2E-41")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Passed {
+		t.Fatal("live-PID mutation must FAIL")
+	}
+	found := false
+	for _, r := range res.Assertion.FailureReasons {
+		found = found || strings.Contains(r, "invariant violation")
+	}
+	if !found {
+		t.Fatalf("expected invariant violation reason, got %v", res.Assertion.FailureReasons)
+	}
+}
+
+// TC-050-04: inproc 모드에서는 G9 전부 Skipped 이고 실패가 아니다.
+func TestG9_SkippedInProc(t *testing.T) {
+	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
+	for _, sc := range g9Scenarios() {
+		_ = runner.Register(sc)
+	}
+	for _, sc := range g9Scenarios() {
+		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
+		if err != nil || !res.Skipped {
+			t.Fatalf("%s: skipped=%v err=%v", sc.Metadata().ID, res.Skipped, err)
+		}
 	}
 }

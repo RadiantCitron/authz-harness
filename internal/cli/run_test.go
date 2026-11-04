@@ -93,11 +93,11 @@ func TestRunCLI_AT_CLI_04_JSONOutput(t *testing.T) {
 		t.Fatalf("failed to parse json output: %v", err)
 	}
 
-	if report.Total != 39 {
-		t.Errorf("expected 39 total scenarios in json, got %d", report.Total)
+	if report.Total != 44 {
+		t.Errorf("expected 44 total scenarios in json, got %d", report.Total)
 	}
-	if report.Passed != 39 {
-		t.Errorf("expected 39 passed scenarios, got %d", report.Passed)
+	if report.Passed != 44 {
+		t.Errorf("expected 44 passed scenarios, got %d", report.Passed)
 	}
 	if report.Failed != 0 {
 		t.Errorf("expected 0 failed scenarios, got %d", report.Failed)

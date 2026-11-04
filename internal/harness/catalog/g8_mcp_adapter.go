@@ -28,11 +28,32 @@ func g8Scenarios() []harness.Scenario {
 	}
 }
 
+// newMCPSpawner 는 MCP 호출 경로가 사용할 표준 Spawner 를 조립한다 (G8·G9 공유).
+// 바이너리가 있으면 프로덕션 서브프로세스 워커, 없으면 InProc 브릿지를 쓴다.
+func newMCPSpawner(env *harness.SandboxEnvironment, stack *harnessStack) (orchestrator.Spawner, error) {
+	if env.BinaryPath != "" {
+		return orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
+			BinaryPath: env.BinaryPath,
+			Args: []string{
+				"subagent", "worker",
+				"-workspace", env.WorkspaceDir,
+				"-state-file", env.StatePath,
+				"-pub-jwks-file", env.PubJWKSPath,
+				"-replay-file", env.ReplayPath,
+				"-audit-file", env.AuditPath,
+			},
+			Audit: stack.AuditWriter,
+		})
+	}
+	return &inProcSpawnerBridge{stack: stack}, nil
+}
+
 // executeMCPCall 은 샌드박스 환경에서 MCP JSON-RPC tools/call 요청을 실행하고 종료 코드 및 응답을 수거한다.
 func executeMCPCall(
 	ctx context.Context,
 	env *harness.SandboxEnvironment,
 	stack *harnessStack,
+	spawner orchestrator.Spawner,
 	toolName string,
 	arguments map[string]any,
 	tokenVal string,
@@ -65,31 +86,6 @@ func executeMCPCall(
 	inBuf := bytes.NewReader(reqBytes)
 	outBuf := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
-
-	// Spawner 설정
-	binPath := env.BinaryPath
-	var spawner orchestrator.Spawner
-	if binPath != "" {
-		sp, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
-			BinaryPath: binPath,
-			Args: []string{
-				"subagent", "worker",
-				"-workspace", env.WorkspaceDir,
-				"-state-file", env.StatePath,
-				"-pub-jwks-file", env.PubJWKSPath,
-				"-replay-file", env.ReplayPath,
-				"-audit-file", env.AuditPath,
-			},
-			Audit: stack.AuditWriter,
-		})
-		if err != nil {
-			return domain.ExitInternalError, nil, err
-		}
-		spawner = sp
-	} else {
-		// InProc 모드용 mock spawner -> stack.PEP 직접 호출 브릿지
-		spawner = &inProcSpawnerBridge{stack: stack}
-	}
 
 	executor := mcp.NewSubprocessExecutor(spawner)
 	server := mcp.NewServer(inBuf, outBuf, errBuf, executor, nil)
@@ -254,7 +250,11 @@ func (s *e2e33Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_read", map[string]any{"path": "mcp_task.txt"}, s.token, false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_read", map[string]any{"path": "mcp_task.txt"}, s.token, false)
 	return code, err
 }
 
@@ -319,7 +319,11 @@ func (s *e2e34Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_write", map[string]any{"path": "mcp_protected.txt", "data": "tampered"}, s.token, false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_write", map[string]any{"path": "mcp_protected.txt", "data": "tampered"}, s.token, false)
 	return code, err
 }
 
@@ -386,7 +390,11 @@ func (s *e2e35Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_read", map[string]any{"path": "mcp_expired.txt"}, s.token, false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_read", map[string]any{"path": "mcp_expired.txt"}, s.token, false)
 	return code, err
 }
 
@@ -463,7 +471,11 @@ func (s *e2e36Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_write", map[string]any{"path": "../../etc/passwd", "data": "injected"}, s.token, false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_write", map[string]any{"path": "../../etc/passwd", "data": "injected"}, s.token, false)
 	return code, err
 }
 
@@ -536,7 +548,11 @@ func (s *e2e37Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_read", map[string]any{"path": "mcp_revoked.txt"}, s.token, false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_read", map[string]any{"path": "mcp_revoked.txt"}, s.token, false)
 	return code, err
 }
 
@@ -581,7 +597,11 @@ func (s *e2e38Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "file_read", map[string]any{"path": "mcp_notoken.txt"}, "", true)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "file_read", map[string]any{"path": "mcp_notoken.txt"}, "", true)
 	return code, err
 }
 
@@ -626,6 +646,10 @@ func (s *e2e39Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	}
 	defer stack.Close()
 
-	code, _, err := executeMCPCall(ctx, env, stack, "shell_exec", map[string]any{"cmd": "whoami"}, "dummy.jwt.token", false)
+	spawner, err := newMCPSpawner(env, stack)
+	if err != nil {
+		return domain.ExitInternalError, err
+	}
+	code, _, err := executeMCPCall(ctx, env, stack, spawner, "shell_exec", map[string]any{"cmd": "whoami"}, "dummy.jwt.token", false)
 	return code, err
 }
