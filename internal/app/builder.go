@@ -148,7 +148,28 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		}
 	}
 
-	// 4. 토큰 발급기 및 검증기 (키 + 리플레이 경로가 있을 때만)
+	// 4. 인가 상태 저장소 및 PAP / PIP / PDP (ExchangeService 에 PIP 스냅샷 공급자를 배선하기 위해 먼저 조립)
+	var stateStore state.Store
+	var papSvc pap.Service
+	var pipSvc pip.Service
+	var pdpSvc pdp.Service
+
+	if cfg.StatePath != "" {
+		st, err := state.NewFileStore(cfg.StatePath, state.WithClock(cfg.Clock))
+		if err != nil {
+			_ = auditWriter.Close()
+			return nil, fmt.Errorf("app builder: state store: %w", err)
+		}
+		stateStore = st
+
+		if !cfg.VerifyOnly {
+			papSvc = pap.NewService(stateStore, auditWriter, pap.WithClock(cfg.Clock))
+		}
+		pipSvc = pip.NewService(stateStore, pip.WithClock(cfg.Clock))
+		pdpSvc = pdp.NewService(pipSvc, auditWriter, pdp.WithClock(cfg.Clock))
+	}
+
+	// 5. 토큰 발급기, 검증기 및 교환기 (키 + 리플레이 경로가 있을 때만)
 	var budgetLedger budget.Ledger
 	var clientReg *token.InMemoryClientRegistry
 	var tokenIssuer token.TokenIssuer
@@ -178,30 +199,12 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		tokenVerifier = token.NewVerifier(keyMgr, replayLedger, auditWriter, cfg.Clock)
 
 		if !cfg.VerifyOnly {
-			exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock,
-				exchange.WithBudgetLedger(budgetLedger))
+			exOpts := []exchange.Option{exchange.WithBudgetLedger(budgetLedger)}
+			if pipSvc != nil {
+				exOpts = append(exOpts, exchange.WithSnapshotProvider(pipSvc))
+			}
+			exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock, exOpts...)
 		}
-	}
-
-	// 5. 인가 상태 저장소 및 PAP / PIP / PDP
-	var stateStore state.Store
-	var papSvc pap.Service
-	var pipSvc pip.Service
-	var pdpSvc pdp.Service
-
-	if cfg.StatePath != "" {
-		st, err := state.NewFileStore(cfg.StatePath, state.WithClock(cfg.Clock))
-		if err != nil {
-			_ = auditWriter.Close()
-			return nil, fmt.Errorf("app builder: state store: %w", err)
-		}
-		stateStore = st
-
-		if !cfg.VerifyOnly {
-			papSvc = pap.NewService(stateStore, auditWriter, pap.WithClock(cfg.Clock))
-		}
-		pipSvc = pip.NewService(stateStore, pip.WithClock(cfg.Clock))
-		pdpSvc = pdp.NewService(pipSvc, auditWriter, pdp.WithClock(cfg.Clock))
 	}
 
 	// 6. 워크스페이스 격리(Jail) 및 PEP 게이트웨이

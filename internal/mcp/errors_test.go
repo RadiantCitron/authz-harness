@@ -49,6 +49,14 @@ func TestMapSubprocessError(t *testing.T) {
 			expectedText:   "[APPROVAL_EXPIRED] approval expired (exit code 18)",
 		},
 		{
+			name:           "ExitResourceLimit (17) -> RESOURCE_TIMEOUT 사유 복원",
+			exitCode:       int(domain.ExitResourceLimit),
+			rawReason:      "",
+			rawErrMsg:      "context deadline exceeded",
+			expectedReason: "RESOURCE_TIMEOUT",
+			expectedText:   "[RESOURCE_TIMEOUT] context deadline exceeded (exit code 17)",
+		},
+		{
 			name:           "TC-040-03: 알 수 없는 종료 코드 -> ReasonInternalError",
 			exitCode:       99,
 			rawReason:      "",

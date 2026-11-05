@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/exchange"
+	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 )
@@ -155,4 +158,104 @@ func TestReExchange_Lifecycle(t *testing.T) {
 		_, err = e.exch(c.TokenString, "worker-01", time.Minute, 1)
 		wantDomainErr(t, err, domain.ReasonDelegationSelfLoop, domain.ExitAuthzDenied)
 	})
+}
+
+type mockSnapshotProvider struct {
+	epochs domain.SecurityEpochs
+}
+
+func (m *mockSnapshotProvider) GetSubjectSnapshot(_ context.Context, subject string) (*domain.SubjectSnapshot, error) {
+	return &domain.SubjectSnapshot{
+		Subject:       subject,
+		CurrentEpoch:  m.epochs.Get(subject),
+		SubjectEpochs: m.epochs,
+	}, nil
+}
+
+func (m *mockSnapshotProvider) GetActiveGrants(_ context.Context, _ string) ([]domain.Grant, error) {
+	return nil, nil
+}
+
+func (m *mockSnapshotProvider) GetCurrentEpoch(_ context.Context, subject string) (domain.Epoch, error) {
+	return m.epochs.Get(subject), nil
+}
+
+func TestExchange_WithSnapshotProvider_EarlyEpochRejection(t *testing.T) {
+	baseTime := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	st, err := keys.NewFileStore(filepath.Join(dir, "priv.json"), filepath.Join(dir, "pub.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auditP := filepath.Join(dir, "audit.jsonl")
+	auditW, err := audit.NewJSONLWriter(auditP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = auditW.Close() })
+	keyMgr, err := keys.NewManager(st, auditW)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keyMgr.RotateKey(domain.AuditContext{TraceID: "init", Actor: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	clk := &mutableClock{t: baseTime}
+	replay, err := token.NewFileReplayLedger(filepath.Join(dir, "replay.json"), clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients := token.NewInMemoryClientRegistry()
+	issuer := token.NewService(keyMgr, clients, auditW, clk)
+	verifier := token.NewVerifier(keyMgr, replay, auditW, clk)
+	validator := exchange.NewDownscopeValidator()
+
+	sp := &mockSnapshotProvider{
+		epochs: domain.SecurityEpochs{
+			"lead-01":   1,
+			"mid-01":    1,
+			"worker-01": 1,
+		},
+	}
+	svc := exchange.NewExchangeService(
+		issuer,
+		verifier,
+		clients,
+		validator,
+		auditW,
+		clk,
+		exchange.WithSnapshotProvider(sp),
+	)
+
+	// 1. lead-01 (Epoch 1) -> mid-01 교환 성공
+	p0, err := issuer.IssueToken(token.IssueRequest{
+		ClientID: "client-orchestrator", ClientSecret: "orchestrator-secret-key-01",
+		Subject: "lead-01", Scope: "file:read:docs/a.txt", TTL: time.Hour, Epoch: 1,
+	}, token.IssueOptions{}, domain.AuditContext{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p1, err := svc.Exchange(context.Background(), exchange.ExchangeRequest{
+		ClientID: "client-orchestrator", ClientSecret: "orchestrator-secret-key-01",
+		ParentToken: p0.TokenString, ChildSubject: "mid-01", Scope: "file:read:docs/a.txt", TTL: 30 * time.Minute,
+	}, domain.AuditContext{})
+	if err != nil {
+		t.Fatalf("expected p0->p1 exchange to succeed: %v", err)
+	}
+
+	// 2. 상위 위임자(lead-01)의 Epoch를 2로 Bump한 뒤 mid-01 토큰(p1)으로 worker-01 교환 시도 -> 조상 Epoch 불일치로 즉시 거부
+	sp.epochs["lead-01"] = 2
+	_, err = svc.Exchange(context.Background(), exchange.ExchangeRequest{
+		ClientID: "client-subagent", ClientSecret: "subagent-secret-key-02",
+		ParentToken: p1.TokenString, ChildSubject: "worker-01", Scope: "file:read:docs/a.txt", TTL: 10 * time.Minute,
+	}, domain.AuditContext{TraceID: "trc-epoch-anc"})
+	wantDomainErr(t, err, domain.ReasonSubjectEpochRevoked, domain.ExitAuthzDenied)
+
+	// 3. 직계 부모(p0, lead-01 Epoch 1)로 직접 교환 시도 -> 직계 부모 Epoch 불일치로 즉시 거부
+	_, err = svc.Exchange(context.Background(), exchange.ExchangeRequest{
+		ClientID: "client-subagent", ClientSecret: "subagent-secret-key-02",
+		ParentToken: p0.TokenString, ChildSubject: "worker-01", Scope: "file:read:docs/a.txt", TTL: 10 * time.Minute,
+	}, domain.AuditContext{TraceID: "trc-epoch-parent"})
+	wantDomainErr(t, err, domain.ReasonSubjectEpochRevoked, domain.ExitAuthzDenied)
 }

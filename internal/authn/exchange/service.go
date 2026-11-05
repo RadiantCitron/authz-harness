@@ -48,6 +48,7 @@ type ExchangeService struct {
 	auditWriter audit.Writer
 	clock       domain.Clock
 	budgets     budget.Ledger
+	snapshots   domain.SnapshotProvider
 }
 
 // Option 은 ExchangeService 의 선택적 의존성 주입 옵션이다.
@@ -56,6 +57,12 @@ type Option func(*ExchangeService)
 // WithBudgetLedger 는 예산 예약에 쓸 원장을 주입한다. 없으면 예산 교환은 Fail-Closed 로 거부된다.
 func WithBudgetLedger(l budget.Ledger) Option {
 	return func(s *ExchangeService) { s.budgets = l }
+}
+
+// WithSnapshotProvider 는 토큰 교환 시점에 부모 및 위임 조상(act 사슬)의 최신 Security Epoch 를
+// 실시간 대조하기 위한 스냅샷 공급자(PIP)를 주입한다.
+func WithSnapshotProvider(sp domain.SnapshotProvider) Option {
+	return func(s *ExchangeService) { s.snapshots = sp }
 }
 
 // NewExchangeService 는 ExchangeService 인스턴스를 생성한다.
@@ -142,6 +149,38 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	}
 
 	parentClaims := verifiedParent.Claims
+
+	// 3-1. 부모 및 위임 조상(act 사슬) Security Epoch 실시간 사전 검증 (SnapshotProvider 가 배선된 경우)
+	if s.snapshots != nil {
+		snap, snapErr := s.snapshots.GetSubjectSnapshot(ctx, parentClaims.Subject)
+		if snapErr != nil || snap == nil {
+			details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
+			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, details); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			}
+			return nil, domain.NewError(domain.ReasonInternalError, "exchange", details, snapErr)
+		}
+		parentEpoch := domain.Epoch(parentClaims.Epoch)
+		if parentEpoch < 1 {
+			parentEpoch = 1
+		}
+		if parentEpoch != snap.CurrentEpoch {
+			details := fmt.Sprintf("parent %q epoch (%d) does not match current epoch (%d)", parentClaims.Subject, parentEpoch, snap.CurrentEpoch)
+			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonSubjectEpochRevoked, details); aerr != nil {
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			}
+			return nil, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)
+		}
+		for a := parentClaims.Actor; a != nil; a = a.Actor {
+			if a.Epoch < 1 || snap.SubjectEpochs == nil || snap.SubjectEpochs.Get(a.Subject) != a.Epoch {
+				details := fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", a.Subject, a.Epoch)
+				if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonSubjectEpochRevoked, details); aerr != nil {
+					return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+				}
+				return nil, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)
+			}
+		}
+	}
 
 	// 4. 축소 위임(Downscoping) 불변식 검증
 	if err := s.validator.ValidateDownscope(&parentClaims, req.ChildSubject, req.Scope, req.TTL, now); err != nil {

@@ -308,6 +308,64 @@ func TestPDP_Service_Audit_FailClosed(t *testing.T) {
 	}
 }
 
+// TestPDP_Service_WithEvaluatorAndAuditBinding 은 WithEvaluator 전략 주입과
+// pdp.decide 감사 이벤트의 TokenJTI·ArgHash 최상위 바인딩을 검증한다.
+func TestPDP_Service_WithEvaluatorAndAuditBinding(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	pipMock := &mockPIP{
+		snapshot: &pip.SubjectSnapshot{
+			Subject:      "worker-01",
+			CurrentEpoch: 1,
+			Timestamp:    now,
+		},
+	}
+
+	auditMock := &mockAudit{}
+	customCalled := false
+	customEval := func(req pdp.Request, snap *pip.SubjectSnapshot) pdp.Decision {
+		customCalled = true
+		return pdp.Decision{
+			Decision: pdp.DecisionAllow,
+			Reason:   domain.ReasonAuthorized,
+			GrantID:  "custom-grant-99",
+		}
+	}
+
+	svc := pdp.NewService(pipMock, auditMock, pdp.WithEvaluator(customEval))
+	req := pdp.Request{
+		Subject:  "worker-01",
+		Action:   domain.ActionFileRead,
+		Resource: "docs/plan.txt",
+		Epoch:    1,
+		TokenJTI: "jti-test-001",
+		ArgHash:  "sha256:abcdef0123456789",
+		TraceID:  "trc-eval-01",
+	}
+
+	dec, err := svc.Decide(ctx, req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !customCalled {
+		t.Fatal("expected custom evaluator to be called")
+	}
+	if dec.Decision != pdp.DecisionAllow || dec.GrantID != "custom-grant-99" {
+		t.Fatalf("unexpected decision: %+v", dec)
+	}
+	if len(auditMock.events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(auditMock.events))
+	}
+	ev := auditMock.events[0]
+	if ev.TokenJTI != "jti-test-001" {
+		t.Errorf("expected TokenJTI 'jti-test-001', got %q", ev.TokenJTI)
+	}
+	if ev.ArgHash != "sha256:abcdef0123456789" {
+		t.Errorf("expected ArgHash 'sha256:abcdef0123456789', got %q", ev.ArgHash)
+	}
+}
+
 func TestTC_020_Scenarios(t *testing.T) {
 	now := time.Now().UTC()
 	baseSnapshot := &pip.SubjectSnapshot{

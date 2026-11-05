@@ -177,6 +177,10 @@ func Evaluate(req Request, snapshot *domain.SubjectSnapshot) Decision {
 	}
 }
 
+// EvaluatorFunc 는 요청과 주체 스냅샷만으로 인가 결정을 계산하는 순수 평가 함수 타입이다.
+// 기본값은 패키지 순수 함수 Evaluate 이며, WithEvaluator 옵션으로 커스텀 정책 함수나 외부 정책 엔진 어댑터를 주입할 수 있다.
+type EvaluatorFunc func(req Request, snapshot *domain.SubjectSnapshot) Decision
+
 // Service 는 PIP 상태 조회와 감사 로깅을 조율하는 PDP 서비스 규약이다.
 type Service interface {
 	Decide(ctx context.Context, req Request) (*Decision, error)
@@ -187,6 +191,7 @@ type pdpService struct {
 	pipSvc domain.SnapshotProvider
 	audit  domain.AuditWriter
 	clock  domain.Clock
+	eval   EvaluatorFunc
 }
 
 // ServiceOption 은 PDP 서비스 구성 옵션이다.
@@ -201,12 +206,23 @@ func WithClock(c domain.Clock) ServiceOption {
 	}
 }
 
+// WithEvaluator 는 커스텀 순수 평가 함수(또는 외부 정책 엔진 어댑터)를 주입하는 옵션이다.
+// nil 이 전달되면 기본 내장 Evaluate 함수를 유지한다.
+func WithEvaluator(fn EvaluatorFunc) ServiceOption {
+	return func(s *pdpService) {
+		if fn != nil {
+			s.eval = fn
+		}
+	}
+}
+
 // NewService 는 PIP와 Audit Writer를 주입받아 PDP 서비스를 생성한다.
 func NewService(pipSvc domain.SnapshotProvider, audit domain.AuditWriter, opts ...ServiceOption) Service {
 	s := &pdpService{
 		pipSvc: pipSvc,
 		audit:  audit,
 		clock:  domain.RealClock{},
+		eval:   Evaluate,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -214,7 +230,7 @@ func NewService(pipSvc domain.SnapshotProvider, audit domain.AuditWriter, opts .
 	return s
 }
 
-// Decide 는 주체의 최신 상태 스냅샷을 PIP로부터 조회하고, 순수 Evaluate 함수로 판정한 뒤
+// Decide 는 주체의 최신 상태 스냅샷을 PIP로부터 조회하고, 순수 평가 함수(eval)로 판정한 뒤
 // 그 결과를 감사 로그(audit.jsonl)에 기록하고 Decision을 반환한다.
 // 감사 기록에 실패할 경우 Fail-Closed 원칙에 따라 에러를 반환한다.
 func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error) {
@@ -228,7 +244,11 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 		return nil, fmt.Errorf("pdp: failed to query pip snapshot: %w", err)
 	}
 
-	decision := Evaluate(req, snapshot)
+	evalFn := s.eval
+	if evalFn == nil {
+		evalFn = Evaluate
+	}
+	decision := evalFn(req, snapshot)
 
 	now := s.clock.Now().UTC()
 	traceID := req.TraceID
