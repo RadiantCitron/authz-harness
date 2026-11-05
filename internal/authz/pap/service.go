@@ -121,7 +121,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store grant", err)
 	}
 
-	// 감사 이벤트 기록
+	// 감사 이벤트 기록 (실패 시 방금 추가한 Grant 를 롤백하여 무증거 상태 변경 방지)
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -141,6 +141,15 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
+			_ = s.store.Update(func(st *state.GrantsState) error {
+				for i := len(st.Grants) - 1; i >= 0; i-- {
+					if st.Grants[i].ID == grant.ID {
+						st.Grants = append(st.Grants[:i], st.Grants[i+1:]...)
+						break
+					}
+				}
+				return nil
+			})
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
@@ -157,10 +166,14 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 
 	now := s.clock.Now().UTC()
 	var revokedGrant *domain.Grant
+	var prevStatus domain.GrantStatus
+	var prevRevokedAt *time.Time
 
 	err := s.store.Update(func(st *state.GrantsState) error {
 		for i := range st.Grants {
 			if st.Grants[i].ID == cleanID {
+				prevStatus = st.Grants[i].Status
+				prevRevokedAt = st.Grants[i].RevokedAt
 				st.Grants[i].Revoke(now)
 				gCopy := st.Grants[i]
 				revokedGrant = &gCopy
@@ -176,7 +189,7 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to revoke grant", err)
 	}
 
-	// 감사 이벤트 기록
+	// 감사 이벤트 기록 (실패 시 이전 상태로 롤백하여 무증거 회수 방지)
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -194,6 +207,16 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
+			_ = s.store.Update(func(st *state.GrantsState) error {
+				for i := range st.Grants {
+					if st.Grants[i].ID == cleanID {
+						st.Grants[i].Status = prevStatus
+						st.Grants[i].RevokedAt = prevRevokedAt
+						break
+					}
+				}
+				return nil
+			})
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
@@ -224,7 +247,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 		return 0, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to bump epoch", err)
 	}
 
-	// 감사 이벤트 기록
+	// 감사 이벤트 기록 (실패 시 이전 Epoch 로 롤백하여 무증거 변경 방지)
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -240,6 +263,12 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
+			_ = s.store.Update(func(st *state.GrantsState) error {
+				if st.Epochs != nil {
+					st.Epochs[cleanSub] = prevEpoch
+				}
+				return nil
+			})
 			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}
@@ -297,7 +326,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store approval", err)
 	}
 
-	// 감사는 잠금(Update)을 반환한 뒤에만 기록한다.
+	// 감사는 잠금(Update)을 반환한 뒤에만 기록하며, 실패 시 방금 추가한 승인을 롤백한다.
 	if s.audit != nil {
 		ev := audit.Event{
 			Timestamp: now,
@@ -307,6 +336,8 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 			Action:    "approval.granted",
 			Resource:  a.Resource,
 			Decision:  "allow",
+			TokenJTI:  a.TokenJTI,
+			ArgHash:   a.ArgHash,
 			Success:   true,
 			Metadata: map[string]interface{}{
 				"approval_id": a.ID,
@@ -318,6 +349,15 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 			},
 		}
 		if err := s.audit.Log(ev); err != nil {
+			_ = s.store.Update(func(st *state.GrantsState) error {
+				for i := len(st.Approvals) - 1; i >= 0; i-- {
+					if st.Approvals[i].ID == a.ID {
+						st.Approvals = append(st.Approvals[:i], st.Approvals[i+1:]...)
+						break
+					}
+				}
+				return nil
+			})
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
 		}
 	}

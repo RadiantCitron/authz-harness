@@ -77,6 +77,64 @@ func TestApprovalAuditFailure(t *testing.T) { // TC-020-06
 	if domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed || domain.ExitCodeFromError(err, 0) != domain.ExitAuditFailure {
 		t.Fatalf("got %v", err)
 	}
+	loaded, err := st.Load()
+	if err != nil || len(loaded.Approvals) != 0 {
+		t.Fatalf("expected approval rollback on audit failure, got %+v (err=%v)", loaded, err)
+	}
+}
+
+func TestPAP_AuditFailureRollbacks(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	st := mustStore(t, filepath.Join(tempDir, "s.json"))
+	auditWriter, err := audit.NewJSONLWriter(filepath.Join(tempDir, "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer auditWriter.Close()
+
+	okSvc := pap.NewService(st, auditWriter)
+	g, err := okSvc.CreateGrant(ctx, pap.CreateGrantRequest{
+		Subject:  "w",
+		Action:   domain.ActionFileRead,
+		Resource: "a.txt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	failSvc := pap.NewService(st, failingWriter{})
+
+	// 1. CreateGrant 감사 실패 시 원장 롤백 검증
+	if _, err := failSvc.CreateGrant(ctx, pap.CreateGrantRequest{
+		Subject:  "w",
+		Action:   domain.ActionFileWrite,
+		Resource: "b.txt",
+	}); domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
+		t.Fatalf("expected AUDIT_LOG_FAILED on CreateGrant, got %v", err)
+	}
+	loaded, _ := st.Load()
+	if len(loaded.Grants) != 1 || loaded.Grants[0].ID != g.ID {
+		t.Fatalf("expected only original grant after failed CreateGrant, got %+v", loaded.Grants)
+	}
+
+	// 2. RevokeGrant 감사 실패 시 활성 상태 복원 검증
+	if _, err := failSvc.RevokeGrant(ctx, g.ID); domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
+		t.Fatalf("expected AUDIT_LOG_FAILED on RevokeGrant, got %v", err)
+	}
+	loaded, _ = st.Load()
+	if !loaded.Grants[0].IsActive() || loaded.Grants[0].RevokedAt != nil {
+		t.Fatalf("expected grant to remain active after failed RevokeGrant, got %+v", loaded.Grants[0])
+	}
+
+	// 3. BumpEpoch 감사 실패 시 이전 Epoch 복원 검증
+	if _, err := failSvc.BumpEpoch(ctx, "w"); domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
+		t.Fatalf("expected AUDIT_LOG_FAILED on BumpEpoch, got %v", err)
+	}
+	loaded, _ = st.Load()
+	if got := loaded.Epochs.Get("w"); got != 1 {
+		t.Fatalf("expected epoch to remain 1 after failed BumpEpoch, got %d", got)
+	}
 }
 
 func TestApprovalGrantRequiresApproval(t *testing.T) {

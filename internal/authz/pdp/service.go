@@ -244,6 +244,7 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 			Resource:  req.Resource,
 			Decision:  string(decision.Decision),
 			Reason:    decision.Reason,
+			TokenJTI:  req.TokenJTI,
 			Success:   decision.Decision == DecisionAllow,
 			Metadata: map[string]interface{}{
 				"grant_id": decision.GrantID,
@@ -264,6 +265,8 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 			Resource:  req.Resource,
 			Decision:  strings.ToLower(string(decision.Decision)),
 			Reason:    string(decision.Reason),
+			TokenJTI:  req.TokenJTI,
+			ArgHash:   req.ArgHash,
 			Success:   decision.Decision == DecisionAllow,
 			Metadata: map[string]interface{}{
 				"decision":         string(decision.Decision),
