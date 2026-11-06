@@ -205,10 +205,11 @@ func TestArchitectureGuardrails(t *testing.T) {
 	})
 
 	// TC-140-01: 코어 패키지의 log/slog·OTel import 금지 (ADR 0002 B-8)
+	// 계획 023: netguard·execguard·orchestrator·subagent 추가(위반 0건 실측).
 	// 제외(의도): internal/confinement(OS 어댑터, seatbelt_darwin.go 가 slog 사용), internal/mcp, internal/cli,
 	// internal/app(합성 루트), cmd — 코어가 아닌 어댑터/조립 계층이다. observe/slogadapter 도 어댑터라 제외한다.
 	t.Run("TC-140-01: 코어 패키지의 log/slog·OTel import 0건 검증", func(t *testing.T) {
-		for _, d := range []string{"domain", "authn", "authz", "jail", "audit", "storage", "observe", "pipeline"} {
+		for _, d := range []string{"domain", "authn", "authz", "jail", "audit", "storage", "observe", "pipeline", "netguard", "execguard", "orchestrator", "subagent"} {
 			recursive := d != "observe"
 			if v := findForbiddenLogImports(t, filepath.Join(root, "internal", d), recursive); len(v) > 0 {
 				t.Errorf("forbidden logger import in core package %s:\n%s", d, strings.Join(v, "\n"))
@@ -228,6 +229,15 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 		if len(findIgnoredAuditLog(t, dir)) != 1 {
 			t.Error("ignored Log error not detected")
+		}
+		// 계획 023 A2: time.Now 직접 사용도 검출해야 한다.
+		tdir := t.TempDir()
+		tsrc := "package x\n\nimport \"time\"\n\nfunc g() time.Time { return time.Now() }\n"
+		if err := os.WriteFile(filepath.Join(tdir, "x.go"), []byte(tsrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if len(findTimeNowUses(t, tdir, tdir, map[string]bool{})) != 1 {
+			t.Error("time.Now use not detected")
 		}
 	})
 
@@ -377,7 +387,7 @@ func TestArchitectureGuardrails(t *testing.T) {
 			"internal/orchestrator/spawner.go#measureWall": true, // 프로세스 실행 벽시계 측정
 		}
 		var targets []string
-		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail", "pipeline"} {
+		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail", "pipeline", "storage", "observe", "netguard", "execguard", "subagent"} {
 			targets = append(targets, filepath.Join(root, "internal", rel))
 		}
 		for _, dir := range targets {
