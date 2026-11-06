@@ -296,17 +296,7 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 	fmt.Fprintf(r.out, "=== PEP Pipeline Execution [TraceID: %s] ===\n", req.TraceID)
 	fmt.Fprintf(r.out, "Action: %s | Resource: %s\n", req.Action, req.Resource)
 
-	g1Status, g1Info := stageBoxStatus(pep.StageGate1AuthN, res)
-	g2Status, g2Info := stageBoxStatus(pep.StageGate2AuthZ, res)
-	g2cStatus, g2cInfo := stageBoxStatus(pep.StageGate2cJail, res)
-	s4Status, s4Info := stageBoxStatus(pep.Stage4Audit, res)
-	s5Status, s5Info := stageBoxStatus(pep.Stage5FileIO, res)
-
-	fmt.Fprintf(r.out, "[Gate 1] AuthN Token Verification   : %s %s\n", g1Status, g1Info)
-	fmt.Fprintf(r.out, "[Gate 2] Pure PDP Authorization     : %s %s\n", g2Status, g2Info)
-	fmt.Fprintf(r.out, "[Gate 2c] Workspace Jail Boundary   : %s %s\n", g2cStatus, g2cInfo)
-	fmt.Fprintf(r.out, "[Stage 4] Pre-Commit Audit Flush    : %s %s\n", s4Status, s4Info)
-	fmt.Fprintf(r.out, "[Stage 5] Confined File I/O         : %s %s\n", s5Status, s5Info)
+	renderStageBoxes(r.out, res)
 	fmt.Fprintf(r.out, "---------------------------------------------------------\n")
 
 	decisionStr := "DENY"
@@ -328,58 +318,118 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 	}
 }
 
-func stageBoxStatus(targetStage pep.Stage, res *pep.Result) (string, string) {
-	stageOrder := map[pep.Stage]int{
-		pep.StageGate0Input: 0,
-		pep.StageGate1AuthN: 1,
-		pep.StageGate2AuthZ: 2,
-		pep.StageGate2cJail: 3,
-		pep.StageBudget:     4,
-		pep.Stage4Audit:     5,
-		pep.Stage5FileIO:    6,
+// 화면 칸 상태. 단계 순서·통과 여부는 CLI 가 추론하지 않고 pep 가 남긴 사실(pep.Stages, Result.Passed)을 읽는다.
+const (
+	boxPass    = "[PASS]"
+	boxFail    = "[FAIL]"
+	boxSkipped = "[SKIPPED]" // 앞 단계 실패로 도달하지 못함
+	boxNA      = "[N/A]"     // 이 요청에는 해당 없는 조건부 단계(승인·예산 등)
+)
+
+// stageLabels 는 단계별 화면 문구다. 표시 문구는 표시 계층의 일이라 여기 두되,
+// pep.Stages() 의 모든 단계가 라벨을 갖는지는 시험(TestStageLabels_CoverEveryStage)이 강제한다.
+var stageLabels = map[pep.Stage]string{
+	pep.StageGate0Input: "[Gate 0] Input Validation",
+	pep.StageGate1AuthN: "[Gate 1] AuthN Token Verification",
+	pep.StageGate2AuthZ: "[Gate 2] Pure PDP Authorization",
+	pep.StageReplay:     "[Gate 2b] jti Replay Consume",
+	pep.StageGate2cJail: "[Gate 2c] Workspace Jail Boundary",
+	pep.StageApproval:   "[Stage 3a] Human Approval Consume",
+	pep.StageBudget:     "[Stage 3b] Budget Pre-Charge",
+	pep.Stage4Audit:     "[Stage 4] Pre-Commit Audit Flush",
+	pep.Stage5FileIO:    "[Stage 5] Confined File I/O",
+}
+
+// stageBox 는 화면의 한 칸이다.
+type stageBox struct {
+	Label  string
+	Status string
+	Info   string
+}
+
+// stageBoxes 는 pep.Stages() 의 모든 단계에 대해 칸을 만든다. 상태 규칙:
+// 통과 기록에 있으면 PASS, 거부된 단계면 FAIL, 실패 단계보다 뒤면 SKIPPED, 그 밖은 N/A.
+// 라벨이 없는 단계도 단계 문자열로 그려 칸이 조용히 사라지지 않게 한다.
+// 거부 결과의 실패 단계가 정식 목록에 없으면 목록 아래에 FAIL 칸을 하나 더 붙인다.
+func stageBoxes(res *pep.Result) []stageBox {
+	passed := make(map[pep.Stage]bool, len(res.Passed))
+	for _, s := range res.Passed {
+		passed[s] = true
 	}
 
-	targetIdx := stageOrder[targetStage]
-
-	if res.Allowed {
-		switch targetStage {
-		case pep.StageGate1AuthN:
-			return "[PASS]", fmt.Sprintf("(Sub: %s, JTI: %s)", res.Subject, res.TokenJTI)
-		case pep.StageGate2AuthZ:
-			return "[PASS]", "(PDP Grant Validated)"
-		case pep.StageGate2cJail:
-			return "[PASS]", fmt.Sprintf("(SafePath: %s)", res.SafePath)
-		case pep.Stage4Audit:
-			return "[PASS]", "(Pre-Commit Audit Recorded)"
-		case pep.Stage5FileIO:
-			if res.BytesWrote > 0 {
-				return "[PASS]", fmt.Sprintf("(Wrote %d bytes)", res.BytesWrote)
-			}
-			return "[PASS]", fmt.Sprintf("(Read %d bytes)", res.BytesRead)
+	stages := pep.Stages()
+	failedIdx := -1
+	for i, s := range stages {
+		if !res.Allowed && s == res.Stage {
+			failedIdx = i
 		}
-		return "[PASS]", ""
 	}
 
-	failedIdx := stageOrder[res.Stage]
-	if targetIdx < failedIdx {
-		switch targetStage {
-		case pep.StageGate1AuthN:
-			return "[PASS]", fmt.Sprintf("(Sub: %s, JTI: %s)", res.Subject, res.TokenJTI)
-		case pep.StageGate2AuthZ:
-			return "[PASS]", "(Grant Validated)"
-		case pep.StageGate2cJail:
-			return "[PASS]", fmt.Sprintf("(SafePath: %s)", res.SafePath)
-		case pep.Stage4Audit:
-			return "[PASS]", "(Audit Recorded)"
+	boxes := make([]stageBox, 0, len(stages)+1)
+	for i, s := range stages {
+		label, ok := stageLabels[s]
+		if !ok {
+			label = string(s)
 		}
-		return "[PASS]", ""
+		box := stageBox{Label: label}
+		switch {
+		case passed[s]:
+			box.Status, box.Info = boxPass, stagePassInfo(s, res)
+		case !res.Allowed && i == failedIdx:
+			box.Status, box.Info = boxFail, fmt.Sprintf("(%s)", res.Reason)
+		case failedIdx >= 0 && i > failedIdx:
+			box.Status = boxSkipped
+		default:
+			box.Status, box.Info = boxNA, "(not applicable)"
+		}
+		boxes = append(boxes, box)
 	}
 
-	if targetIdx == failedIdx {
-		return "[FAIL]", fmt.Sprintf("(%s)", res.Reason)
+	if !res.Allowed && failedIdx < 0 {
+		boxes = append(boxes, stageBox{
+			Label:  fmt.Sprintf("[?] unknown stage %q", string(res.Stage)),
+			Status: boxFail,
+			Info:   fmt.Sprintf("(%s)", res.Reason),
+		})
 	}
+	return boxes
+}
 
-	return "[SKIPPED]", ""
+// stagePassInfo 는 통과한 칸에 붙는 부가 정보다.
+func stagePassInfo(s pep.Stage, res *pep.Result) string {
+	switch s {
+	case pep.StageGate1AuthN:
+		return fmt.Sprintf("(Sub: %s, JTI: %s)", res.Subject, res.TokenJTI)
+	case pep.StageGate2AuthZ:
+		if res.Allowed {
+			return "(PDP Grant Validated)"
+		}
+		return "(Grant Validated)"
+	case pep.StageGate2cJail:
+		return fmt.Sprintf("(SafePath: %s)", res.SafePath)
+	case pep.Stage4Audit:
+		if res.Allowed {
+			return "(Pre-Commit Audit Recorded)"
+		}
+		return "(Audit Recorded)"
+	case pep.Stage5FileIO:
+		if res.BytesWrote > 0 {
+			return fmt.Sprintf("(Wrote %d bytes)", res.BytesWrote)
+		}
+		return fmt.Sprintf("(Read %d bytes)", res.BytesRead)
+	}
+	return ""
+}
+
+// renderStageBoxes 는 단계 칸을 한 줄씩 출력한다.
+func renderStageBoxes(w io.Writer, res *pep.Result) {
+	for _, b := range stageBoxes(res) {
+		line := fmt.Sprintf("%-36s: %s", b.Label, b.Status)
+		if b.Info != "" {
+			line += " " + b.Info
+		}
+		fmt.Fprintln(w, line)
+	}
 }
 
 func exitCodeName(c domain.ExitCode) string {
