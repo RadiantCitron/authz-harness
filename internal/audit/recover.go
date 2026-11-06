@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"syscall"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -28,17 +27,20 @@ type RecoveryResult struct {
 // 「잘린 꼬리」(줄바꿈 없이 끝나는 깨진 JSON, 앞 사슬은 온전)가 아니면 아무것도 바꾸지 않고 오류를 반환한다.
 // 복구 사실은 audit.recover 이벤트로 사슬에 남는다(plan-008 W2).
 func RecoverIncompleteTail(path string, clock domain.Clock) (*RecoveryResult, error) {
-	lockPath := path + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
+	var res *RecoveryResult
+	err := withAuditLock(path, func() error {
+		var rerr error
+		res, rerr = recoverLocked(path, clock)
+		return rerr
+	})
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
+		return nil, err
 	}
-	defer lockFile.Close()
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
-	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	return res, nil
+}
 
+// recoverLocked 는 배타 flock 을 이미 잡은 상태에서 RecoverIncompleteTail 의 본문을 수행한다.
+func recoverLocked(path string, clock domain.Clock) (*RecoveryResult, error) {
 	verr := VerifyHashChain(path)
 	if verr == nil {
 		return &RecoveryResult{}, nil

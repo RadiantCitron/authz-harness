@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"authz-harness/internal/domain"
+	"authz-harness/internal/storage"
 )
 
 // Event 는 domain.AuditEvent 의 별칭이다(DIP: 스키마 정의는 도메인에 있다). ROADMAP.md §15 감사 모델 준수.
@@ -263,20 +264,22 @@ func (w *JSONLWriter) Log(event Event) error {
 		return domain.NewError(domain.ReasonAuditLogFailed, "audit writer is closed", nil)
 	}
 
-	// 1. syscall.Flock 배타 락 획득 (다중 프로세스 원자적 동기화)
-	lockPath := w.path + ".lock"
-	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
-	}
-	defer lockFile.Close()
+	// 1. 배타 flock 아래에서 기록 (다중 프로세스 원자적 동기화)
+	return withAuditLock(w.path, func() error { return w.appendLocked(event) })
+}
 
-	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
+// withAuditLock 은 path+".lock" 에 배타 flock 을 잡고 fn 을 실행한다.
+// 잠금을 얻지 못한 실패만 AUDIT_LOG_FAILED 로 감싸고, fn 이 낸 오류는 그대로 돌려준다.
+func withAuditLock(path string, fn func() error) error {
+	var fnErr error
+	lockPath := path + ".lock"
+	if err := storage.WithFileLock(lockPath, syscall.LOCK_EX, func() error {
+		fnErr = fn()
+		return nil
+	}); err != nil {
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to lock %s: %v", lockPath, err), err)
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
-
-	return w.appendLocked(event)
+	return fnErr
 }
 
 // appendLocked 는 배타 flock 을 이미 잡은 상태에서 이벤트 하나를 사슬에 잇는다.

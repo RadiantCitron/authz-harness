@@ -253,3 +253,21 @@ func TestRefund(t *testing.T) { // TC-020-08
 	}
 	wantReason(t, later.Refund("ghost", 1, 0, 0), domain.ReasonInternalError, 16)
 }
+
+// 계획 022 B1: addCapped 는 한도가 있는 필드만 더하고 initial 을 넘기지 않는다.
+func TestAddCapped(t *testing.T) {
+	cases := []struct {
+		name                string
+		rem, delta, initial domain.Budget
+		want                domain.Budget
+	}{
+		{"한도 없음: 바이트 불변", domain.Budget{MaxCalls: 1}, domain.Budget{MaxCalls: 2, MaxReadBytes: 9, MaxWriteBytes: 9}, domain.Budget{MaxCalls: 5}, domain.Budget{MaxCalls: 3}},
+		{"한도 있음: 더함", domain.Budget{MaxCalls: 1, MaxReadBytes: 1, MaxWriteBytes: 1}, domain.Budget{MaxCalls: 1, MaxReadBytes: 2, MaxWriteBytes: 3}, domain.Budget{MaxCalls: 9, MaxReadBytes: 9, MaxWriteBytes: 9}, domain.Budget{MaxCalls: 2, MaxReadBytes: 3, MaxWriteBytes: 4}},
+		{"상한 초과는 잘림", domain.Budget{MaxCalls: 4, MaxReadBytes: 4, MaxWriteBytes: 4}, domain.Budget{MaxCalls: 9, MaxReadBytes: 9, MaxWriteBytes: 9}, domain.Budget{MaxCalls: 5, MaxReadBytes: 6, MaxWriteBytes: 7}, domain.Budget{MaxCalls: 5, MaxReadBytes: 6, MaxWriteBytes: 7}},
+	}
+	for _, c := range cases {
+		if got := addCapped(c.rem, c.delta, c.initial); got != c.want {
+			t.Errorf("%s: want %+v got %+v", c.name, c.want, got)
+		}
+	}
+}

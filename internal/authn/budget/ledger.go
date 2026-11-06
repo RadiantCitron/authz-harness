@@ -199,13 +199,7 @@ func (l *FileLedger) Refund(jti string, calls, readBytes, writeBytes int64) erro
 		if e.Reclaimed {
 			return nil
 		}
-		e.Remaining.MaxCalls = minInt64(e.Remaining.MaxCalls+calls, e.Initial.MaxCalls)
-		if e.Initial.HasReadLimit() {
-			e.Remaining.MaxReadBytes = minInt64(e.Remaining.MaxReadBytes+readBytes, e.Initial.MaxReadBytes)
-		}
-		if e.Initial.HasWriteLimit() {
-			e.Remaining.MaxWriteBytes = minInt64(e.Remaining.MaxWriteBytes+writeBytes, e.Initial.MaxWriteBytes)
-		}
+		e.Remaining = addCapped(e.Remaining, domain.Budget{MaxCalls: calls, MaxReadBytes: readBytes, MaxWriteBytes: writeBytes}, e.Initial)
 		st.Entries[jti] = e
 		return nil
 	})
@@ -242,13 +236,7 @@ func reclaimExpiredLocked(st *LedgerState, nowUnix int64) {
 	for _, it := range due {
 		child := st.Entries[it.jti]
 		if parent, ok := st.Entries[child.ParentJTI]; ok {
-			parent.Remaining.MaxCalls = minInt64(parent.Remaining.MaxCalls+child.Remaining.MaxCalls, parent.Initial.MaxCalls)
-			if parent.Initial.HasReadLimit() {
-				parent.Remaining.MaxReadBytes = minInt64(parent.Remaining.MaxReadBytes+child.Remaining.MaxReadBytes, parent.Initial.MaxReadBytes)
-			}
-			if parent.Initial.HasWriteLimit() {
-				parent.Remaining.MaxWriteBytes = minInt64(parent.Remaining.MaxWriteBytes+child.Remaining.MaxWriteBytes, parent.Initial.MaxWriteBytes)
-			}
+			parent.Remaining = addCapped(parent.Remaining, child.Remaining, parent.Initial)
 			st.Entries[child.ParentJTI] = parent
 			child.Remaining = domain.Budget{}
 		}
@@ -268,6 +256,18 @@ func depthOf(st *LedgerState, jti string) int {
 		jti = p
 	}
 	return d // 순환 방어
+}
+
+// addCapped 는 rem 에 delta 를 더하되 initial 을 넘지 않게 한다. 읽기·쓰기 바이트는 initial 에 한도가 있을 때만 더한다.
+func addCapped(rem, delta, initial domain.Budget) domain.Budget {
+	rem.MaxCalls = minInt64(rem.MaxCalls+delta.MaxCalls, initial.MaxCalls)
+	if initial.HasReadLimit() {
+		rem.MaxReadBytes = minInt64(rem.MaxReadBytes+delta.MaxReadBytes, initial.MaxReadBytes)
+	}
+	if initial.HasWriteLimit() {
+		rem.MaxWriteBytes = minInt64(rem.MaxWriteBytes+delta.MaxWriteBytes, initial.MaxWriteBytes)
+	}
+	return rem
 }
 
 func minInt64(a, b int64) int64 {
