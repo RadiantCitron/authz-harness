@@ -142,61 +142,18 @@ type inProcSpawnerBridge struct {
 	stack *harnessStack
 }
 
+// Spawn 은 subprocess 모드와 같은 프로덕션 워커(subagent.SubagentWorker)를 프로세스 안에서 실행한다.
+// 응답 조립·거부 사유·음수 시계 오프셋 거부는 모두 워커의 규칙을 그대로 따른다(재작성 금지).
 func (b *inProcSpawnerBridge) Spawn(ctx context.Context, req subagent.SubagentRequest) (*orchestrator.SpawnResult, error) {
-	// 워커와 같은 규칙: 음수 오프셋은 PEP 호출 없이 거부한다.
-	if req.ClockOffsetSeconds < 0 {
-		return &orchestrator.SpawnResult{
-			TraceID:  req.TraceID,
-			ExitCode: int(domain.ExitBadInput),
-			Response: &subagent.SubagentResponse{
-				TraceID:  req.TraceID,
-				ExitCode: int(domain.ExitBadInput),
-				Action:   req.Action,
-				FilePath: req.FilePath,
-				Reason:   string(domain.ReasonInvalidArguments),
-				Error:    "clock_offset_sec must not be negative",
-			},
-		}, nil
-	}
-	exitCode, err := executeHarnessAction(ctx, b.stack.Env, b.stack, ActionRequest{
-		Token:       req.Token,
-		Action:      domain.Action(req.Action),
-		Resource:    req.FilePath,
-		Data:        []byte(req.Data),
-		TraceID:     req.TraceID,
-		ClockOffset: time.Duration(req.ClockOffsetSeconds) * time.Second,
-	})
+	worker, err := subagent.NewWorker(b.stack.PEP)
 	if err != nil {
-		return &orchestrator.SpawnResult{
-			TraceID:   req.TraceID,
-			ExitCode:  int(exitCode),
-			StderrRaw: err.Error(),
-		}, nil
+		return nil, fmt.Errorf("create inproc worker: %w", err)
 	}
-
-	resp := &subagent.SubagentResponse{
-		TraceID:  req.TraceID,
-		ExitCode: int(exitCode),
-		Action:   req.Action,
-		FilePath: req.FilePath,
-	}
-	if exitCode == domain.ExitSuccess {
-		if req.Action == "file:read" {
-			data, _ := b.stack.Jail.ReadFile(req.FilePath)
-			resp.Output = string(data)
-			resp.BytesRead = len(data)
-		} else {
-			resp.BytesWritten = len(req.Data)
-		}
-	} else {
-		resp.Error = fmt.Sprintf("action denied with code %d", exitCode)
-		resp.Reason = string(domain.ReasonTokenInsufficientScope)
-	}
-
+	resp, exitCode := worker.Execute(ctx, req)
 	return &orchestrator.SpawnResult{
 		TraceID:  req.TraceID,
-		ExitCode: int(exitCode),
-		Response: resp,
+		ExitCode: exitCode,
+		Response: &resp,
 	}, nil
 }
 
