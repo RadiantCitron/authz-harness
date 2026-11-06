@@ -141,7 +141,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			_ = s.store.Update(func(st *state.GrantsState) error {
+			rbErr := s.store.Update(func(st *state.GrantsState) error {
 				for i := len(st.Grants) - 1; i >= 0; i-- {
 					if st.Grants[i].ID == grant.ID {
 						st.Grants = append(st.Grants[:i], st.Grants[i+1:]...)
@@ -150,7 +150,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 				}
 				return nil
 			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
+			return nil, auditFailedAfterCreate("grant", err, rbErr)
 		}
 	}
 
@@ -166,14 +166,10 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 
 	now := s.clock.Now().UTC()
 	var revokedGrant *domain.Grant
-	var prevStatus domain.GrantStatus
-	var prevRevokedAt *time.Time
 
 	err := s.store.Update(func(st *state.GrantsState) error {
 		for i := range st.Grants {
 			if st.Grants[i].ID == cleanID {
-				prevStatus = st.Grants[i].Status
-				prevRevokedAt = st.Grants[i].RevokedAt
 				st.Grants[i].Revoke(now)
 				gCopy := st.Grants[i]
 				revokedGrant = &gCopy
@@ -189,7 +185,7 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to revoke grant", err)
 	}
 
-	// 감사 이벤트 기록 (실패 시 이전 상태로 롤백하여 무증거 회수 방지)
+	// 감사 이벤트 기록 (실패해도 회수는 유지하고 적용 사실을 오류에 담는다. ADR 0010)
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -207,17 +203,8 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			_ = s.store.Update(func(st *state.GrantsState) error {
-				for i := range st.Grants {
-					if st.Grants[i].ID == cleanID {
-						st.Grants[i].Status = prevStatus
-						st.Grants[i].RevokedAt = prevRevokedAt
-						break
-					}
-				}
-				return nil
-			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
+			// 줄이는 변경(회수)은 되돌리지 않는다(ADR 0010). 되돌리면 그 사이 성공한 다른 변경까지 지운다.
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: grant revoked but audit logging failed", err)
 		}
 	}
 
@@ -247,7 +234,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 		return 0, domain.NewError(domain.ReasonInternalError, "pap: failed to bump epoch", err)
 	}
 
-	// 감사 이벤트 기록 (실패 시 이전 Epoch 로 롤백하여 무증거 변경 방지)
+	// 감사 이벤트 기록 (실패해도 Epoch 증가는 유지한다. ADR 0010)
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -263,13 +250,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			_ = s.store.Update(func(st *state.GrantsState) error {
-				if st.Epochs != nil {
-					st.Epochs[cleanSub] = prevEpoch
-				}
-				return nil
-			})
-			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
+			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap: epoch bumped but audit logging failed", err)
 		}
 	}
 
@@ -349,7 +330,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 			},
 		}
 		if err := s.audit.Log(ev); err != nil {
-			_ = s.store.Update(func(st *state.GrantsState) error {
+			rbErr := s.store.Update(func(st *state.GrantsState) error {
 				for i := len(st.Approvals) - 1; i >= 0; i-- {
 					if st.Approvals[i].ID == a.ID {
 						st.Approvals = append(st.Approvals[:i], st.Approvals[i+1:]...)
@@ -358,7 +339,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 				}
 				return nil
 			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
+			return nil, auditFailedAfterCreate("approval", err, rbErr)
 		}
 	}
 	return &a, nil
@@ -378,4 +359,15 @@ func (s *papService) ListApprovals(ctx context.Context, subject string) ([]domai
 		out = append(out, a)
 	}
 	return out, nil
+}
+
+// auditFailedAfterCreate 는 늘리는 변경의 감사 실패를 오류로 만든다.
+// 되돌리기도 실패하면 두 오류를 함께 담고 항목이 남았을 수 있음을 알린다(ADR 0010).
+func auditFailedAfterCreate(kind string, auditErr, rollbackErr error) error {
+	if rollbackErr == nil {
+		return domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", auditErr)
+	}
+	return domain.NewError(domain.ReasonAuditLogFailed,
+		fmt.Sprintf("pap: audit logging failed and rollback failed; the %s may remain", kind),
+		errors.Join(auditErr, rollbackErr))
 }

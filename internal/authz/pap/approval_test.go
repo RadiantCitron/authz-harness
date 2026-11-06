@@ -118,22 +118,22 @@ func TestPAP_AuditFailureRollbacks(t *testing.T) {
 		t.Fatalf("expected only original grant after failed CreateGrant, got %+v", loaded.Grants)
 	}
 
-	// 2. RevokeGrant 감사 실패 시 활성 상태 복원 검증
+	// 2. RevokeGrant 감사 실패 시에도 회수는 유지된다 (ADR 0010, P1)
 	if _, err := failSvc.RevokeGrant(ctx, g.ID); domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
 		t.Fatalf("expected AUDIT_LOG_FAILED on RevokeGrant, got %v", err)
 	}
 	loaded, _ = st.Load()
-	if !loaded.Grants[0].IsActive() || loaded.Grants[0].RevokedAt != nil {
-		t.Fatalf("expected grant to remain active after failed RevokeGrant, got %+v", loaded.Grants[0])
+	if loaded.Grants[0].IsActive() || loaded.Grants[0].RevokedAt == nil {
+		t.Fatalf("expected grant to stay revoked after failed RevokeGrant, got %+v", loaded.Grants[0])
 	}
 
-	// 3. BumpEpoch 감사 실패 시 이전 Epoch 복원 검증
+	// 3. BumpEpoch 감사 실패 시에도 증가는 유지된다 (ADR 0010, P2)
 	if _, err := failSvc.BumpEpoch(ctx, "w"); domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
 		t.Fatalf("expected AUDIT_LOG_FAILED on BumpEpoch, got %v", err)
 	}
 	loaded, _ = st.Load()
-	if got := loaded.Epochs.Get("w"); got != 1 {
-		t.Fatalf("expected epoch to remain 1 after failed BumpEpoch, got %d", got)
+	if got := loaded.Epochs.Get("w"); got != 2 {
+		t.Fatalf("expected epoch to stay bumped to 2 after failed BumpEpoch, got %d", got)
 	}
 }
 
