@@ -75,9 +75,14 @@ func TestKeysRunner_AuditFailureExitCode(t *testing.T) {
 	}
 }
 
-// 계획 018 C2: 없는 kid 폐기는 14 를 유지한다.
+// 계획 018 C2: 없는 kid 폐기는 14 를 유지한다(감사가 정상일 때).
+// 거부 기록 쓰기까지 실패하면 계획 019 D-04 에 따라 15 다.
 func TestKeysRunner_RevokeUnknownKidExitCode(t *testing.T) {
 	r, _, _ := newKeysRunnerForFailure(t)
+	if code := r.Run(context.Background(), []string{"revoke", "--kid", "no-such-kid"}); code != domain.ExitAuditFailure {
+		t.Fatalf("deny audit failure: expected %d, got %d", domain.ExitAuditFailure, code)
+	}
+	r.mgr = r.stack.KeyManager
 	if code := r.Run(context.Background(), []string{"revoke", "--kid", "no-such-kid"}); code != domain.ExitBadInput {
 		t.Fatalf("expected %d, got %d", domain.ExitBadInput, code)
 	}

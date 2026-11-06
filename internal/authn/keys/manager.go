@@ -184,8 +184,52 @@ func (m *Manager) GetVerificationKey(kid string) (*domain.JWK, error) {
 	return nil, ErrKeyNotFound
 }
 
+var (
+	errEmptyKID       = errors.New("keys manager: kid must not be empty")
+	errAlreadyRetired = errors.New("keys manager: key already retired")
+)
+
+// recordDenied 는 관리 명령의 실패를 <action> 거부 기록으로 남긴다(계획 019 D-01·D-03).
+// 사용자 입력 문자열과 오류 문구는 담지 않고 사유 코드만 담는다. 기록이 실패하면 AUDIT_LOG_FAILED 를 돌려준다.
+func (m *Manager) recordDenied(step, action string, err error, auditCtx domain.AuditContext) error {
+	if m.auditWriter == nil {
+		return nil
+	}
+	def := domain.ReasonInternalError
+	if errors.Is(err, ErrKeyNotFound) || errors.Is(err, errEmptyKID) {
+		def = domain.ReasonInvalidArguments
+	}
+	reason := domain.ReasonFromError(err, def)
+	if aerr := m.auditWriter.Log(audit.Event{
+		Timestamp: m.clock.Now(),
+		TraceID:   auditCtx.TraceID,
+		Step:      step,
+		Actor:     auditCtx.Actor,
+		Action:    action,
+		Decision:  "deny",
+		Reason:    string(reason),
+		Success:   false,
+		Metadata:  map[string]interface{}{"reason": string(reason)},
+	}); aerr != nil {
+		return domain.NewError(domain.ReasonAuditLogFailed, "keys manager: failed to record denial audit log", aerr)
+	}
+	return nil
+}
+
 // RotateKey 는 새 키를 active로 생성하고 기존 active 키를 verify-only로 전이한다.
+// 실패는 이 입구에서 key.rotate.deny 로 한 곳에서 기록한다(감사 실패는 다시 기록하지 않는다).
 func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
+	jwk, err := m.rotateKey(auditCtx)
+	if err == nil || domain.ReasonFromError(err, "") == domain.ReasonAuditLogFailed {
+		return jwk, err
+	}
+	if derr := m.recordDenied("keys.rotate", "key.rotate.deny", err, auditCtx); derr != nil {
+		return nil, derr
+	}
+	return nil, err
+}
+
+func (m *Manager) rotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 	privState, err := m.store.LoadPrivate()
 	if err != nil {
 		return nil, fmt.Errorf("keys manager: failed to load private state: %w", err)
@@ -253,9 +297,39 @@ func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 }
 
 // RevokeKey 는 지정한 kid의 키를 retired 상태로 전이한다.
+// 실패는 key.revoke.deny, 이미 폐기된 키의 재폐기는 key.revoke.noop 으로 이 입구에서 기록한다.
 func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
+	err := m.revokeKey(kid, auditCtx)
+	if err == nil || domain.ReasonFromError(err, "") == domain.ReasonAuditLogFailed {
+		return err
+	}
+	if errors.Is(err, errAlreadyRetired) {
+		// 상태가 바뀌지 않은 멱등 성공이다. key.revoked 의 의미(전이 발생)를 흐리지 않도록 별도 기록한다.
+		if m.auditWriter != nil {
+			if aerr := m.auditWriter.Log(audit.Event{
+				Timestamp: m.clock.Now(),
+				TraceID:   auditCtx.TraceID,
+				Step:      "keys.revoke",
+				Actor:     auditCtx.Actor,
+				Action:    "key.revoke.noop",
+				Success:   true,
+				Reason:    auditCtx.Reason,
+				Metadata:  map[string]interface{}{"kid": kid},
+			}); aerr != nil {
+				return domain.NewError(domain.ReasonAuditLogFailed, "keys manager: key already revoked but audit logging failed", aerr)
+			}
+		}
+		return nil
+	}
+	if derr := m.recordDenied("keys.revoke", "key.revoke.deny", err, auditCtx); derr != nil {
+		return derr
+	}
+	return err
+}
+
+func (m *Manager) revokeKey(kid string, auditCtx domain.AuditContext) error {
 	if kid == "" {
-		return errors.New("keys manager: kid must not be empty")
+		return errEmptyKID
 	}
 
 	privState, err := m.store.LoadPrivate()
@@ -273,8 +347,8 @@ func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
 		if privState.Keys[i].KID == kid {
 			found = true
 			if privState.Keys[i].Status == domain.KeyStatusRetired {
-				// 이미 폐기된 키
-				return nil
+				// 이미 폐기된 키: 입구(RevokeKey)가 멱등 성공으로 기록한다.
+				return errAlreadyRetired
 			}
 
 			privState.Keys[i].Status = domain.KeyStatusRetired
