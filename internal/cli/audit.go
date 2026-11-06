@@ -82,40 +82,18 @@ func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.Exi
 		return domain.ExitBadInput
 	}
 
-	f, err := os.Open(r.auditPath)
-	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: failed to open audit file '%s': %v\n", r.auditPath, err)
-		return domain.ExitAuditFailure
-	}
-	defer f.Close()
-
-	var allEvents []audit.Event
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var ev audit.Event
-		if err := json.Unmarshal([]byte(line), &ev); err == nil {
-			allEvents = append(allEvents, ev)
-		}
-	}
-
-	if len(allEvents) == 0 {
-		fmt.Fprintf(r.errOut, "Error: no audit events found in %s\n", r.auditPath)
-		return domain.ExitAuditFailure
+	allEvents, code := r.loadTraceEvents()
+	if code != domain.ExitSuccess {
+		return code
 	}
 
 	targetTraceID := strings.TrimSpace(traceID)
 	if latest || targetTraceID == "" {
-		if latest || targetTraceID == "" {
-			// 가장 최근 이벤트의 TraceID 탐색
-			for i := len(allEvents) - 1; i >= 0; i-- {
-				if allEvents[i].TraceID != "" {
-					targetTraceID = allEvents[i].TraceID
-					break
-				}
+		// 가장 최근 이벤트의 TraceID 탐색
+		for i := len(allEvents) - 1; i >= 0; i-- {
+			if allEvents[i].TraceID != "" {
+				targetTraceID = allEvents[i].TraceID
+				break
 			}
 		}
 	}
@@ -146,6 +124,40 @@ func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.Exi
 	formatter.RenderTimeline(targetTraceID, chainValid, matchedEvents)
 
 	return domain.ExitSuccess
+}
+
+// loadTraceEvents 는 감사 파일을 읽어 파싱 가능한 줄만 모은다 (깨진 JSON 줄은 건너뛴다: 무결성 판정은 audit verify 의 몫).
+// 줄 길이 상한은 audit.MaxRecordBytes 이며, 읽기 오류(상한 초과 포함)는 부분 출력 없이 ExitAuditFailure 로 끝낸다.
+func (r *AuditRunner) loadTraceEvents() ([]audit.Event, domain.ExitCode) {
+	f, err := os.Open(r.auditPath)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to open audit file '%s': %v\n", r.auditPath, err)
+		return nil, domain.ExitAuditFailure
+	}
+	defer f.Close()
+
+	var events []audit.Event
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), audit.MaxRecordBytes+1)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var ev audit.Event
+		if json.Unmarshal([]byte(line), &ev) == nil {
+			events = append(events, ev)
+		}
+	}
+	if err := sc.Err(); err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to read audit file '%s': %v\n", r.auditPath, err)
+		return nil, domain.ExitAuditFailure
+	}
+	if len(events) == 0 {
+		fmt.Fprintf(r.errOut, "Error: no audit events found in %s\n", r.auditPath)
+		return nil, domain.ExitAuditFailure
+	}
+	return events, domain.ExitSuccess
 }
 
 func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitCode {
@@ -184,31 +196,10 @@ func (r *AuditRunner) runTree(args []string) domain.ExitCode {
 		return domain.ExitBadInput
 	}
 
-	f, err := os.Open(r.auditPath)
-	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: failed to open audit file '%s': %v\n", r.auditPath, err)
-		return domain.ExitAuditFailure
+	all, code := r.loadTraceEvents()
+	if code != domain.ExitSuccess {
+		return code
 	}
-	defer f.Close()
-
-	var all []audit.Event
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var ev audit.Event
-		if json.Unmarshal([]byte(line), &ev) == nil {
-			all = append(all, ev)
-		}
-	}
-	if len(all) == 0 {
-		fmt.Fprintf(r.errOut, "Error: no audit events found in %s\n", r.auditPath)
-		return domain.ExitAuditFailure
-	}
-
 	target := strings.TrimSpace(traceID)
 	if target == "" {
 		for i := len(all) - 1; i >= 0; i-- {

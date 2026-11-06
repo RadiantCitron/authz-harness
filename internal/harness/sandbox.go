@@ -168,6 +168,7 @@ func (env *SandboxEnvironment) ReadAuditEvents() ([]audit.Event, error) {
 
 	var events []audit.Event
 	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), audit.MaxRecordBytes+1)
 	lineNum := 0
 	for scanner.Scan() {
 		lineNum++
