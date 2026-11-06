@@ -136,7 +136,7 @@ func TestBudget_WriteBytesExceeded(t *testing.T) { // TC-040-02
 	tok := issueBudgetToken(t, h, ledger, domain.Budget{MaxCalls: 5, MaxWriteBytes: 10}, true)
 
 	r := exec(t, gw, tok.TokenString, domain.ActionFileWrite, "docs/out.txt", make([]byte, 11), false)
-	if r.ExitCode != domain.ExitAuthzDenied || r.Reason != domain.ReasonBudgetExhausted || r.Stage != pep.StageBudget {
+	if r.ExitCode != domain.ExitAuthzDenied || r.Reason != domain.ReasonBudgetExhausted || r.Stage != domain.StageBudget {
 		t.Fatalf("got exit=%d reason=%s stage=%s", r.ExitCode, r.Reason, r.Stage)
 	}
 	if _, err := os.Stat(filepath.Join(h.workspaceDir, "docs/out.txt")); err == nil {
@@ -200,7 +200,7 @@ func TestBudget_NoLedgerEntry(t *testing.T) { // TC-040-05
 		t.Fatalf("read: exit=%d reason=%s", r.ExitCode, r.Reason)
 	}
 	r = exec(t, gw, tok.TokenString, domain.ActionFileWrite, "docs/out.txt", []byte("x"), false)
-	if r.Reason != domain.ReasonBudgetExhausted || r.Stage != pep.StageBudget {
+	if r.Reason != domain.ReasonBudgetExhausted || r.Stage != domain.StageBudget {
 		t.Fatalf("write: reason=%s stage=%s", r.Reason, r.Stage)
 	}
 }
@@ -214,7 +214,7 @@ func TestBudget_PEPWithoutLedgerFailClosed(t *testing.T) { // TC-040-06
 	gw, _ := budgetPEP(t, h, false)
 
 	r := exec(t, gw, tok.TokenString, domain.ActionFileRead, "docs/a.txt", nil, false)
-	if r.ExitCode != domain.ExitInternalError || r.Stage != pep.StageGate1AuthN {
+	if r.ExitCode != domain.ExitInternalError || r.Stage != domain.StageAuthn {
 		t.Fatalf("got exit=%d stage=%s", r.ExitCode, r.Stage)
 	}
 }
@@ -267,7 +267,7 @@ func TestBudget_ReadDenyAuditOrder(t *testing.T) {
 			seq = append(seq, ev.Action+"@"+ev.Metadata["stage"].(string))
 		}
 	}
-	want := []string{"pep.allow@stage4_audit", "pep.deny@stage5_io"}
+	want := []string{"pep.allow@precommit_audit", "pep.deny@settle"}
 	if len(seq) != 2 || seq[0] != want[0] || seq[1] != want[1] {
 		t.Fatalf("audit order = %v, want %v", seq, want)
 	}

@@ -550,7 +550,7 @@ func (m *mockAuditFailGateway) Execute(ctx context.Context, req pep.Request) (*p
 		Allowed:  false,
 		ExitCode: domain.ExitAuditFailure,
 		Reason:   domain.ReasonAuditLogFailed,
-		Stage:    pep.Stage4Audit,
+		Stage:    domain.StagePrecommitAudit,
 		Details:  "injected audit log failure",
 	}, nil
 }

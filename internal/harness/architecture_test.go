@@ -631,6 +631,7 @@ var pepAllowedImports = map[string]bool{
 	modulePrefix + "internal/jail":         true,
 	modulePrefix + "internal/netguard":     true,
 	modulePrefix + "internal/observe":      true,
+	modulePrefix + "internal/pipeline":     true,
 }
 
 // pipeline 은 표준 라이브러리만 쓴다. 내부 패키지 import 는 허용하지 않는다.

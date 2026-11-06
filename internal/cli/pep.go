@@ -256,7 +256,7 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 			Resource   string          `json:"resource"`
 			Allowed    bool            `json:"allowed"`
 			ExitCode   domain.ExitCode `json:"exit_code"`
-			Stage      pep.Stage       `json:"failed_stage,omitempty"`
+			Stage      domain.Stage    `json:"failed_stage,omitempty"`
 			Reason     domain.Reason   `json:"reason"`
 			Details    string          `json:"details,omitempty"`
 			Subject    string          `json:"subject,omitempty"`
@@ -326,20 +326,6 @@ const (
 	boxNA      = "[N/A]"     // 이 요청에는 해당 없는 조건부 단계(승인·예산 등)
 )
 
-// stageLabels 는 단계별 화면 문구다. 표시 문구는 표시 계층의 일이라 여기 두되,
-// pep.Stages() 의 모든 단계가 라벨을 갖는지는 시험(TestStageLabels_CoverEveryStage)이 강제한다.
-var stageLabels = map[pep.Stage]string{
-	pep.StageGate0Input: "[Gate 0] Input Validation",
-	pep.StageGate1AuthN: "[Gate 1] AuthN Token Verification",
-	pep.StageGate2AuthZ: "[Gate 2] Pure PDP Authorization",
-	pep.StageReplay:     "[Gate 2b] jti Replay Consume",
-	pep.StageGate2cJail: "[Gate 2c] Workspace Jail Boundary",
-	pep.StageApproval:   "[Stage 3a] Human Approval Consume",
-	pep.StageBudget:     "[Stage 3b] Budget Pre-Charge",
-	pep.Stage4Audit:     "[Stage 4] Pre-Commit Audit Flush",
-	pep.Stage5FileIO:    "[Stage 5] Confined File I/O",
-}
-
 // stageBox 는 화면의 한 칸이다.
 type stageBox struct {
 	Label  string
@@ -352,29 +338,25 @@ type stageBox struct {
 // 라벨이 없는 단계도 단계 문자열로 그려 칸이 조용히 사라지지 않게 한다.
 // 거부 결과의 실패 단계가 정식 목록에 없으면 목록 아래에 FAIL 칸을 하나 더 붙인다.
 func stageBoxes(res *pep.Result) []stageBox {
-	passed := make(map[pep.Stage]bool, len(res.Passed))
+	passed := make(map[domain.Stage]bool, len(res.Passed))
 	for _, s := range res.Passed {
 		passed[s] = true
 	}
 
-	stages := pep.Stages()
+	stages := domain.PEPStages()
 	failedIdx := -1
 	for i, s := range stages {
-		if !res.Allowed && s == res.Stage {
+		if !res.Allowed && s.ID == res.Stage {
 			failedIdx = i
 		}
 	}
 
 	boxes := make([]stageBox, 0, len(stages)+1)
 	for i, s := range stages {
-		label, ok := stageLabels[s]
-		if !ok {
-			label = string(s)
-		}
-		box := stageBox{Label: label}
+		box := stageBox{Label: s.Label}
 		switch {
-		case passed[s]:
-			box.Status, box.Info = boxPass, stagePassInfo(s, res)
+		case passed[s.ID]:
+			box.Status, box.Info = boxPass, stagePassInfo(s.ID, res)
 		case !res.Allowed && i == failedIdx:
 			box.Status, box.Info = boxFail, fmt.Sprintf("(%s)", res.Reason)
 		case failedIdx >= 0 && i > failedIdx:
@@ -396,23 +378,23 @@ func stageBoxes(res *pep.Result) []stageBox {
 }
 
 // stagePassInfo 는 통과한 칸에 붙는 부가 정보다.
-func stagePassInfo(s pep.Stage, res *pep.Result) string {
+func stagePassInfo(s domain.Stage, res *pep.Result) string {
 	switch s {
-	case pep.StageGate1AuthN:
+	case domain.StageAuthn:
 		return fmt.Sprintf("(Sub: %s, JTI: %s)", res.Subject, res.TokenJTI)
-	case pep.StageGate2AuthZ:
+	case domain.StageAuthz:
 		if res.Allowed {
 			return "(PDP Grant Validated)"
 		}
 		return "(Grant Validated)"
-	case pep.StageGate2cJail:
+	case domain.StageBoundary:
 		return fmt.Sprintf("(SafePath: %s)", res.SafePath)
-	case pep.Stage4Audit:
+	case domain.StagePrecommitAudit:
 		if res.Allowed {
 			return "(Pre-Commit Audit Recorded)"
 		}
 		return "(Audit Recorded)"
-	case pep.Stage5FileIO:
+	case domain.StageExecute:
 		if res.BytesWrote > 0 {
 			return fmt.Sprintf("(Wrote %d bytes)", res.BytesWrote)
 		}

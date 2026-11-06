@@ -16,12 +16,12 @@ type Tool interface {
 	Execute(ctx context.Context, c *Call) (Output, error) // 실제 수행 (execute)
 }
 
-// BudgetPlan 은 예산 토큰에 대한 도구별 차감 방식이다.
-// PreCharge 는 실행 전에 호출 1회와 요청 데이터 바이트를 차감한다.
-// PostCharge 는 실행 뒤에 읽은(출력한) 바이트를 차감한다. 사전 차감이 없는 도구는 호출 1회도 함께 차감한다.
-// RefundAfterStart 는 실행이 시작된 뒤 실패해도 사전 차감분을 환급해도 되는지다.
+// BudgetPlan 은 예산 토큰에 대한 도구별 차감 방식이다. 호출 1회는 모든 도구가 budget 단계에서 사전 차감한다.
+// ChargeWriteBytes 는 budget 에서 요청 데이터 바이트도 차감하는지,
+// PostCharge 는 settle 에서 출력 바이트를 정산하는지,
+// RefundAfterStart 는 실행이 시작된 뒤 실패해도 사전 차감분을 환급하는지다.
 type BudgetPlan struct {
-	PreCharge        bool
+	ChargeWriteBytes bool
 	PostCharge       bool
 	RefundAfterStart bool
 }

@@ -106,7 +106,7 @@ func TestObserver_RefundFailureReportedOnce(t *testing.T) { // TC-010-05
 
 func TestStageObserver_PanicNotSwallowed(t *testing.T) { // TC-010-06
 	v, p, j, a := obsStubs(false)
-	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: a, StageObserver: func(pep.Stage) { panic("hook") }})
+	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: a, StageObserver: func(domain.Stage) { panic("hook") }})
 	defer func() {
 		if recover() == nil {
 			t.Fatal("StageObserver panic must propagate")
@@ -134,7 +134,7 @@ func TestFinalize_BlockAuditFailureReports15(t *testing.T) { // TC-020-05
 	p.decisionToReturn = &pdp.Decision{Decision: pdp.DecisionDeny, Reason: domain.ReasonNoActiveGrant}
 	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: &nthFailWriter{}})
 	r, _ := gw.Execute(context.Background(), pep.Request{Token: "t", Action: domain.ActionFileRead, Resource: "a.txt"})
-	if r.Allowed || r.Reason != domain.ReasonAuditLogFailed || r.ExitCode != domain.ExitAuditFailure || r.Stage != pep.StageGate2AuthZ ||
+	if r.Allowed || r.Reason != domain.ReasonAuditLogFailed || r.ExitCode != domain.ExitAuditFailure || r.Stage != domain.StageAuthz ||
 		!strings.Contains(r.Details, string(domain.ReasonNoActiveGrant)) {
 		t.Fatalf("got %+v", r)
 	}

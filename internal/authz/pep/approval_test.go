@@ -96,7 +96,7 @@ func TestPEPAskThenApproveRetry(t *testing.T) { // TC-040-01
 	tok := issueValidToken(t, h, sub, "file:write:"+res, time.Hour, 1)
 
 	r1, _ := gw.Execute(context.Background(), writeReq(tok, res, data))
-	if r1.ExitCode != domain.ExitApprovalRequired || r1.Reason != domain.ReasonApprovalRequired || r1.Stage != pep.StageGate2AuthZ || r1.TokenJTI == "" {
+	if r1.ExitCode != domain.ExitApprovalRequired || r1.Reason != domain.ReasonApprovalRequired || r1.Stage != domain.StageAuthz || r1.TokenJTI == "" {
 		t.Fatalf("first: %+v", r1)
 	}
 	if fileExists(h, res) {
@@ -144,7 +144,7 @@ func TestPEPReplayAfterSuccess(t *testing.T) { // TC-040-02
 		t.Fatalf("%+v", r)
 	}
 	r, _ := gw.Execute(context.Background(), writeReq(tok, "docs/p.txt", []byte("x")))
-	if r.ExitCode != domain.ExitTokenInvalid || r.Stage != pep.StageGate1AuthN || r.Reason != domain.ReasonTokenReplayDetected {
+	if r.ExitCode != domain.ExitTokenInvalid || r.Stage != domain.StageAuthn || r.Reason != domain.ReasonTokenReplayDetected {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -208,7 +208,7 @@ func TestPEPJailViolationKeepsApproval(t *testing.T) { // TC-040-05
 	}
 	approve(t, h, "worker-01", res, r0.TokenJTI, []byte("x"))
 	r, _ := gw.Execute(context.Background(), writeReq(tok, res, []byte("x")))
-	if r.ExitCode != domain.ExitPathViolation || r.Stage != pep.StageGate2cJail {
+	if r.ExitCode != domain.ExitPathViolation || r.Stage != domain.StageBoundary {
 		t.Fatalf("%+v", r)
 	}
 	if approvalCount(t, h) != 1 {

@@ -16,7 +16,7 @@ import (
 )
 
 // windowGW 는 StageObserver 를 가진 예산 지원 PEP 를 만든다.
-func windowGW(t *testing.T, h *testHarness, obs func(pep.Stage)) (pep.Gateway, *budget.FileLedger) {
+func windowGW(t *testing.T, h *testHarness, obs func(domain.Stage)) (pep.Gateway, *budget.FileLedger) {
 	t.Helper()
 	ledger, err := budget.NewFileLedger(filepath.Join(t.TempDir(), "budget_ledger.json"), domain.RealClock{})
 	if err != nil {
@@ -122,8 +122,8 @@ func TestTOCTOUWindow(t *testing.T) {
 			var gid string
 			fired := false
 			var tokVal string
-			gw, ledger := windowGW(t, h, func(s pep.Stage) {
-				if s == pep.StageGate1AuthN && !fired {
+			gw, ledger := windowGW(t, h, func(s domain.Stage) {
+				if s == domain.StageAuthn && !fired {
 					fired = true
 					in.do(t, h, gid)
 				}
@@ -145,13 +145,13 @@ func TestTOCTOUWindow(t *testing.T) {
 		h := setupTestHarness(t)
 		var gid string
 		fired := false
-		var stages []pep.Stage
+		var stages []domain.Stage
 		record := true
-		gw, ledger := windowGW(t, h, func(s pep.Stage) {
+		gw, ledger := windowGW(t, h, func(s domain.Stage) {
 			if record {
 				stages = append(stages, s)
 			}
-			if s == pep.StageGate2AuthZ && !fired {
+			if s == domain.StageAuthz && !fired {
 				fired = true
 				if _, err := h.papSvc.RevokeGrant(ctx, gid); err != nil {
 					t.Fatal(err)
@@ -169,11 +169,11 @@ func TestTOCTOUWindow(t *testing.T) {
 			t.Errorf("file = %q", b)
 		}
 		// TC-040-08: 통과한 단계만 순서대로
-		// 정식 순서(pep.Stages)에서 이 요청에 해당 없는 승인 단계만 뺀 것이다 (순서를 여기서 다시 적지 않는다).
-		var want []pep.Stage
-		for _, s := range pep.Stages() {
-			if s != pep.StageApproval {
-				want = append(want, s)
+		// 정식 순서(domain.PEPStages)에서 이 요청에 해당 없는 승인·정산 단계만 뺀 것이다 (순서를 여기서 다시 적지 않는다).
+		var want []domain.Stage
+		for _, s := range domain.PEPStages() {
+			if s.ID != domain.StageApproval && s.ID != domain.StageSettle {
+				want = append(want, s.ID)
 			}
 		}
 		if !reflect.DeepEqual(stages, want) {
@@ -186,7 +186,7 @@ func TestTOCTOUWindow(t *testing.T) {
 			t.Fatalf("2차 = %d/%s", r2.ExitCode, r2.Reason)
 		}
 		// 실패 단계(Gate 2)는 기록 없음
-		if !reflect.DeepEqual(stages, []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN}) {
+		if !reflect.DeepEqual(stages, []domain.Stage{domain.StageInput, domain.StageAuthn}) {
 			t.Errorf("failed-call stages = %v", stages)
 		}
 	})

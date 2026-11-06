@@ -49,7 +49,7 @@ type toolOpts struct {
 	noExec  bool
 	jail    jail.Jail
 	ledger  budget.Ledger
-	observe func(pep.Stage)
+	observe func(domain.Stage)
 }
 
 func toolPEP(t *testing.T, h *testHarness, o toolOpts) pep.Gateway {
@@ -108,7 +108,7 @@ func run(t *testing.T, gw pep.Gateway, r pep.Request) *pep.Result {
 	return res
 }
 
-func wantDeny(t *testing.T, r *pep.Result, code domain.ExitCode, reason domain.Reason, stage pep.Stage) {
+func wantDeny(t *testing.T, r *pep.Result, code domain.ExitCode, reason domain.Reason, stage domain.Stage) {
 	t.Helper()
 	if r.Allowed || r.ExitCode != code || r.Reason != reason || r.Stage != stage {
 		t.Fatalf("got allowed=%v exit=%d reason=%s stage=%s; want exit=%d reason=%s stage=%s", r.Allowed, r.ExitCode, r.Reason, r.Stage, code, reason, stage)
@@ -130,7 +130,7 @@ func TestToolNetFetch_Allowed(t *testing.T) {
 	var found bool
 	for _, ev := range auditActions(t, h.auditFile) {
 		md, _ := ev["metadata"].(map[string]interface{})
-		if ev["action"] == "pep.allow" && ev["step"] == "pep.net:fetch" && md["stage"] == string(pep.Stage5FileIO) {
+		if ev["action"] == "pep.allow" && ev["step"] == "pep.net:fetch" && md["stage"] == string(domain.StageExecute) {
 			found = true
 			if ev["resource"] != hp || ev["arg_hash"] != domain.DataDigest([]byte("http://"+hp+"/status")) || ev["result_hash"] != domain.DataDigest([]byte("status-ok")) {
 				t.Fatalf("audit mismatch: %v", ev)
@@ -150,7 +150,7 @@ func TestToolNetFetch_ScopeMismatch(t *testing.T) {
 	createGrant(t, h, "worker-01", domain.ActionNetFetch, hp)
 	tok := issueValidToken(t, h, "worker-01", "file:read:a.txt", time.Hour, 1)
 	r := run(t, gw, netReq(tok, "http://"+hp+"/"))
-	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonTokenInsufficientScope, pep.StageGate2AuthZ)
+	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonTokenInsufficientScope, domain.StageAuthz)
 	if atomic.LoadInt32(n) != 0 {
 		t.Fatal("server must not be contacted")
 	}
@@ -186,7 +186,7 @@ func TestToolNetFetch_NotInAllowListDespiteGrant(t *testing.T) {
 	createGrant(t, h, "worker-01", domain.ActionNetFetch, q)
 	tok := issueValidToken(t, h, "worker-01", "net:fetch:"+q, time.Hour, 1)
 	r := run(t, gw, netReq(tok, "http://"+q+"/"))
-	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonEgressDenied, pep.StageGate2cJail)
+	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonEgressDenied, domain.StageBoundary)
 	if atomic.LoadInt32(nq) != 0 {
 		t.Fatal("server Q must not be contacted")
 	}
@@ -197,7 +197,7 @@ func TestToolNetFetch_BadURLNotAudited(t *testing.T) {
 	h := setupTestHarness(t)
 	gw := toolPEP(t, h, toolOpts{})
 	r := run(t, gw, netReq("some.token.str", "http://127.0.0.1:8080@evil/?token=s3cr3t"))
-	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonEgressDenied, pep.StageGate0Input)
+	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonEgressDenied, domain.StageInput)
 	raw, err := os.ReadFile(h.auditFile)
 	if err != nil {
 		t.Fatal(err)
@@ -236,8 +236,8 @@ func TestToolExec_BudgetPreDeduct(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stages []pep.Stage
-	gw := toolPEP(t, h, toolOpts{ledger: ledger, observe: func(s pep.Stage) { stages = append(stages, s) }})
+	var stages []domain.Stage
+	gw := toolPEP(t, h, toolOpts{ledger: ledger, observe: func(s domain.Stage) { stages = append(stages, s) }})
 	createGrant(t, h, "worker-01", domain.ActionExecRun, "echo-safe")
 	tok := budgetExecToken(t, h, ledger, domain.Budget{MaxCalls: 1})
 
@@ -246,9 +246,9 @@ func TestToolExec_BudgetPreDeduct(t *testing.T) {
 	}
 	stages = nil
 	r := run(t, gw, execReq(tok, "echo-safe", "a"))
-	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonBudgetExhausted, pep.StageBudget)
+	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonBudgetExhausted, domain.StageBudget)
 	for _, s := range stages {
-		if s == pep.Stage5FileIO {
+		if s == domain.StageExecute {
 			t.Fatal("Stage 5 must not be reached")
 		}
 	}
@@ -292,9 +292,9 @@ func TestToolDispatch_UnwiredFailsClosed(t *testing.T) {
 	createGrant(t, h, "worker-01", domain.ActionNetFetch, hp)
 	createGrant(t, h, "worker-01", domain.ActionExecRun, "echo-safe")
 	tok := issueValidToken(t, h, "worker-01", "net:fetch:"+hp+" exec:run:echo-safe", time.Hour, 1)
-	wantDeny(t, run(t, gw, netReq(tok, hp)), domain.ExitInternalError, domain.ReasonInternalError, pep.StageGate2cJail)
+	wantDeny(t, run(t, gw, netReq(tok, hp)), domain.ExitInternalError, domain.ReasonInternalError, domain.StageBoundary)
 	tok2 := issueValidToken(t, h, "worker-01", "net:fetch:"+hp+" exec:run:echo-safe", time.Hour, 1)
-	wantDeny(t, run(t, gw, execReq(tok2, "echo-safe", "a")), domain.ExitInternalError, domain.ReasonInternalError, pep.StageGate2cJail)
+	wantDeny(t, run(t, gw, execReq(tok2, "echo-safe", "a")), domain.ExitInternalError, domain.ReasonInternalError, domain.StageBoundary)
 }
 
 // TC-040-09
@@ -311,8 +311,8 @@ func TestToolExec_Cases(t *testing.T) {
 	if !r.Allowed || string(r.Data) != "hello_123\n" {
 		t.Fatalf("ok: %+v %q", r, r.Data)
 	}
-	wantDeny(t, run(t, gw, execReq(tok(), "echo-safe", "-e")), domain.ExitAuthzDenied, domain.ReasonExecArgRejected, pep.StageGate2cJail)
-	wantDeny(t, run(t, gw, execReq(tok(), "sh", "")), domain.ExitAuthzDenied, domain.ReasonExecNotAllowed, pep.StageGate2cJail)
+	wantDeny(t, run(t, gw, execReq(tok(), "echo-safe", "-e")), domain.ExitAuthzDenied, domain.ReasonExecArgRejected, domain.StageBoundary)
+	wantDeny(t, run(t, gw, execReq(tok(), "sh", "")), domain.ExitAuthzDenied, domain.ReasonExecNotAllowed, domain.StageBoundary)
 }
 
 // TC-040-10
@@ -320,7 +320,7 @@ func TestToolNetFetch_DataRejected(t *testing.T) {
 	h := setupTestHarness(t)
 	gw := toolPEP(t, h, toolOpts{})
 	r := run(t, gw, pep.Request{Token: "x.y.z", Action: domain.ActionNetFetch, Resource: "127.0.0.1:8080", Data: []byte("x")})
-	wantDeny(t, r, domain.ExitBadInput, domain.ReasonInvalidArguments, pep.StageGate0Input)
+	wantDeny(t, r, domain.ExitBadInput, domain.ReasonInvalidArguments, domain.StageInput)
 }
 
 // TC-040-11

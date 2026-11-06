@@ -226,7 +226,7 @@ func newG15E2E74() harness.Scenario {
 			if srv.Hits() != 1 {
 				return code, harness.Invariantf("server hits want 1, got %d", srv.Hits())
 			}
-			ev, ok, err := g15LastEvent(env, trace, "pep.allow", string("stage5_io"))
+			ev, ok, err := g15LastEvent(env, trace, "pep.allow", string(domain.StageExecute))
 			if err != nil {
 				return code, err
 			}

@@ -280,7 +280,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		if result.ExitCode != domain.ExitTokenInvalid {
 			t.Errorf("expected ExitTokenInvalid(11), got %d", result.ExitCode)
 		}
-		if result.Stage != pep.StageGate1AuthN {
+		if result.Stage != domain.StageAuthn {
 			t.Errorf("expected StageGate1AuthN, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonTokenInvalidSignature {
@@ -388,7 +388,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		if result.ExitCode != domain.ExitAuthzDenied {
 			t.Errorf("expected ExitAuthzDenied(12), got %d", result.ExitCode)
 		}
-		if result.Stage != pep.StageGate2AuthZ {
+		if result.Stage != domain.StageAuthz {
 			t.Errorf("expected StageGate2AuthZ, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonNoActiveGrant {
@@ -500,7 +500,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		if result.ExitCode != domain.ExitPathViolation {
 			t.Errorf("expected ExitPathViolation(13), got %d", result.ExitCode)
 		}
-		if result.Stage != pep.StageGate2cJail {
+		if result.Stage != domain.StageBoundary {
 			t.Errorf("expected StageGate2cJail, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonSymlinkEscape && result.Reason != domain.ReasonPathTraversal {
@@ -535,7 +535,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		if result.ExitCode != domain.ExitAuditFailure {
 			t.Errorf("expected ExitAuditFailure(15), got %d", result.ExitCode)
 		}
-		if result.Stage != pep.Stage4Audit {
+		if result.Stage != domain.StagePrecommitAudit {
 			t.Errorf("expected Stage4Audit, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonAuditLogFailed {
@@ -578,7 +578,7 @@ func TestGate0InputValidation(t *testing.T) {
 			if res.Allowed || res.ExitCode != domain.ExitBadInput {
 				t.Errorf("expected ExitBadInput(14), got %d", res.ExitCode)
 			}
-			if res.Stage != pep.StageGate0Input {
+			if res.Stage != domain.StageInput {
 				t.Errorf("expected StageGate0Input, got %s", res.Stage)
 			}
 			if res.Reason != domain.ReasonInvalidArguments {
@@ -1045,7 +1045,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 		if res.Allowed {
 			t.Fatal("expected denied on authn error, got allowed")
 		}
-		if res.Stage != pep.StageGate1AuthN {
+		if res.Stage != domain.StageAuthn {
 			t.Errorf("expected StageGate1AuthN, got %s", res.Stage)
 		}
 		if pdpStub.calls != 0 {
@@ -1100,7 +1100,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 		if res.Allowed {
 			t.Fatal("expected denied on pdp deny, got allowed")
 		}
-		if res.Stage != pep.StageGate2AuthZ {
+		if res.Stage != domain.StageAuthz {
 			t.Errorf("expected StageGate2AuthZ, got %s", res.Stage)
 		}
 		if jailStub.callsRead != 0 || jailStub.callsWrite != 0 {

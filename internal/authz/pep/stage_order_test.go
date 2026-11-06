@@ -14,12 +14,12 @@ import (
 	"authz-harness/internal/domain"
 )
 
-// 계획 013 S1: 단계의 정식 순서(pep.Stages)와 요청별 통과 기록(Result.Passed)을 고정한다.
+// 계획 013 S1: 단계의 정식 순서(domain.PEPStages)와 요청별 통과 기록(Result.Passed)을 고정한다.
 // 단계를 runPipeline 에 끼우고 Stages 에 넣지 않으면 아래 시험이 실패해, 화면이 순서표를 따로 들다가
 // 새 단계를 빠뜨린 결함(보고서 034)과 같은 실수를 시험이 잡는다.
 
 // orderGW 는 승인 소비기·예산 원장·StageObserver 를 모두 가진 관문을 만든다.
-func orderGW(t *testing.T, h *testHarness, obs func(pep.Stage)) (pep.Gateway, *budget.FileLedger) {
+func orderGW(t *testing.T, h *testHarness, obs func(domain.Stage)) (pep.Gateway, *budget.FileLedger) {
 	t.Helper()
 	ledger, err := budget.NewFileLedger(filepath.Join(t.TempDir(), "budget_ledger.json"), domain.RealClock{})
 	if err != nil {
@@ -34,9 +34,9 @@ func orderGW(t *testing.T, h *testHarness, obs func(pep.Stage)) (pep.Gateway, *b
 	return gw, ledger
 }
 
-func stageIndex(s pep.Stage) int {
-	for i, c := range pep.Stages() {
-		if c == s {
+func stageIndex(s domain.Stage) int {
+	for i, c := range domain.PEPStages() {
+		if c.ID == s {
 			return i
 		}
 	}
@@ -51,7 +51,7 @@ func assertPassedConsistent(t *testing.T, r *pep.Result) {
 	for _, s := range r.Passed {
 		i := stageIndex(s)
 		if i < 0 {
-			t.Fatalf("Passed has stage %q that is not in pep.Stages() — add it to stageOrder", s)
+			t.Fatalf("Passed has stage %q that is not in domain.PEPStages() — add it to stageOrder", s)
 		}
 		if i <= prev {
 			t.Fatalf("Passed is not in canonical order: %v", r.Passed)
@@ -63,7 +63,7 @@ func assertPassedConsistent(t *testing.T, r *pep.Result) {
 	}
 	fi := stageIndex(r.Stage)
 	if fi < 0 {
-		t.Fatalf("failed stage %q is not in pep.Stages()", r.Stage)
+		t.Fatalf("failed stage %q is not in domain.PEPStages()", r.Stage)
 	}
 	for _, s := range r.Passed {
 		if s == r.Stage {
@@ -77,23 +77,23 @@ func assertPassedConsistent(t *testing.T, r *pep.Result) {
 
 // P4: Stages 가 돌려준 슬라이스를 고쳐도 내부 목록은 바뀌지 않는다.
 func TestStages_ReturnsCopy(t *testing.T) {
-	a := pep.Stages()
-	if len(a) != 9 {
-		t.Fatalf("len = %d, want 9", len(a))
+	a := domain.PEPStages()
+	if len(a) != 10 {
+		t.Fatalf("len = %d, want 10", len(a))
 	}
 	first := a[0]
-	a[0] = "tampered"
-	if b := pep.Stages(); b[0] != first {
+	a[0].ID = "tampered"
+	if b := domain.PEPStages(); b[0] != first {
 		t.Fatalf("internal order was modified: %v", b)
 	}
 }
 
-// P1·P3: 승인+예산 쓰기 허가는 9단계를 모두 통과하고, Passed 는 독립 장치(StageObserver)가 본 순서와 같다.
+// P1·P3: 승인+예산 쓰기 허가는 settle 을 뺀 9단계를 모두 통과하고, Passed 는 독립 장치(StageObserver)가 본 순서와 같다.
 func TestStageOrder_FullPathPassesEveryStage(t *testing.T) {
 	h := setupTestHarness(t)
-	var observed []pep.Stage
+	var observed []domain.Stage
 	record := false
-	gw, ledger := orderGW(t, h, func(s pep.Stage) {
+	gw, ledger := orderGW(t, h, func(s domain.Stage) {
 		if record {
 			observed = append(observed, s)
 		}
@@ -121,8 +121,15 @@ func TestStageOrder_FullPathPassesEveryStage(t *testing.T) {
 		t.Fatalf("expected allow: %+v", r)
 	}
 	assertPassedConsistent(t, r)
-	if want := pep.Stages(); !reflect.DeepEqual(r.Passed, want) {
-		t.Errorf("Passed = %v, want every stage %v", r.Passed, want)
+	// 쓰기는 사후 정산이 없으므로 settle 만 빠진다.
+	var want []domain.Stage
+	for _, sp := range domain.PEPStages() {
+		if sp.ID != domain.StageSettle {
+			want = append(want, sp.ID)
+		}
+	}
+	if !reflect.DeepEqual(r.Passed, want) {
+		t.Errorf("Passed = %v, want every stage but settle %v", r.Passed, want)
 	}
 	if !reflect.DeepEqual(r.Passed, observed) {
 		t.Errorf("Passed = %v, StageObserver saw %v", r.Passed, observed)
@@ -132,8 +139,8 @@ func TestStageOrder_FullPathPassesEveryStage(t *testing.T) {
 // 조건부 단계(승인·예산)가 해당 없는 허가 요청은 그 두 단계만 빠진다.
 func TestStageOrder_ConditionalStagesOmittedWhenNotApplicable(t *testing.T) {
 	h := setupTestHarness(t)
-	var observed []pep.Stage
-	gw, _ := orderGW(t, h, func(s pep.Stage) { observed = append(observed, s) })
+	var observed []domain.Stage
+	gw, _ := orderGW(t, h, func(s domain.Stage) { observed = append(observed, s) })
 	createGrant(t, h, "worker-01", domain.ActionFileRead, "docs/a.txt")
 	writeFixture(t, h, "docs/a.txt", "hello")
 	tok := issueValidToken(t, h, "worker-01", "file:read:docs/a.txt", time.Hour, 1)
@@ -146,8 +153,8 @@ func TestStageOrder_ConditionalStagesOmittedWhenNotApplicable(t *testing.T) {
 		t.Fatalf("expected allow: %+v", r)
 	}
 	assertPassedConsistent(t, r)
-	want := []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ, pep.StageReplay,
-		pep.StageGate2cJail, pep.Stage4Audit, pep.Stage5FileIO}
+	want := []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz, domain.StageBoundary,
+		domain.StageReplay, domain.StagePrecommitAudit, domain.StageExecute}
 	if !reflect.DeepEqual(r.Passed, want) {
 		t.Errorf("Passed = %v, want %v", r.Passed, want)
 	}
@@ -176,22 +183,22 @@ func TestStageOrder_FailurePathsKeepInvariant(t *testing.T) {
 	tests := []struct {
 		name      string
 		req       pep.Request
-		wantStage pep.Stage
-		wantPass  []pep.Stage
+		wantStage domain.Stage
+		wantPass  []domain.Stage
 	}{
 		{"Gate0 빈 대상", pep.Request{Token: "x", Action: domain.ActionFileRead, Resource: ""},
-			pep.StageGate0Input, nil},
+			domain.StageInput, nil},
 		{"Gate1 잘못된 토큰", pep.Request{Token: "invalid.jwt.token", Action: domain.ActionFileRead, Resource: "docs/a.txt"},
-			pep.StageGate1AuthN, []pep.Stage{pep.StageGate0Input}},
+			domain.StageAuthn, []domain.Stage{domain.StageInput}},
 		{"Gate2 권한 없음", writeReq(noGrantTok, "docs/nogrant.txt", []byte("x")),
-			pep.StageGate2AuthZ, []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN}},
+			domain.StageAuthz, []domain.Stage{domain.StageInput, domain.StageAuthn}},
 		{"Gate2c 심볼릭 링크 탈출", writeReq(jailTok, "link/x.txt", []byte("x")),
-			pep.StageGate2cJail, []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ, pep.StageReplay}},
+			domain.StageBoundary, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz}},
 		{"Budget 쓰기 바이트 초과", writeReq(budgetTok.TokenString, "docs/out.txt", []byte("too-long")),
-			pep.StageBudget, []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ, pep.StageReplay, pep.StageGate2cJail}},
+			domain.StageBudget, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz, domain.StageBoundary, domain.StageReplay}},
 		{"Stage4 사전 감사 실패", pep.Request{Token: auditTok, Action: domain.ActionFileWrite, Resource: "docs/out.txt",
 			Data: []byte("x"), InjectAuditFailure: true},
-			pep.Stage4Audit, []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ, pep.StageReplay, pep.StageGate2cJail}},
+			domain.StagePrecommitAudit, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz, domain.StageBoundary, domain.StageReplay}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
