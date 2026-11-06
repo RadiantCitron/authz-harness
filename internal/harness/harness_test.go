@@ -345,6 +345,7 @@ func (d *dummyScenario) Execute(ctx context.Context, env *SandboxEnvironment) (d
 // AT-09: TestHarnessRunner_LifecycleSmoke
 func TestHarnessRunner_LifecycleSmoke(t *testing.T) {
 	runner := NewDefaultRunner(WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 
 	sc := &dummyScenario{
 		meta: ScenarioMetadata{
@@ -396,6 +397,7 @@ func TestHarnessRunner_LifecycleSmoke(t *testing.T) {
 // AT-10: TestHarnessRunner_NoCrossContamination
 func TestHarnessRunner_NoCrossContamination(t *testing.T) {
 	runner := NewDefaultRunner(WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 
 	scA := &dummyScenario{
 		meta: ScenarioMetadata{
@@ -589,6 +591,7 @@ func TestRunner_InvariantViolationJudgement(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := NewDefaultRunner(WithBaseDir(t.TempDir()))
+			t.Cleanup(func() { _ = runner.Close() })
 			sc := &dummyScenario{
 				meta: ScenarioMetadata{
 					ID: "E2E-TEST-INV", Group: "G0", Name: "invariant",

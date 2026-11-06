@@ -123,6 +123,7 @@ func (s *confinedHonestScenario) Execute(ctx context.Context, env *harness.Sandb
 // TC-055-04: 격리 하 정직 워커가 file:read 와 허용 포트 net:fetch 를 정상 수행한다.
 func TestConfinedHonestWorker_ReadAndFetch(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	sc := &confinedHonestScenario{}
 	_ = runner.Register(sc)
 	res, err := runner.RunScenario(context.Background(), "T-055-04")

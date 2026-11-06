@@ -61,6 +61,9 @@ type DefaultRunner struct {
 	binaryProvider      BinaryProvider
 	faultWorkerProvider BinaryProvider
 	confinementProbe    func() bool
+
+	// 러너가 스스로 만든 프로바이더(주입받지 않은 것). Close 가 이것만 정리한다.
+	ownedProviders []*CachedBinaryProvider
 }
 
 // RunnerOption 은 Runner 생성 옵션이다.
@@ -123,12 +126,27 @@ func NewDefaultRunner(opts ...RunnerOption) *DefaultRunner {
 		r.confinementProbe = confinement.Platform().Available
 	}
 	if r.executionMode == ModeSubprocess && r.binaryProvider == nil {
-		r.binaryProvider = NewCachedBinaryProvider()
+		p := NewCachedBinaryProvider()
+		r.binaryProvider = p
+		r.ownedProviders = append(r.ownedProviders, p)
 	}
 	if r.executionMode == ModeSubprocess && r.faultWorkerProvider == nil {
-		r.faultWorkerProvider = NewFaultWorkerProvider()
+		p := NewFaultWorkerProvider()
+		r.faultWorkerProvider = p
+		r.ownedProviders = append(r.ownedProviders, p)
 	}
 	return r
+}
+
+// Close 는 러너가 스스로 만든 임시 바이너리를 정리한다. 주입받은 프로바이더는 건드리지 않으며, 여러 번 불러도 안전하다.
+func (r *DefaultRunner) Close() error {
+	var errs []error
+	for _, p := range r.ownedProviders {
+		if err := p.Cleanup(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Register 는 시나리오를 러너에 등록한다.

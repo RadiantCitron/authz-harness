@@ -3,6 +3,7 @@ package harness
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -31,6 +32,8 @@ type SandboxEnvironment struct {
 	MockClock       domain.Clock // 결정론적 가상 시계
 	BinaryPath      string       // 서브프로세스 실행에 사용할 컴파일된 authz-harness 바이너리 경로
 	FaultWorkerPath string       // G9 시험 전용 결함 워커 실행 파일 경로 (RequiresSubprocess 시나리오에만 주입)
+
+	cleanupHooks []func() error // Cleanup 이 폴더 삭제 전에 역순으로 실행하는 정리 함수
 }
 
 // fixedClock 은 고정된 시각을 반환하는 가상 시계다.
@@ -117,7 +120,25 @@ func (env *SandboxEnvironment) Cleanup() error {
 	if env == nil || env.RootDir == "" {
 		return nil
 	}
-	return os.RemoveAll(env.RootDir)
+	var errs []error
+	for i := len(env.cleanupHooks) - 1; i >= 0; i-- {
+		if err := env.cleanupHooks[i](); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	env.cleanupHooks = nil
+	if err := os.RemoveAll(env.RootDir); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// OnCleanup 은 Cleanup 이 샌드박스 폴더를 지우기 전에 실행할 정리 함수를 등록한다 (역순 실행).
+func (env *SandboxEnvironment) OnCleanup(fn func() error) {
+	if env == nil || fn == nil {
+		return
+	}
+	env.cleanupHooks = append(env.cleanupHooks, fn)
 }
 
 // ReadWorkspaceFile 은 Zone C Workspace 디렉터리 내의 파일을 안전하게 읽는다.

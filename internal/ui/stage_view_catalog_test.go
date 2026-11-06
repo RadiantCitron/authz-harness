@@ -18,6 +18,7 @@ import (
 // 종료 코드가 0이 아닌 시나리오는 차단·실패·판단 불가가 하나 이상 보여야 하고, 막힌 칸은 기록된 단계와 같아야 한다.
 func TestStageView_AllScenarios(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	if err := catalog.RegisterAll(runner); err != nil {
 		t.Fatal(err)
 	}

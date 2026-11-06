@@ -14,6 +14,7 @@ func TestStages_MutatedBoundaryExpectationFails(t *testing.T) {
 	expectedStages["E2E-25"] = domain.StageAuthz
 	defer func() { expectedStages["E2E-25"] = old }()
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g6Scenarios() {
 		_ = runner.Register(sc)
 	}

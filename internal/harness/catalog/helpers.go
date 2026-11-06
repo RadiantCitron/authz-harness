@@ -94,7 +94,7 @@ func setupHarnessStackWithObserver(env *harness.SandboxEnvironment, clock domain
 		return nil, fmt.Errorf("setup stack via app builder: %w", err)
 	}
 
-	return &harnessStack{
+	hs := &harnessStack{
 		Env:             env,
 		AuditWriter:     st.AuditWriter,
 		KeyStore:        st.KeyStore,
@@ -111,7 +111,10 @@ func setupHarnessStackWithObserver(env *harness.SandboxEnvironment, clock domain
 		PDP:             st.PDP,
 		Jail:            st.Jail,
 		PEP:             st.PEP,
-	}, nil
+	}
+	// 시나리오가 Close 를 빠뜨려도 샌드박스 정리 때 기록기가 닫히도록 등록한다 (Close 는 중복 호출에 안전하다).
+	env.OnCleanup(hs.Close)
+	return hs, nil
 }
 
 // issueTestToken 은 표준 테스트용 토큰을 발행하는 헬퍼 함수다.

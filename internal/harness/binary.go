@@ -93,7 +93,9 @@ func (p *CachedBinaryProvider) Cleanup() error {
 	defer p.mu.Unlock()
 
 	if p.tempDir != "" {
-		return os.RemoveAll(p.tempDir)
+		dir := p.tempDir
+		p.tempDir = ""
+		return os.RemoveAll(dir)
 	}
 	return nil
 }

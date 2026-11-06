@@ -65,6 +65,7 @@ func TestCatalog_ScenarioCount(t *testing.T) {
 // TestCatalog_RegisterAll 은 Runner에 전체 시나리오가 정상 등록되는지 검증한다.
 func TestCatalog_RegisterAll(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	if err := RegisterAll(runner); err != nil {
 		t.Fatalf("RegisterAll failed: %v", err)
 	}
@@ -78,6 +79,7 @@ func TestCatalog_RegisterAll(t *testing.T) {
 // TestCatalog_Group_G1_Lifecycle 은 G1 그룹 (E2E-01 ~ E2E-03) 실행 검증
 func TestCatalog_Group_G1_Lifecycle(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g1Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -97,6 +99,7 @@ func TestCatalog_Group_G1_Lifecycle(t *testing.T) {
 // TestCatalog_Group_G2_AuthN 은 G2 그룹 (E2E-04 ~ E2E-06) 실행 검증
 func TestCatalog_Group_G2_AuthN(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g2Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -116,6 +119,7 @@ func TestCatalog_Group_G2_AuthN(t *testing.T) {
 // TestCatalog_Group_G3_TokenIntegrity 은 G3 그룹 (E2E-07 ~ E2E-13) 실행 검증
 func TestCatalog_Group_G3_TokenIntegrity(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g3Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -135,6 +139,7 @@ func TestCatalog_Group_G3_TokenIntegrity(t *testing.T) {
 // TestCatalog_Group_G4_ClaimsReplay 은 G4 그룹 (E2E-14 ~ E2E-18) 실행 검증
 func TestCatalog_Group_G4_ClaimsReplay(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g4Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -154,6 +159,7 @@ func TestCatalog_Group_G4_ClaimsReplay(t *testing.T) {
 // TestCatalog_Group_G5_DelegationPDP 은 G5 그룹 (E2E-19 ~ E2E-24) 실행 검증
 func TestCatalog_Group_G5_DelegationPDP(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g5Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -173,6 +179,7 @@ func TestCatalog_Group_G5_DelegationPDP(t *testing.T) {
 // TestCatalog_Group_G6_JailPath 은 G6 그룹 (E2E-25 ~ E2E-27) 실행 검증
 func TestCatalog_Group_G6_JailPath(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g6Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -192,6 +199,7 @@ func TestCatalog_Group_G6_JailPath(t *testing.T) {
 // TestCatalog_Group_G7_ObservabilityAudit 은 G7 그룹 (E2E-28 ~ E2E-30) 실행 검증
 func TestCatalog_Group_G7_ObservabilityAudit(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g7Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -211,6 +219,7 @@ func TestCatalog_Group_G7_ObservabilityAudit(t *testing.T) {
 // TestCatalog_Group_G8_MCPAdapter 는 G8 그룹 (E2E-33 ~ E2E-39) 실행 검증
 func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g8Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -230,6 +239,7 @@ func TestCatalog_Group_G8_MCPAdapter(t *testing.T) {
 // TestCatalog_RunAll_QuadAssertion 은 전체(79대) 시나리오를 일괄 실행하여 100% PASS 되는지 검증한다.
 func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	if err := RegisterAll(runner); err != nil {
 		t.Fatalf("RegisterAll failed: %v", err)
 	}
@@ -267,6 +277,7 @@ func TestCatalog_RunAll_QuadAssertion(t *testing.T) {
 // TestCatalog_Group_G9_ResourceLimits 는 G9 그룹 (E2E-40 ~ E2E-44) 실행 검증
 func TestCatalog_Group_G9_ResourceLimits(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g9Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -297,6 +308,7 @@ func (m mutatedExpectation) Metadata() harness.ScenarioMetadata {
 // TC-050-02: 기대 코드를 0 으로 바꾸면 FAIL 이어야 한다 (동어반복 판정 방지).
 func TestG9_MutationExpectedExitCodeFails(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	_ = runner.Register(mutatedExpectation{Scenario: g9Scenarios()[0], code: domain.ExitSuccess})
 	res, err := runner.RunScenario(context.Background(), "E2E-40")
 	if err != nil {
@@ -314,6 +326,7 @@ func TestG9_MutationLivePIDFailsByInvariant(t *testing.T) {
 		reason: domain.ReasonResourceTimeout, term: orchestrator.TermTimedOut, checkGrandchild: true,
 		pidOverride: func(int) int { return os.Getpid() }}
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	_ = runner.Register(stagedScenario{sc})
 	res, err := runner.RunScenario(context.Background(), "E2E-41")
 	if err != nil {
@@ -348,6 +361,7 @@ func TestG9_SkippedInProc(t *testing.T) {
 // TestG10: OS 격리 대조군→실험군 (E2E-45 ~ E2E-54). 격리 불가 환경에서는 Skipped 이며 실패가 아니다.
 func TestG10_Scenarios(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g10Scenarios() {
 		_ = runner.Register(sc)
 	}
@@ -370,6 +384,7 @@ func TestG10_Scenarios(t *testing.T) {
 func g10RunMutant(t *testing.T, sc *g10Scenario) harness.ScenarioResult {
 	t.Helper()
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	if !confinement.Platform().Available() {
 		t.Skip("confinement unavailable")
 	}
@@ -409,6 +424,7 @@ func TestG10_MutationControlWithConfinementFails(t *testing.T) {
 // TC-050-02: 프로브가 false 이면 G10 5건 모두 Skipped.
 func TestG10_SkippedWhenProbeFalse(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithConfinementProbe(func() bool { return false }))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g10Scenarios() {
 		_ = runner.Register(stagedScenario{sc})
 	}
@@ -437,6 +453,7 @@ func TestG10_SkippedInProc(t *testing.T) {
 // TestCatalog_Group_G13 은 G13 그룹 (E2E-61 ~ E2E-66) 실행 검증
 func TestCatalog_Group_G13(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = runner.Close() })
 	for _, sc := range g13Scenarios() {
 		if err := runner.Register(sc); err != nil {
 			t.Fatal(err)

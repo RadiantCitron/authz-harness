@@ -73,6 +73,7 @@ func TestEvaluator_StageAssertion(t *testing.T) {
 // TC-060-02: 기대 단계가 없는 시나리오는 등록이 실패한다.
 func TestRunner_RegisterRejectsMissingStage(t *testing.T) {
 	r := NewDefaultRunner(WithBaseDir(t.TempDir()))
+	t.Cleanup(func() { _ = r.Close() })
 	sc := &dummyScenario{meta: ScenarioMetadata{ID: "E2E-NOSTAGE", Expected: ExpectedAssertion{ExitCode: domain.ExitSuccess}}}
 	if err := r.Register(sc); err == nil {
 		t.Fatal("Register must fail without ExpectedStage")

@@ -88,6 +88,12 @@ func (r *RunRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 		harness.WithEvaluator(harness.NewDefaultEvaluator()),
 	)
 
+	defer func() {
+		if err := runner.Close(); err != nil {
+			fmt.Fprintf(r.errOut, "Warning: failed to clean up temporary binaries: %v\n", err)
+		}
+	}()
+
 	if err := catalog.RegisterAll(runner); err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to register catalog scenarios: %v\n", err)
 		return domain.ExitInternalError
