@@ -89,18 +89,19 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 		return nil, fmt.Errorf("failed to marshal subagent request: %w", err)
 	}
 
-	// 1. 부모 사전 감사 이벤트 (ORCHESTRATE_SPAWN)
+	// 1. 부모 사전 감사 이벤트 (orchestrator.spawn)
 	if s.cfg.Audit != nil {
 		if err := s.cfg.Audit.Log(audit.Event{
 			Timestamp: s.cfg.Clock.Now(),
 			TraceID:   req.TraceID,
-			Step:      "ORCHESTRATE_SPAWN",
+			Step:      "orchestrator.spawn",
 			Actor:     "orchestrator",
-			Action:    req.Action,
+			Action:    "agent.spawned",
 			Resource:  auditResource(req),
 			Success:   true,
 			Metadata: map[string]interface{}{
-				"binary": s.cfg.BinaryPath,
+				"binary":           s.cfg.BinaryPath,
+				"requested_action": req.Action,
 			},
 		}); err != nil {
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_spawn", "failed to record pre-spawn audit log", err)
@@ -136,7 +137,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			ev := audit.Event{
 				Timestamp: s.cfg.Clock.Now(),
 				TraceID:   req.TraceID,
-				Step:      "ORCHESTRATE_CONFINE",
+				Step:      "orchestrator.confine",
 				Actor:     "orchestrator",
 				Action:    AuditActionAgentConfined,
 				Resource:  auditResource(req),
@@ -225,23 +226,24 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			Timestamp: s.cfg.Clock.Now(),
 			TraceID:   req.TraceID,
 			Actor:     "orchestrator",
-			Action:    req.Action,
+			Action:    "agent.collected",
 			Resource:  auditResource(req),
 			Success:   result.ExitCode == 0,
 			Metadata: map[string]interface{}{
-				"exit_code":   result.ExitCode,
-				"duration_ms": duration.Milliseconds(),
-				"termination": string(term),
+				"exit_code":        result.ExitCode,
+				"duration_ms":      duration.Milliseconds(),
+				"termination":      string(term),
+				"requested_action": req.Action,
 			},
 		}
 		if exitCode == domain.ExitResourceLimit {
-			ev.Step = "ORCHESTRATE_LIMIT_EXCEEDED"
+			ev.Step = "orchestrator.limit_exceeded"
 			ev.Action = AuditActionLimitExceeded
 			ev.Decision = "deny"
 			ev.Reason = string(reason)
 			ev.Success = false
 		} else {
-			ev.Step = "ORCHESTRATE_COLLECT"
+			ev.Step = "orchestrator.collect"
 			ev.Metadata["timed_out"] = result.TimedOut
 			ev.Metadata["raw_exit_code"] = rawExit
 			if signal != "" {

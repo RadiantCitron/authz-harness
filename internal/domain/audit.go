@@ -3,12 +3,12 @@ package domain
 import "time"
 
 // AuditEvent 는 감사 로그(audit.jsonl) 해시 체인에 기록되는 불변의 영속 보안 증거 레코드 스키마다.
-// (DomainEvent 는 관문 내부의 인메모리 사건이며 영속 증거가 아니다.)
 type AuditEvent struct {
-	SchemaVersion int                    `json:"schema_version,omitempty"` // 0·1: 레거시 v1, 2: 확장 필드 보호, 3: 길이 접두 해시 입력(ADR 0006)
+	SchemaVersion int                    `json:"schema_version,omitempty"` // 0·1: 레거시 v1, 2: 확장 필드 보호, 3: 길이 접두 해시 입력(ADR 0006), 4: 단계(stage) 보호(ADR 0009)
 	Timestamp     time.Time              `json:"timestamp"`
 	TraceID       string                 `json:"trace_id"`
 	Step          string                 `json:"step,omitempty"`
+	Stage         string                 `json:"stage,omitempty"` // v4: PEP 파이프라인 단계 ID(ADR 0007). 파이프라인 밖 이벤트는 비운다
 	Actor         string                 `json:"actor"`
 	AgentID       string                 `json:"agent_id,omitempty"`
 	Action        string                 `json:"action,omitempty"`

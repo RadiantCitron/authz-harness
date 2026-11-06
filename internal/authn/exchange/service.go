@@ -267,7 +267,7 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		auditEv := audit.Event{
 			Timestamp: now,
 			TraceID:   traceID,
-			Step:      "030-exchange",
+			Step:      "token.exchange",
 			Actor:     actor,
 			Action:    "token.exchanged",
 			Decision:  "allow",
@@ -306,7 +306,7 @@ func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string
 	auditEv := audit.Event{
 		Timestamp: now,
 		TraceID:   traceID,
-		Step:      "030-exchange",
+		Step:      "token.exchange",
 		Actor:     actor,
 		Action:    "token.exchange.deny",
 		Decision:  "deny",

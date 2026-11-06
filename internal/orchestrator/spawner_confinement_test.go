@@ -103,7 +103,7 @@ func TestSpawnerConfinement(t *testing.T) {
 				conf = &w.evs[i]
 			}
 		}
-		if conf == nil || conf.Decision != "deny" || countStep(w, "ORCHESTRATE_COLLECT") != 0 {
+		if conf == nil || conf.Decision != "deny" || countStep(w, "orchestrator.collect") != 0 {
 			t.Fatalf("audit wrong: %v", w.steps())
 		}
 	}
@@ -134,7 +134,7 @@ func TestSpawnerConfinement(t *testing.T) {
 		if _, err := s.Spawn(context.Background(), confReq("tr-zero")); err != nil {
 			t.Fatal(err)
 		}
-		if got := fmt.Sprint(w.steps()); got != "[ORCHESTRATE_SPAWN ORCHESTRATE_COLLECT]" {
+		if got := fmt.Sprint(w.steps()); got != "[orchestrator.spawn orchestrator.collect]" {
 			t.Fatalf("steps=%s", got)
 		}
 	})
@@ -164,11 +164,11 @@ func TestSpawnerConfinement(t *testing.T) {
 		if err != nil || res.ExitCode != 13 {
 			t.Fatalf("%v %+v", err, res)
 		}
-		if countStep(w, "ORCHESTRATE_CONFINE") != 1 || countStep(w, "ORCHESTRATE_COLLECT") != 1 {
+		if countStep(w, "orchestrator.confine") != 1 || countStep(w, "orchestrator.collect") != 1 {
 			t.Fatalf("steps=%v", w.steps())
 		}
 		for _, e := range w.evs {
-			if e.Step == "ORCHESTRATE_CONFINE" && e.Decision != "allow" {
+			if e.Step == "orchestrator.confine" && e.Decision != "allow" {
 				t.Fatal("confine must be allow only")
 			}
 		}

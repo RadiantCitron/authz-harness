@@ -28,7 +28,7 @@ func TestAuditRunner_Timeline_Success(t *testing.T) {
 	_ = writer.Log(audit.Event{
 		Timestamp: time.Now(),
 		TraceID:   traceID,
-		Step:      "ORCHESTRATE_SPAWN",
+		Step:      "orchestrator.spawn",
 		Actor:     "orchestrator-main",
 		Action:    "spawn",
 		Success:   true,
@@ -56,7 +56,7 @@ func TestAuditRunner_Timeline_Success(t *testing.T) {
 	if !strings.Contains(outStr, "AUDIT TRACE TIMELINE: trace-timeline-test") {
 		t.Errorf("missing header in output:\n%s", outStr)
 	}
-	if !strings.Contains(outStr, "ORCHESTRATE_SPAWN") || !strings.Contains(outStr, "pep.allow") {
+	if !strings.Contains(outStr, "orchestrator.spawn") || !strings.Contains(outStr, "pep.allow") {
 		t.Errorf("missing timeline events in output:\n%s", outStr)
 	}
 }

@@ -129,8 +129,7 @@ func TestToolNetFetch_Allowed(t *testing.T) {
 	}
 	var found bool
 	for _, ev := range auditActions(t, h.auditFile) {
-		md, _ := ev["metadata"].(map[string]interface{})
-		if ev["action"] == "pep.allow" && ev["step"] == "pep.net:fetch" && md["stage"] == string(domain.StageExecute) {
+		if ev["action"] == "pep.allow" && ev["step"] == "pep.net:fetch" && ev["stage"] == string(domain.StageExecute) {
 			found = true
 			if ev["resource"] != hp || ev["arg_hash"] != domain.DataDigest([]byte("http://"+hp+"/status")) || ev["result_hash"] != domain.DataDigest([]byte("status-ok")) {
 				t.Fatalf("audit mismatch: %v", ev)

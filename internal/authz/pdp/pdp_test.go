@@ -554,43 +554,6 @@ func TestTC_020_Scenarios(t *testing.T) {
 			t.Fatalf("expected DENY / NO_ACTIVE_GRANT, got %s / %s", dec.Decision, dec.Reason)
 		}
 	})
-
-	// TC-020-10: EventRecorder 인메모리 도메인 이벤트 수집
-	t.Run("TC-020-10: EventRecorder 인메모리 도메인 이벤트 수집", func(t *testing.T) {
-		pipMock := &mockPIP{snapshot: baseSnapshot}
-		auditMock := &mockAudit{}
-		svc := pdp.NewService(pipMock, auditMock)
-
-		buffer := domain.NewEventBuffer()
-		ctx := domain.WithEventRecorder(context.Background(), buffer)
-
-		req := pdp.Request{
-			Subject:      "worker-01",
-			Action:       domain.ActionFileWrite,
-			Resource:     "a.txt",
-			Epoch:        1,
-			TokenScope:   "file:write",
-			RequireScope: true,
-			TraceID:      "trace-tc-020-10",
-		}
-
-		dec, err := svc.Decide(ctx, req)
-		if err != nil {
-			t.Fatalf("Decide returned unexpected error: %v", err)
-		}
-		if dec.Decision != pdp.DecisionAllow {
-			t.Fatalf("expected ALLOW, got %s", dec.Decision)
-		}
-
-		events := buffer.Events()
-		if len(events) != 1 {
-			t.Fatalf("expected 1 in-memory domain event, got %d", len(events))
-		}
-		ev := events[0]
-		if ev.TraceID != "trace-tc-020-10" || ev.Reason != domain.ReasonAuthorized || !ev.Success {
-			t.Fatalf("unexpected domain event: %+v", ev)
-		}
-	})
 }
 
 // TestTrackA_PureDomainDecisionTable 은 TC-060-04 및 AP-03 불변식에 따라

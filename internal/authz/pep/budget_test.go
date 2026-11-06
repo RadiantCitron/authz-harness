@@ -259,12 +259,12 @@ func TestBudget_ReadDenyAuditOrder(t *testing.T) {
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		var ev struct {
-			TraceID  string                 `json:"trace_id"`
-			Action   string                 `json:"action"`
-			Metadata map[string]interface{} `json:"metadata"`
+			TraceID string `json:"trace_id"`
+			Action  string `json:"action"`
+			Stage   string `json:"stage"`
 		}
 		if json.Unmarshal(sc.Bytes(), &ev) == nil && ev.TraceID == "order-trace" && (ev.Action == "pep.allow" || ev.Action == "pep.deny") {
-			seq = append(seq, ev.Action+"@"+ev.Metadata["stage"].(string))
+			seq = append(seq, ev.Action+"@"+ev.Stage)
 		}
 	}
 	want := []string{"pep.allow@precommit_audit", "pep.deny@settle"}

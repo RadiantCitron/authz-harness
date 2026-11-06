@@ -358,7 +358,7 @@ func TestTC_030_07_TopLevelFieldElevation(t *testing.T) {
 	ev := audit.Event{
 		TraceID: "trc-07",
 		Actor:   "worker-07",
-		Action:  "authn.verify",
+		Action:  "authn.verified",
 		Success: false,
 		Metadata: map[string]interface{}{
 			"reason":   "TOKEN_EXPIRED",

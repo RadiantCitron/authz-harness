@@ -207,7 +207,7 @@ func TestConsumeAfterCheck_BudgetReadEndsWithSettle(t *testing.T) {
 	var last map[string]interface{}
 	for _, ev := range auditActions(t, h.auditFile) {
 		if ev["action"] == "pep.allow" && ev["trace_id"] != nil {
-			if md, _ := ev["metadata"].(map[string]interface{}); md["stage"] == string(domain.StageSettle) {
+			if ev["stage"] == string(domain.StageSettle) {
 				last = ev
 			}
 		}

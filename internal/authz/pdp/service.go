@@ -253,26 +253,6 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 	now := s.clock.Now().UTC()
 	traceID := req.TraceID
 
-	// 도메인 이벤트 수집기가 컨텍스트에 주입된 경우 도메인 사건 기록 (DIP)
-	if recorder := domain.EventRecorderFromContext(ctx); recorder != nil {
-		recorder.Record(domain.DomainEvent{
-			Timestamp: now,
-			TraceID:   traceID,
-			Stage:     "pdp.decide",
-			Actor:     req.Subject,
-			Action:    string(req.Action),
-			Resource:  req.Resource,
-			Decision:  string(decision.Decision),
-			Reason:    decision.Reason,
-			TokenJTI:  req.TokenJTI,
-			Success:   decision.Decision == DecisionAllow,
-			Metadata: map[string]interface{}{
-				"grant_id": decision.GrantID,
-				"details":  decision.Details,
-			},
-		})
-	}
-
 	// 감사 이벤트 기록
 	if s.audit != nil {
 		event := domain.AuditEvent{

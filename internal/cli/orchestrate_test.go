@@ -343,8 +343,8 @@ func TestOrchestrateRunner_TC10_SingleAuditChain_And_Concurrency(t *testing.T) {
 	}
 
 	auditContent := string(auditBytes)
-	if !strings.Contains(auditContent, "ORCHESTRATE_SPAWN") {
-		t.Errorf("audit log missing ORCHESTRATE_SPAWN")
+	if !strings.Contains(auditContent, "orchestrator.spawn") {
+		t.Errorf("audit log missing orchestrator.spawn")
 	}
 	if !strings.Contains(auditContent, "pep-gateway") {
 		t.Errorf("audit log missing pep-gateway events")

@@ -59,7 +59,7 @@ func TestAuditRecover_T2AppendsNewlineOnly(t *testing.T) {
 		t.Fatalf("lines %d, want 3 (2 original + recover event)", n)
 	}
 	ev := lastEvent(t, path)
-	if ev.Action != "audit.recover" || ev.Resource != "newline-appended:#2" || ev.Metadata["recovery_kind"] != "newline_appended" {
+	if ev.Action != "audit.recovered" || ev.Resource != "newline-appended:#2" || ev.Metadata["recovery_kind"] != "newline_appended" {
 		t.Fatalf("recover event: %+v", ev)
 	}
 	if !strings.Contains(out.String(), "#2") {

@@ -334,9 +334,9 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 	return v.auditWriter.Log(audit.Event{
 		Timestamp: now,
 		TraceID:   traceID,
-		Step:      "020-verify",
+		Step:      "token.verify",
 		Actor:     actor,
-		Action:    "authn.verify",
+		Action:    "authn.verified",
 		Decision:  map[bool]string{true: "allow", false: "deny"}[success],
 		Reason:    string(reason),
 		TokenJTI:  jti,

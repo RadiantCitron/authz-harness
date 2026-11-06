@@ -373,11 +373,20 @@ func TestTC08_AuditChain(t *testing.T) {
 		t.Fatalf("expected 2 audit events, got %d", len(events))
 	}
 
-	if events[0].Step != "ORCHESTRATE_SPAWN" || events[0].TraceID != traceID {
+	if events[0].Step != "orchestrator.spawn" || events[0].TraceID != traceID {
 		t.Errorf("unexpected event 0: %+v", events[0])
 	}
-	if events[1].Step != "ORCHESTRATE_COLLECT" || events[1].TraceID != traceID || !events[1].Success {
+	if events[1].Step != "orchestrator.collect" || events[1].TraceID != traceID || !events[1].Success {
 		t.Errorf("unexpected event 1: %+v", events[1])
+	}
+	// TC-050-08: Action 은 도구 행동이 아니라 agent.spawned·agent.collected 이고, 요청 행동은 Metadata 에 남는다.
+	for i, want := range []string{"agent.spawned", "agent.collected"} {
+		if events[i].Action != want {
+			t.Errorf("event %d Action = %q, want %q", i, events[i].Action, want)
+		}
+		if events[i].Metadata["requested_action"] != "file:read" {
+			t.Errorf("event %d requested_action = %v", i, events[i].Metadata["requested_action"])
+		}
 	}
 }
 

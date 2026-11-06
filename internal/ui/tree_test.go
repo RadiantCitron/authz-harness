@@ -22,7 +22,7 @@ func pep(i int, jti, sub, action, dec, reason string) audit.Event {
 
 func TestDelegationTree_TwoHopSerial(t *testing.T) { // TC-050-01
 	evs := []audit.Event{
-		pep(0, "jti-root-0001", "Root", "authn.verify", "allow", "AUTHORIZED"),
+		pep(0, "jti-root-0001", "Root", "authn.verified", "allow", "AUTHORIZED"),
 		exch(1, "jti-root-0001", "Root", "jti-lead-0001", "lead-01", 1),
 		exch(2, "jti-lead-0001", "lead-01", "jti-work-0001", "worker-01", 2),
 		pep(3, "jti-work-0001", "worker-01", "pep.deny", "deny", "INSUFFICIENT_SCOPE"),
@@ -41,7 +41,7 @@ func TestDelegationTree_TwoHopSerial(t *testing.T) { // TC-050-01
 
 func TestDelegationTree_Siblings(t *testing.T) { // TC-050-02
 	evs := []audit.Event{
-		pep(0, "jti-root", "Root", "authn.verify", "allow", ""),
+		pep(0, "jti-root", "Root", "authn.verified", "allow", ""),
 		exch(1, "jti-root", "Root", "jti-a", "worker-A", 1),
 		exch(2, "jti-root", "Root", "jti-b", "worker-B", 1),
 	}

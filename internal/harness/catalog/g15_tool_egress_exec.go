@@ -126,7 +126,7 @@ func g15LastEvent(env *harness.SandboxEnvironment, trace, action, stage string) 
 			continue
 		}
 		if stage != "" {
-			if st, _ := ev.Metadata["stage"].(string); st != stage {
+			if ev.Stage != stage {
 				continue
 			}
 		}

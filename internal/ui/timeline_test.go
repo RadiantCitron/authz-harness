@@ -20,7 +20,7 @@ func TestTimelineFormatter_RenderTimeline(t *testing.T) {
 		{
 			Timestamp: now,
 			TraceID:   "tr-multihop-test",
-			Step:      "ORCHESTRATE_SPAWN",
+			Step:      "orchestrator.spawn",
 			Actor:     "orchestrator-main",
 			Action:    "orchestrate",
 			Success:   true,
@@ -60,8 +60,8 @@ func TestTimelineFormatter_RenderTimeline(t *testing.T) {
 	if !strings.Contains(out, "AUDIT TRACE TIMELINE: tr-multihop-test (Hash Chain: VALID)") {
 		t.Errorf("missing valid header: %s", out)
 	}
-	if !strings.Contains(out, "ORCHESTRATE_SPAWN") {
-		t.Errorf("missing ORCHESTRATE_SPAWN event: %s", out)
+	if !strings.Contains(out, "orchestrator.spawn") {
+		t.Errorf("missing orchestrator.spawn event: %s", out)
 	}
 	if !strings.Contains(out, "pep.deny") {
 		t.Errorf("missing pep.deny event: %s", out)

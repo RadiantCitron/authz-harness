@@ -76,7 +76,7 @@ func TestSchemaCompat_AppendV2AfterV1(t *testing.T) { // TC-030-02
 	}
 	b, _ := os.ReadFile(p)
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if strings.Count(string(b), `"schema_version":3`) != 2 || strings.Contains(lines[2], "schema_version") {
+	if strings.Count(string(b), `"schema_version":4`) != 2 || strings.Contains(lines[2], "schema_version") {
 		t.Fatalf("unexpected versions:\n%s", b)
 	}
 }
@@ -108,6 +108,6 @@ func TestSchemaCompat_V2FieldInjectedIntoV1(t *testing.T) { // TC-030-04
 }
 
 func TestSchemaCompat_UnknownVersionAndDowngrade(t *testing.T) { // TC-030-05
-	wantBroken(t, VerifyHashChain(writeLines(t, chain(mkEv(1, 4, "", "")))))
+	wantBroken(t, VerifyHashChain(writeLines(t, chain(mkEv(1, 5, "", "")))))
 	wantBroken(t, VerifyHashChain(writeLines(t, chain(mkEv(1, 2, "", ""), mkEv(2, 0, "", "")))))
 }

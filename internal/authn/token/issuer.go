@@ -117,7 +117,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 			if aerr := s.auditWriter.Log(audit.Event{
 				Timestamp: s.clock.Now().UTC(),
 				TraceID:   traceID,
-				Step:      "020-issue-authn",
+				Step:      "token.issue_authn",
 				Actor:     actor,
 				Action:    "token.issue.deny",
 				Decision:  "deny",
@@ -269,7 +269,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		auditEv := audit.Event{
 			Timestamp: now,
 			TraceID:   traceID,
-			Step:      "020-issue",
+			Step:      "token.issue",
 			Actor:     actor,
 			Action:    "token.issued",
 			Success:   true,

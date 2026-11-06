@@ -62,7 +62,7 @@ func TestV3_FieldBoundaryAmbiguity(t *testing.T) {
 }
 
 // AT-S4-03, AT-S4-07
-func TestV3_WriterWritesV3AndBoundaryShiftDetected(t *testing.T) {
+func TestV3_WriterWritesCurrentVersionAndBoundaryShiftDetected(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "a.jsonl")
 	w, _ := audit.NewJSONLWriter(p)
 	for i := 0; i < 2; i++ {
@@ -72,8 +72,8 @@ func TestV3_WriterWritesV3AndBoundaryShiftDetected(t *testing.T) {
 	}
 	w.Close()
 	b, _ := os.ReadFile(p)
-	if strings.Count(string(b), `"schema_version":3`) != 2 {
-		t.Fatalf("not all v3:\n%s", b)
+	if strings.Count(string(b), `"schema_version":4`) != 2 {
+		t.Fatalf("not all v4:\n%s", b)
 	}
 	if err := audit.VerifyHashChain(p); err != nil {
 		t.Fatal(err)
@@ -86,11 +86,12 @@ func TestV3_WriterWritesV3AndBoundaryShiftDetected(t *testing.T) {
 
 // AT-S4-04, AT-S4-05
 func TestV3_MixedAndDowngrade(t *testing.T) {
-	if err := audit.VerifyHashChain(chainLines(t, v3Ev(1, 1), v3Ev(2, 1), v3Ev(3, 1), v3Ev(4, 2), v3Ev(5, 2), v3Ev(6, 3), v3Ev(7, 3))); err != nil {
+	if err := audit.VerifyHashChain(chainLines(t, v3Ev(1, 1), v3Ev(2, 1), v3Ev(3, 1), v3Ev(4, 2), v3Ev(5, 2), v3Ev(6, 3), v3Ev(7, 3), v3Ev(8, 4), v3Ev(9, 4))); err != nil {
 		t.Fatalf("mixed: %v", err)
 	}
 	broken(t, audit.VerifyHashChain(chainLines(t, v3Ev(1, 3), v3Ev(2, 2))))
-	broken(t, audit.VerifyHashChain(chainLines(t, v3Ev(1, 3), v3Ev(2, 4))))
+	broken(t, audit.VerifyHashChain(chainLines(t, v3Ev(1, 3), v3Ev(2, 5))))
+	broken(t, audit.VerifyHashChain(chainLines(t, v3Ev(1, 4), v3Ev(2, 3))))
 }
 
 // AT-S4-06

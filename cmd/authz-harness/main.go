@@ -180,9 +180,9 @@ func main() {
 	initEvent := audit.Event{
 		Timestamp: time.Now().UTC(),
 		TraceID:   fmt.Sprintf("boot-%d", time.Now().UnixNano()),
-		Step:      "030-boot",
+		Step:      "harness.boot",
 		Actor:     "harness-cli",
-		Action:    "harness.startup",
+		Action:    "harness.started",
 		Success:   true,
 		Metadata: map[string]interface{}{
 			"version": Version,

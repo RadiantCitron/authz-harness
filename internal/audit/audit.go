@@ -32,6 +32,9 @@ const MaxRecordBytes = 1 << 20
 // 스키마 v3 부터는 구분자 대신 필드마다 「<바이트 길이>:<값>」을 이어 붙이는 길이 접두 인코딩을 쓴다
 // (필드 경계를 옮겨도 해시가 같아지는 모호성 제거, ADR 0006). v0~v2 공식은 기존 파일 검증을 위해 바꾸지 않는다.
 func ComputeEventHash(prevHash string, ev Event) string {
+	if ev.SchemaVersion >= 4 {
+		return computeHashV4(prevHash, ev)
+	}
 	if ev.SchemaVersion >= 3 {
 		return computeHashV3(prevHash, ev)
 	}
@@ -54,9 +57,16 @@ func ComputeEventHash(prevHash string, ev Event) string {
 }
 
 func computeHashV3(prevHash string, ev Event) string {
-	var b strings.Builder
-	b.WriteString("authz-audit-v3")
-	for _, f := range []string{
+	return lengthPrefixedHash("authz-audit-v3", v3Fields(prevHash, ev))
+}
+
+// computeHashV4 는 v3 입력에 Stage 를 더한다(ADR 0009). 단계 값을 고치면 해시가 달라져 audit verify 가 잡는다.
+func computeHashV4(prevHash string, ev Event) string {
+	return lengthPrefixedHash("authz-audit-v4", append(v3Fields(prevHash, ev), ev.Stage))
+}
+
+func v3Fields(prevHash string, ev Event) []string {
+	return []string{
 		prevHash,
 		ev.Timestamp.UTC().Format(time.RFC3339Nano),
 		ev.TraceID,
@@ -70,7 +80,13 @@ func computeHashV3(prevHash string, ev Event) string {
 		ev.AgentID,
 		ev.ArgHash,
 		ev.ResultHash,
-	} {
+	}
+}
+
+func lengthPrefixedHash(domainTag string, fields []string) string {
+	var b strings.Builder
+	b.WriteString(domainTag)
+	for _, f := range fields {
 		b.WriteString(strconv.Itoa(len(f)))
 		b.WriteByte(':')
 		b.WriteString(f)
@@ -80,7 +96,7 @@ func computeHashV3(prevHash string, ev Event) string {
 }
 
 // CurrentSchemaVersion 은 JSONLWriter 가 새로 쓰는 레코드의 스키마 버전이다.
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 // NormalizeEvent 는 감사 이벤트의 최상위 필드를 정규화한다.
 func NormalizeEvent(ev *Event) {
@@ -397,6 +413,8 @@ func VerifyHashChain(path string) error {
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has unknown schema_version %d", n, ev.SchemaVersion), nil)
 		case ev.SchemaVersion < 2 && (ev.ArgHash != "" || ev.ResultHash != ""):
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has v2 fields without schema_version 2", n), nil)
+		case ev.SchemaVersion < 4 && ev.Stage != "":
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has stage without schema_version 4", n), nil)
 		case prevVersion >= 2 && ev.SchemaVersion < prevVersion:
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d downgrades schema version from v%d to v%d", n, prevVersion, ev.SchemaVersion), nil)
 		}

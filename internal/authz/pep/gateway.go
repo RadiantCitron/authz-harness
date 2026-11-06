@@ -514,6 +514,7 @@ func (g *gateway) logEvent(state *pipelineState, stage domain.Stage, success boo
 		Timestamp:  g.clock.Now().UTC(),
 		TraceID:    state.traceID,
 		Step:       stepName,
+		Stage:      string(stage),
 		Actor:      state.subject,
 		AgentID:    state.subject,
 		Action:     actionName,
@@ -525,7 +526,6 @@ func (g *gateway) logEvent(state *pipelineState, stage domain.Stage, success boo
 		ResultHash: resultHash,
 		Success:    success,
 		Metadata: map[string]interface{}{
-			"stage":            string(stage),
 			"requested_action": string(state.normAction),
 			"details":          details,
 		},
@@ -558,6 +558,7 @@ func (g *gateway) logApprovalConsumed(state *pipelineState) error {
 		Timestamp: g.clock.Now().UTC(),
 		TraceID:   state.traceID,
 		Step:      "pep.approval_consume",
+		Stage:     string(domain.StageApproval),
 		Actor:     state.subject,
 		AgentID:   state.subject,
 		Action:    "approval.consumed",
@@ -568,7 +569,6 @@ func (g *gateway) logApprovalConsumed(state *pipelineState) error {
 		ArgHash:   state.argHash,
 		Success:   true,
 		Metadata: map[string]interface{}{
-			"stage":       string(domain.StageApproval),
 			"approval_id": state.approvalID,
 		},
 	})
