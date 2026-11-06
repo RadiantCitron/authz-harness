@@ -65,8 +65,3 @@ func sanitizeMessage(msg string) string {
 	}
 	return domain.RedactRawTokens(msg)
 }
-
-// ContainsRawToken 은 주어진 텍스트 내에 원시 JWT 토큰이 존재하는지 domain.ContainsRawToken 으로 검사한다.
-func ContainsRawToken(text string) bool {
-	return domain.ContainsRawToken(text)
-}

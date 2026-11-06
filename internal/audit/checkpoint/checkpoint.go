@@ -154,11 +154,7 @@ func currHashOf(line string) (string, error) {
 	if err := json.Unmarshal([]byte(line), &ev); err != nil {
 		return "", err
 	}
-	h := ev.CurrHash
-	if h == "" && ev.Metadata != nil {
-		h, _ = ev.Metadata["curr_hash"].(string)
-	}
-	return h, nil
+	return ev.EffectiveCurrHash(), nil
 }
 
 // Create 는 현재 감사 체인의 (줄 수, 마지막 curr_hash)에 서명한 체크포인트를 outPath 에 쓴다.

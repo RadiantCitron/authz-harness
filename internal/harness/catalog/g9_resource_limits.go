@@ -12,7 +12,6 @@ import (
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
-	"authz-harness/internal/mcp"
 	"authz-harness/internal/orchestrator"
 	"authz-harness/internal/subagent"
 )
@@ -191,7 +190,7 @@ func (s *e2e43Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if mErr != nil {
 		return domain.ExitInternalError, mErr
 	}
-	if mcp.ContainsRawToken(string(raw)) || strings.Contains(string(raw), s.token) {
+	if domain.ContainsRawToken(string(raw)) || strings.Contains(string(raw), s.token) {
 		return code, harness.Invariantf("raw token leaked in MCP response")
 	}
 	res, _ := resp.Result.(map[string]any)

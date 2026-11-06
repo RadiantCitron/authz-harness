@@ -125,7 +125,7 @@ func TestSubprocessExecutor_ResourceLimitReasonPropagation(t *testing.T) {
 			if res.StructuredContent == nil || res.StructuredContent.ExitCode != 17 || res.StructuredContent.Reason != reason {
 				t.Fatalf("unexpected structured: %+v", res.StructuredContent)
 			}
-			if ContainsRawToken(text) || ContainsRawToken(res.StructuredContent.Message) {
+			if domain.ContainsRawToken(text) || domain.ContainsRawToken(res.StructuredContent.Message) {
 				t.Fatal("raw token leaked")
 			}
 		})

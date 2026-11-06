@@ -420,18 +420,8 @@ func VerifyHashChain(path string) error {
 		}
 		prevVersion = ev.SchemaVersion
 
-		evPrevHash := ev.PrevHash
-		if evPrevHash == "" && ev.Metadata != nil {
-			if ph, ok := ev.Metadata["prev_hash"].(string); ok {
-				evPrevHash = ph
-			}
-		}
-		evCurrHash := ev.CurrHash
-		if evCurrHash == "" && ev.Metadata != nil {
-			if ch, ok := ev.Metadata["curr_hash"].(string); ok {
-				evCurrHash = ch
-			}
-		}
+		evPrevHash := ev.EffectivePrevHash()
+		evCurrHash := ev.EffectiveCurrHash()
 
 		if evCurrHash == "" {
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d missing curr_hash", n), nil)

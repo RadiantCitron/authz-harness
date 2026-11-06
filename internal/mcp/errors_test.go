@@ -102,12 +102,12 @@ func TestTokenRedaction_ZeroLeakage(t *testing.T) {
 		t.Errorf("expected [REDACTED_TOKEN] placeholder, got: %s", sanitized)
 	}
 
-	if ContainsRawToken(sanitized) {
+	if domain.ContainsRawToken(sanitized) {
 		t.Errorf("sanitized message still contains raw token pattern")
 	}
 
 	res := MapSubprocessError(int(domain.ExitTokenInvalid), "TOKEN_INVALID", leakMsg)
-	if ContainsRawToken(res.Content[0].Text) {
+	if domain.ContainsRawToken(res.Content[0].Text) {
 		t.Errorf("MapSubprocessError leaked raw token: %s", res.Content[0].Text)
 	}
 }
@@ -123,7 +123,7 @@ func TestMapSubprocessError_StructuredContent(t *testing.T) {
 	if sc.ExitCode != 12 || sc.Reason != domain.Reason("NO_ACTIVE_GRANT") {
 		t.Fatalf("unexpected detail: %+v", sc)
 	}
-	if ContainsRawToken(sc.Message) || ContainsRawToken(res.Content[0].Text) {
+	if domain.ContainsRawToken(sc.Message) || domain.ContainsRawToken(res.Content[0].Text) {
 		t.Fatal("raw token leaked")
 	}
 }

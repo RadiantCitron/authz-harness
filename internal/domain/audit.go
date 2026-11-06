@@ -30,3 +30,21 @@ type AuditWriter interface {
 	Log(event AuditEvent) error
 	Close() error
 }
+
+// EffectivePrevHash 는 최상위 PrevHash 를, 없으면 Metadata["prev_hash"] 를 돌려준다 (둘 다 없으면 빈 값).
+func (e AuditEvent) EffectivePrevHash() string {
+	if e.PrevHash != "" {
+		return e.PrevHash
+	}
+	h, _ := e.Metadata["prev_hash"].(string)
+	return h
+}
+
+// EffectiveCurrHash 는 최상위 CurrHash 를, 없으면 Metadata["curr_hash"] 를 돌려준다 (둘 다 없으면 빈 값).
+func (e AuditEvent) EffectiveCurrHash() string {
+	if e.CurrHash != "" {
+		return e.CurrHash
+	}
+	h, _ := e.Metadata["curr_hash"].(string)
+	return h
+}

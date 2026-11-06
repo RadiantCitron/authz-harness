@@ -3,15 +3,11 @@ package harness
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/domain"
 )
-
-// jwtTokenPattern 은 서명된 Bearer 토큰(JWT eyJ...) 유출 여부를 검출하는 정규식이다.
-var jwtTokenPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_\.\-]{10,}`)
 
 // FileExpectation 은 파일 시스템 검증 명세다.
 type FileExpectation struct {
@@ -262,7 +258,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 	if exp.HashChain.NoRawTokenLeak {
 		for i, ev := range events {
 			rawJSON, _ := json.Marshal(ev)
-			if jwtTokenPattern.Match(rawJSON) {
+			if domain.ContainsRawToken(string(rawJSON)) {
 				res.HashChainPassed = false
 				res.Passed = false
 				res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("raw token leak detected in audit event #%d", i+1))
@@ -278,49 +274,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			res.Passed = false
 			res.FailureReasons = append(res.FailureReasons, "audit events empty but RequireValidChain is true")
 		} else {
-			var prevHash string
-			for i, ev := range events {
-				var evPrevHash, evCurrHash string
-				evPrevHash = ev.PrevHash
-				evCurrHash = ev.CurrHash
-				if ev.Metadata != nil {
-					if evPrevHash == "" {
-						if ph, ok := ev.Metadata["prev_hash"].(string); ok {
-							evPrevHash = ph
-						}
-					}
-					if evCurrHash == "" {
-						if ch, ok := ev.Metadata["curr_hash"].(string); ok {
-							evCurrHash = ch
-						}
-					}
-				}
-
-				if evCurrHash == "" {
-					res.HashChainPassed = false
-					res.Passed = false
-					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("event #%d missing curr_hash (vacuous pass forbidden)", i+1))
-					break
-				}
-
-				if evPrevHash != prevHash {
-					res.HashChainPassed = false
-					res.Passed = false
-					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("hash chain broken at event #%d: expected prev_hash %q, got %q", i+1, prevHash, evPrevHash))
-					break
-				}
-
-				computedCurrHash := computeEventHash(evPrevHash, ev)
-				if evCurrHash != computedCurrHash {
-					res.HashChainPassed = false
-					res.Passed = false
-					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("curr_hash mismatch at event #%d: expected %q, got %q", i+1, computedCurrHash, evCurrHash))
-					break
-				}
-				prevHash = evCurrHash
-			}
-
-			if res.HashChainPassed && env != nil && env.AuditPath != "" {
+			if env != nil && env.AuditPath != "" {
 				if err := audit.VerifyHashChain(env.AuditPath); err != nil {
 					res.HashChainPassed = false
 					res.Passed = false
@@ -380,14 +334,4 @@ func stageOf(ev audit.Event) domain.Stage {
 		return NoStageRecord
 	}
 	return domain.Stage(ev.Stage)
-}
-
-// computeEventHash 는 이벤트와 이전 해시를 바탕으로 정규화된 SHA-256 해시를 계산한다.
-func computeEventHash(prevHash string, ev audit.Event) string {
-	return audit.ComputeEventHash(prevHash, ev)
-}
-
-// ComputeEventCurrHash 는 이벤트 메타데이터에 주입할 curr_hash 계산 헬퍼 함수다.
-func ComputeEventCurrHash(prevHash string, ev audit.Event) string {
-	return audit.ComputeEventHash(prevHash, ev)
 }

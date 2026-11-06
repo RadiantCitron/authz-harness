@@ -110,7 +110,7 @@ func TestQuadAssertion_SuccessCase(t *testing.T) {
 		Metadata:  make(map[string]interface{}),
 	}
 	ev1.Metadata["prev_hash"] = ""
-	ev1.Metadata["curr_hash"] = ComputeEventCurrHash("", ev1)
+	ev1.Metadata["curr_hash"] = audit.ComputeEventHash("", ev1)
 
 	if err := writer.Log(ev1); err != nil {
 		t.Fatalf("failed to log audit event: %v", err)
