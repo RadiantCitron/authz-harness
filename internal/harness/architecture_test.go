@@ -576,6 +576,7 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}{
 			{"OS 패키지 주입", "os", []string{"os"}},
 			{"장부 원본 주입", modulePrefix + "internal/authz/state", []string{modulePrefix + "internal/authz/state"}},
+			{"예산 원장 구체 패키지 재주입", modulePrefix + "internal/authn/budget", []string{modulePrefix + "internal/authn/budget"}},
 			{"현재 집합 그대로", "", nil},
 		}
 		for _, tc := range cases {
@@ -644,23 +645,22 @@ var pdpAllowedImports = map[string]bool{
 	modulePrefix + "internal/domain": true,
 }
 
-// 관문(pep) 직접 import 허용 목록. 표준 4개와 내부 어댑터·도메인 9개로 고정한다.
+// 관문(pep) 직접 import 허용 목록. 표준 4개와 내부 어댑터·도메인 9개로 고정한다. (예산 원장은 domain.BudgetLedger 포트로 접근하므로 authn/budget 은 허용하지 않는다 — 계획 024)
 // 추가 시 설명서 007편 Q4·Q5 도 함께 갱신한다.
 var pepAllowedImports = map[string]bool{
-	"context":                              true,
-	"fmt":                                  true,
-	"strings":                              true,
-	"time":                                 true,
-	modulePrefix + "internal/audit":        true,
-	modulePrefix + "internal/authn/budget": true,
-	modulePrefix + "internal/authn/token":  true,
-	modulePrefix + "internal/authz/pdp":    true,
-	modulePrefix + "internal/domain":       true,
-	modulePrefix + "internal/execguard":    true,
-	modulePrefix + "internal/jail":         true,
-	modulePrefix + "internal/netguard":     true,
-	modulePrefix + "internal/observe":      true,
-	modulePrefix + "internal/pipeline":     true,
+	"context":                             true,
+	"fmt":                                 true,
+	"strings":                             true,
+	"time":                                true,
+	modulePrefix + "internal/audit":       true,
+	modulePrefix + "internal/authn/token": true,
+	modulePrefix + "internal/authz/pdp":   true,
+	modulePrefix + "internal/domain":      true,
+	modulePrefix + "internal/execguard":   true,
+	modulePrefix + "internal/jail":        true,
+	modulePrefix + "internal/netguard":    true,
+	modulePrefix + "internal/observe":     true,
+	modulePrefix + "internal/pipeline":    true,
 }
 
 // pipeline 은 표준 라이브러리만 쓴다. 내부 패키지 import 는 허용하지 않는다.
