@@ -219,7 +219,7 @@ func TestArchitectureGuardrails(t *testing.T) {
 	// 제외(의도): internal/confinement(OS 어댑터, seatbelt_darwin.go 가 slog 사용), internal/mcp, internal/cli,
 	// internal/app(합성 루트), cmd — 코어가 아닌 어댑터/조립 계층이다. observe/slogadapter 도 어댑터라 제외한다.
 	t.Run("TC-140-01: 코어 패키지의 log/slog·OTel import 0건 검증", func(t *testing.T) {
-		for _, d := range []string{"domain", "authn", "authz", "jail", "audit", "storage", "observe"} {
+		for _, d := range []string{"domain", "authn", "authz", "jail", "audit", "storage", "observe", "pipeline"} {
 			recursive := d != "observe"
 			if v := findForbiddenLogImports(t, filepath.Join(root, "internal", d), recursive); len(v) > 0 {
 				t.Errorf("forbidden logger import in core package %s:\n%s", d, strings.Join(v, "\n"))
@@ -388,43 +388,12 @@ func TestArchitectureGuardrails(t *testing.T) {
 			"internal/orchestrator/spawner.go#measureWall": true, // 프로세스 실행 벽시계 측정
 		}
 		var targets []string
-		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail"} {
+		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail", "pipeline"} {
 			targets = append(targets, filepath.Join(root, "internal", rel))
 		}
 		for _, dir := range targets {
-			err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-				if err != nil {
-					return err
-				}
-				if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-					return nil
-				}
-				f, perr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-				if perr != nil {
-					return perr
-				}
-				r, _ := filepath.Rel(root, path)
-				r = filepath.ToSlash(r)
-				for _, decl := range f.Decls {
-					fd, ok := decl.(*ast.FuncDecl)
-					if !ok || fd.Body == nil {
-						continue
-					}
-					ast.Inspect(fd.Body, func(n ast.Node) bool {
-						sel, ok := n.(*ast.SelectorExpr)
-						if !ok || sel.Sel.Name != "Now" {
-							return true
-						}
-						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "time" && !allowed[r+"#"+fd.Name.Name] {
-							t.Errorf("TC-130-01 violation: %s %s uses time.Now", r, fd.Name.Name)
-						}
-						return true
-					})
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("failed to walk %s: %v", dir, err)
+			for _, v := range findTimeNowUses(t, root, dir, allowed) {
+				t.Errorf("TC-130-01 violation: %s uses time.Now", v)
 			}
 		}
 	})
@@ -508,6 +477,7 @@ func TestArchitectureGuardrails(t *testing.T) {
 		for pkg, allowed := range map[string]map[string]bool{
 			modulePrefix + "internal/authz/pdp": pdpAllowedImports,
 			modulePrefix + "internal/domain":    domainAllowedImports,
+			modulePrefix + "internal/pipeline":  pipelineAllowedImports,
 		} {
 			if _, ok := graph[pkg]; !ok {
 				t.Fatalf("package not found in import graph: %s", pkg)
@@ -515,6 +485,25 @@ func TestArchitectureGuardrails(t *testing.T) {
 			for _, imp := range findDisallowedImports(graph, pkg, allowed) {
 				t.Errorf("TC-170-04 violation: %s imports %q (not in allow list)", pkg, imp)
 			}
+		}
+	})
+
+	// TC-020-13: pipeline 에 time.Now·log/slog 를 주입하면 가드가 검출해야 한다.
+	t.Run("TC-020-13: pipeline 가드 변이 검출(time.Now, log/slog)", func(t *testing.T) {
+		dir := t.TempDir()
+		src := "package x\n\nimport (\n\t\"log/slog\"\n\t\"time\"\n)\n\nvar _ = slog.Default\n\nfunc f() { _ = time.Now() }\n"
+		if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if len(findTimeNowUses(t, dir, dir, nil)) != 1 {
+			t.Error("time.Now not detected")
+		}
+		if len(findForbiddenLogImports(t, dir, true)) != 1 {
+			t.Error("slog import not detected")
+		}
+		pkg := modulePrefix + "internal/pipeline"
+		if got := findDisallowedImports(map[string][]string{pkg: {"context", "time"}}, pkg, pipelineAllowedImports); len(got) != 1 || got[0] != "time" {
+			t.Errorf("allow-list: want [time], got %v", got)
 		}
 	})
 
@@ -573,6 +562,47 @@ func TestArchitectureGuardrails(t *testing.T) {
 	})
 }
 
+// findTimeNowUses 는 dir 아래 비테스트 Go 파일에서 허용 목록 밖의 time.Now 사용을 "경로 함수" 로 돌려준다.
+func findTimeNowUses(t *testing.T, root, dir string, allowed map[string]bool) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, perr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if perr != nil {
+			return perr
+		}
+		r, _ := filepath.Rel(root, path)
+		r = filepath.ToSlash(r)
+		for _, decl := range f.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Body == nil {
+				continue
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok || sel.Sel.Name != "Now" {
+					return true
+				}
+				if id, ok := sel.X.(*ast.Ident); ok && id.Name == "time" && !allowed[r+"#"+fd.Name.Name] {
+					out = append(out, r+" "+fd.Name.Name)
+				}
+				return true
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk %s: %v", dir, err)
+	}
+	return out
+}
+
 const modulePrefix = "authz-harness/"
 
 // 직접 import 허용 목록. 항목을 추가하는 변경은 그 자체가 리뷰 대상이다.
@@ -601,6 +631,13 @@ var pepAllowedImports = map[string]bool{
 	modulePrefix + "internal/jail":         true,
 	modulePrefix + "internal/netguard":     true,
 	modulePrefix + "internal/observe":      true,
+}
+
+// pipeline 은 표준 라이브러리만 쓴다. 내부 패키지 import 는 허용하지 않는다.
+var pipelineAllowedImports = map[string]bool{
+	"context": true,
+	"errors":  true,
+	"fmt":     true,
 }
 
 var domainAllowedImports = map[string]bool{
