@@ -280,7 +280,7 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 		}
 	}
 
-	// 9b단계: 읽기 전용 Replay 확인 (소비는 PDP allow 뒤 ConsumeReplay)
+	// 9b단계: 읽기 전용 Replay 확인 (소비는 모든 검사(boundary)를 통과한 뒤 PEP replay 단계의 ConsumeReplay)
 	if opts.CheckReplay && !opts.RecordReplay && v.replayLedger != nil && claims.Budget == nil {
 		consumed, cerr := v.replayLedger.IsConsumed(claims.JWTID)
 		if cerr != nil {
