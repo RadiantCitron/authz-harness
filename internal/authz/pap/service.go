@@ -95,8 +95,8 @@ func NewService(store state.Store, auditWriter audit.Writer, opts ...ServiceOpti
 	return s
 }
 
-// CreateGrant 는 신규 활성 Grant를 생성하고 감사 로그를 기록한다.
-func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
+// createGrant 는 신규 활성 Grant를 생성하고 감사 로그를 기록한다.
+func (s *papService) createGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
 	now := s.clock.Now().UTC()
 	grant := &domain.Grant{
 		ID:        fmt.Sprintf("grant-%d", now.UnixNano()),
@@ -157,8 +157,8 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 	return grant, nil
 }
 
-// RevokeGrant 는 특정 ID의 Grant를 회수(Revoke) 상태로 갱신하고 감사 로그를 기록한다.
-func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.Grant, error) {
+// revokeGrant 는 특정 ID의 Grant를 회수(Revoke) 상태로 갱신하고 감사 로그를 기록한다.
+func (s *papService) revokeGrant(ctx context.Context, grantID string) (*domain.Grant, error) {
 	cleanID := strings.TrimSpace(grantID)
 	if cleanID == "" {
 		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: grant id required", domain.ErrEmptyGrantID)
@@ -211,8 +211,8 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 	return revokedGrant, nil
 }
 
-// BumpEpoch 는 대상 주체의 Security Epoch를 1 증가시키고 감사 로그를 기록한다.
-func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
+// bumpEpoch 는 대상 주체의 Security Epoch를 1 증가시키고 감사 로그를 기록한다.
+func (s *papService) bumpEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
 	cleanSub := strings.TrimSpace(subject)
 	if cleanSub == "" {
 		return 0, domain.NewError(domain.ReasonInvalidArguments, "pap: subject required", domain.ErrEmptySubject)
@@ -278,8 +278,8 @@ func (s *papService) ListGrants(ctx context.Context, filter GrantFilter) ([]doma
 	return result, nil
 }
 
-// CreateApproval 은 TTL·ArgHash 를 검증하고 승인을 원장에 저장한 뒤 approval.granted 감사를 남긴다.
-func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
+// createApproval 은 TTL·ArgHash 를 검증하고 승인을 원장에 저장한 뒤 approval.granted 감사를 남긴다.
+func (s *papService) createApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
 	ttl, err := domain.ValidateApprovalTTL(req.TTL)
 	if err != nil {
 		return nil, err
@@ -370,4 +370,65 @@ func auditFailedAfterCreate(kind string, auditErr, rollbackErr error) error {
 	return domain.NewError(domain.ReasonAuditLogFailed,
 		fmt.Sprintf("pap: audit logging failed and rollback failed; the %s may remain", kind),
 		errors.Join(auditErr, rollbackErr))
+}
+
+// recordDenied 는 쓰기 명령의 실패를 <action> 거부 기록으로 남긴다(계획 019 D-01·D-03).
+// 사용자 입력 문자열과 오류 문구는 담지 않고 사유 코드만 담는다.
+// 이미 감사 실패인 오류는 다시 기록하지 않고, 기록이 실패하면 원래 거부 대신 AUDIT_LOG_FAILED 를 돌려준다.
+func (s *papService) recordDenied(step, action string, err error) error {
+	if err == nil || s.audit == nil || domain.ReasonFromError(err, "") == domain.ReasonAuditLogFailed {
+		return err
+	}
+	now := s.clock.Now().UTC()
+	reason := domain.ReasonFromError(err, domain.ReasonInternalError)
+	if aerr := s.audit.Log(audit.Event{
+		Timestamp: now,
+		TraceID:   fmt.Sprintf("%s-deny-%d", strings.ReplaceAll(step, ".", "-"), now.UnixNano()),
+		Step:      step,
+		Actor:     "admin",
+		Action:    action,
+		Decision:  "deny",
+		Reason:    string(reason),
+		Success:   false,
+		Metadata:  map[string]interface{}{"reason": string(reason)},
+	}); aerr != nil {
+		return domain.NewError(domain.ReasonAuditLogFailed, "pap: failed to record denial audit log", aerr)
+	}
+	return err
+}
+
+// CreateGrant 는 신규 활성 Grant를 생성하고 감사 로그를 기록한다. 실패는 입구에서 grant.create.deny 로 기록한다.
+func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
+	g, err := s.createGrant(ctx, req)
+	if err != nil {
+		return nil, s.recordDenied("pap.create_grant", "grant.create.deny", err)
+	}
+	return g, nil
+}
+
+// RevokeGrant 는 Grant를 회수하고 감사 로그를 기록한다. 실패는 입구에서 grant.revoke.deny 로 기록한다.
+func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.Grant, error) {
+	g, err := s.revokeGrant(ctx, grantID)
+	if err != nil {
+		return nil, s.recordDenied("pap.revoke_grant", "grant.revoke.deny", err)
+	}
+	return g, nil
+}
+
+// BumpEpoch 는 주체의 Epoch를 올리고 감사 로그를 기록한다. 실패는 입구에서 epoch.bump.deny 로 기록한다.
+func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
+	e, err := s.bumpEpoch(ctx, subject)
+	if err != nil {
+		return 0, s.recordDenied("pap.bump_epoch", "epoch.bump.deny", err)
+	}
+	return e, nil
+}
+
+// CreateApproval 은 승인을 저장하고 감사 로그를 기록한다. 실패는 입구에서 approval.create.deny 로 기록한다.
+func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
+	a, err := s.createApproval(ctx, req)
+	if err != nil {
+		return nil, s.recordDenied("pap.create_approval", "approval.create.deny", err)
+	}
+	return a, nil
 }
