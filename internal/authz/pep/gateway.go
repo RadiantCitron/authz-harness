@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"authz-harness/internal/audit"
-	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pdp"
 	"authz-harness/internal/domain"
@@ -76,7 +75,7 @@ type Config struct {
 	Observer         observe.Observer    // 관측성 포트 주입 (미주입 시 NoopObserver, 항상 WrapSafe 적용)
 	StageObserver    func(domain.Stage)  // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
 	ApprovalConsumer ApprovalConsumer    // 선택: 승인 소비기. 승인으로 허용된 요청인데 없으면 Fail-Closed(16)
-	BudgetLedger     budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
+	BudgetLedger     domain.BudgetLedger // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
 	NetGuard         *netguard.Guard     // 선택: net:fetch 가드. nil 이면 net:fetch 는 boundary 단계에서 Fail-Closed(16)
 	ExecRunner       *execguard.Runner   // 선택: exec:run 실행기. nil 이면 exec:run 은 boundary 단계에서 Fail-Closed(16)
 }

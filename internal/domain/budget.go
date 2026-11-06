@@ -9,6 +9,14 @@ type Budget struct {
 	MaxWriteBytes int64 `json:"max_write_bytes,omitempty"`
 }
 
+// BudgetLedger 는 관문(pep)이 예산 토큰을 집행할 때 쓰는 최소 원장 포트다.
+// 구현체(authn/budget)를 몰라도 차감·환급만 요청할 수 있게 하여 authz → authn 구체 의존을 끊는다.
+// 원장 초기화·예약·조회는 발급·교환 계층의 몫이라 이 포트에 넣지 않는다.
+type BudgetLedger interface {
+	Consume(jti string, calls, readBytes, writeBytes int64) error
+	Refund(jti string, calls, readBytes, writeBytes int64) error
+}
+
 // Validate 는 MaxCalls > 0 이고 바이트 한도가 음수가 아님을 검증한다.
 func (b Budget) Validate() error {
 	if b.MaxCalls <= 0 || b.MaxReadBytes < 0 || b.MaxWriteBytes < 0 {

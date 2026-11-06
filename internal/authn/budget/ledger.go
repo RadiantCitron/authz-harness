@@ -43,6 +43,9 @@ type FileLedger struct {
 
 var _ Ledger = (*FileLedger)(nil)
 
+// Ledger 는 관문이 쓰는 domain.BudgetLedger 포트를 만족해야 한다 (시그니처 일치 고정).
+var _ domain.BudgetLedger = Ledger(nil)
+
 // NewFileLedger 는 path 의 원장 파일을 다루는 FileLedger 를 생성한다.
 func NewFileLedger(path string, clock domain.Clock) (*FileLedger, error) {
 	if clock == nil {
