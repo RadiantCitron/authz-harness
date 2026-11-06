@@ -18,7 +18,7 @@ func (noActiveKey) GetActiveSigningKey() (*domain.SigningKey, error) {
 }
 
 // 계획 017 T8 — 교환 안에서 실제 발급기가 실패해도 교환 결과(사유·종료 코드·거부 감사 1건)는 그대로여야 한다.
-// 자식 발급기의 token.issue.deny 가 같은 TraceID 에 추가되는 것은 허용되지만 최대 1건이다.
+// 자식 발급기의 token.issue.deny 가 같은 TraceID 에 정확히 1건 더 남는 것은 허용된다(계획 017 A안). 두 거부의 사유는 같다.
 func TestExchange_T8_ChildIssueFailureKeepsExchangeOutcome(t *testing.T) {
 	e := newBudgetEnv(t, false, false)
 	parent := e.root(t, nil).TokenString
@@ -31,7 +31,9 @@ func TestExchange_T8_ChildIssueFailureKeepsExchangeOutcome(t *testing.T) {
 		t.Fatalf("must be denied: %v %v", res, err)
 	}
 	reason, code := domain.ReasonFromError(err, ""), domain.ExitCodeFromError(err, 0)
-	t.Logf("baseline exchange outcome: reason=%s exit=%d", reason, code)
+	if reason != domain.ReasonInternalError || code != domain.ExitInternalError {
+		t.Errorf("returned outcome: reason=%s exit=%d", reason, code)
+	}
 
 	var exDeny, issueDeny int
 	for _, ev := range rawEvents(t, e.auditP) {
@@ -44,6 +46,10 @@ func TestExchange_T8_ChildIssueFailureKeepsExchangeOutcome(t *testing.T) {
 			if ev["stage"] != string(domain.StageTokenIssue) {
 				t.Errorf("exchange deny stage=%v", ev["stage"])
 			}
+			// 감사 사유는 돌려주는 사유와 같아야 한다(INVALID_TOKEN 고정 금지).
+			if ev["reason"] != string(reason) {
+				t.Errorf("exchange deny audit reason=%v, returned=%s", ev["reason"], reason)
+			}
 		case "token.issue.deny":
 			issueDeny++
 		}
@@ -54,5 +60,7 @@ func TestExchange_T8_ChildIssueFailureKeepsExchangeOutcome(t *testing.T) {
 	if issueDeny > 1 {
 		t.Errorf("child issue deny must be at most 1, got %d", issueDeny)
 	}
-	t.Logf("baseline token.issue.deny in exchange trace: %d", issueDeny)
+	if issueDeny != 1 {
+		t.Errorf("want exactly 1 child token.issue.deny, got %d", issueDeny)
+	}
 }

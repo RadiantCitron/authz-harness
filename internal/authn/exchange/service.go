@@ -345,7 +345,8 @@ func (s *ExchangeService) tokenIssue(c *exchangeCall) error {
 		Budget:          c.req.Budget,
 	}, token.IssueOptions{}, c.auditCtx)
 	if err != nil {
-		return &denial{domain.ReasonInvalidToken, err.Error(), fmt.Errorf("failed to issue child token: %w", err)}
+		// 발급기가 도메인 사유를 달아 주면 그대로 기록한다. 감사 사유와 돌려주는 종료 코드가 어긋나지 않게 한다.
+		return &denial{domain.ReasonFromError(err, domain.ReasonInvalidToken), err.Error(), fmt.Errorf("failed to issue child token: %w", err)}
 	}
 	c.child = res
 	return nil
