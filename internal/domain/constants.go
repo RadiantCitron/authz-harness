@@ -41,6 +41,29 @@ const (
 	ExitApprovalRequired ExitCode = 18
 )
 
+// exitCodeNames 는 종료 코드의 이름(Go 식별자)이다. 새 ExitCode 상수를 정의하면 여기에도 적어야 하며,
+// 빠뜨리면 TestExitCodeName_CoversEveryDeclaredConstant 가 실패한다.
+var exitCodeNames = map[ExitCode]string{
+	ExitSuccess:          "ExitSuccess",
+	ExitTokenInvalid:     "ExitTokenInvalid",
+	ExitAuthzDenied:      "ExitAuthzDenied",
+	ExitPathViolation:    "ExitPathViolation",
+	ExitBadInput:         "ExitBadInput",
+	ExitAuditFailure:     "ExitAuditFailure",
+	ExitInternalError:    "ExitInternalError",
+	ExitResourceLimit:    "ExitResourceLimit",
+	ExitApprovalRequired: "ExitApprovalRequired",
+}
+
+// ExitCodeName 은 종료 코드의 이름을 돌려준다. 정의되지 않은 값은 "Unknown" 이다.
+// 화면 등 소비처는 이름 표를 따로 들지 않고 이 함수를 쓴다.
+func ExitCodeName(c ExitCode) string {
+	if name, ok := exitCodeNames[c]; ok {
+		return name
+	}
+	return "Unknown"
+}
+
 // Reason 은 PDP 인가 결정 및 검증 실패의 구체적인 판정 사유 코드다.
 type Reason string
 
