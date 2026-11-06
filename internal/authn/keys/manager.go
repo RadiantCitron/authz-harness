@@ -112,7 +112,7 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 					"status": entry.Status,
 				},
 			}); err != nil {
-				return nil, fmt.Errorf("keys manager: failed to record initial key audit log: %w", err)
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "keys manager: initial key stored but audit logging failed", err)
 			}
 		}
 	}
@@ -234,7 +234,7 @@ func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 				"alg":            newEntry.Algorithm,
 			},
 		}); err != nil {
-			return nil, fmt.Errorf("keys manager: failed to record rotate key audit log: %w", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "keys manager: key rotated but audit logging failed", err)
 		}
 	}
 
@@ -311,7 +311,7 @@ func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
 				"revoked_kid": kid,
 			},
 		}); err != nil {
-			return fmt.Errorf("keys manager: failed to record revoke key audit log: %w", err)
+			return domain.NewError(domain.ReasonAuditLogFailed, "keys manager: key revoked but audit logging failed", err)
 		}
 	}
 
