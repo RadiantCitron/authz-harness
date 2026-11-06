@@ -172,11 +172,11 @@ type pipelineState struct {
 	resource    string
 	argHash     string // 요청 데이터 지문(domain.DataDigest), 원문은 기록하지 않는다
 	normAction  domain.Action
+	tool        Tool // normAction 에 대응하는 도구 (Gate 0 가 채운다)
 	subject     string
 	tokenJTI    string
 	callerID    string
 	safePath    string
-	fetchTarget netguard.Target // net:fetch Gate 0 정규화 결과
 	failedStage Stage
 	passed      []Stage   // 통과한 단계 기록 (runStage 가 fn 성공 시 추가, finalize 가 Result.Passed 로 복사)
 	approvalID  string    // PDP 가 승인으로 allow 했을 때 소비할 승인 ID
@@ -251,32 +251,28 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 		}
 	}()
 
+	call := &Call{cfg: &g.cfg, req: req, st: state}
+
 	// 0. 기본 입력 인자 유효성 검증
 	if err := g.runStage(ctx, state, StageGate0Input, func() error {
 		if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
 			return domain.NewError(domain.ReasonMissingTraceContext, string(StageGate0Input), "trace_id is required but missing", nil)
 		}
 		normAction, actErr := NormalizeAction(string(req.Action))
+		var tool Tool
+		if actErr == nil {
+			var found bool
+			tool, found = toolFor(normAction)
+			if !found {
+				actErr = fmt.Errorf("pep: no tool registered for action %q", normAction)
+			}
+		}
 		if actErr != nil || state.resource == "" {
 			return domain.NewError(domain.ReasonInvalidArguments, string(StageGate0Input), "action must be file:read, file:write, net:fetch or exec:run, and resource cannot be empty", actErr)
 		}
 		state.normAction = normAction
-		if normAction == domain.ActionNetFetch {
-			if len(req.Data) > 0 {
-				return domain.NewError(domain.ReasonInvalidArguments, string(StageGate0Input), "net:fetch must not carry data", nil)
-			}
-			t, parseErr := netguard.ParseTarget(state.resource)
-			if parseErr != nil {
-				// 원문 URL(자격 정보·질의 포함 가능)이 감사에 남지 않게 지문만 기록한다.
-				state.argHash = domain.DataDigest([]byte(state.resource))
-				state.resource = "<invalid-url>"
-				return domain.NewError(domain.ReasonEgressDenied, string(StageGate0Input), "net:fetch target rejected", parseErr)
-			}
-			state.resource = t.HostPort
-			state.fetchTarget = t
-			state.argHash = domain.DataDigest([]byte(t.URL))
-		}
-		return nil
+		state.tool = tool
+		return tool.Prepare(call)
 	}); err != nil {
 		return nil, err
 	}
@@ -368,31 +364,7 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 
 	// Stage 3: Gate 2c - Workspace Jail Boundary Verification
 	if err := g.runStage(ctx, state, StageGate2cJail, func() error {
-		switch state.normAction {
-		case domain.ActionNetFetch:
-			if g.cfg.NetGuard == nil {
-				return domain.NewError(domain.ReasonInternalError, string(StageGate2cJail), "net guard is not configured (fail-closed)", nil)
-			}
-			if checkErr := g.cfg.NetGuard.Check(state.resource); checkErr != nil {
-				return domain.NewError(domain.ReasonFromError(checkErr, domain.ReasonEgressDenied), string(StageGate2cJail), fmt.Sprintf("Gate 2c egress denied: %v", checkErr), checkErr)
-			}
-		case domain.ActionExecRun:
-			if g.cfg.ExecRunner == nil {
-				return domain.NewError(domain.ReasonInternalError, string(StageGate2cJail), "exec runner is not configured (fail-closed)", nil)
-			}
-			if valErr := execguard.Validate(state.resource, string(req.Data)); valErr != nil {
-				return domain.NewError(domain.ReasonFromError(valErr, domain.ReasonExecNotAllowed), string(StageGate2cJail), fmt.Sprintf("Gate 2c exec rejected: %v", valErr), valErr)
-			}
-		default:
-			forWrite := (state.normAction == domain.ActionFileWrite)
-			safePath, jailErr := g.cfg.Jail.ResolvePath(state.resource, forWrite)
-			if jailErr != nil {
-				jailReason := jail.ReasonFromError(jailErr)
-				return domain.NewError(jailReason, string(StageGate2cJail), fmt.Sprintf("Gate 2c jail path containment violated: %v", jailErr), jailErr)
-			}
-			state.safePath = safePath
-		}
-		return nil
+		return state.tool.CheckBoundary(call)
 	}); err != nil {
 		return nil, err
 	}
@@ -418,7 +390,7 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 	}
 
 	// Stage 3b: Budget - 쓰기 사전 차감 (예산 토큰만, 읽기는 바이트 수를 알 수 없어 Stage 5 에서 사후 차감)
-	if state.budgeted && (state.normAction == domain.ActionFileWrite || state.normAction == domain.ActionExecRun) {
+	if state.budgeted && state.tool.BudgetPlan(call).PreCharge {
 		if err := g.runStage(ctx, state, StageBudget, func() error {
 			n := int64(len(req.Data))
 			if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, 0, n); consumeErr != nil {
@@ -460,55 +432,28 @@ func (g *gateway) runPipeline(ctx context.Context, req Request, state *pipelineS
 			SafePath: state.safePath,
 		}
 
-		switch state.normAction {
-		case domain.ActionFileRead:
-			data, readErr := g.cfg.Jail.ReadFile(state.resource)
-			if readErr != nil {
-				return domain.NewError(domain.ReasonInternalError, string(Stage5FileIO), fmt.Sprintf("pep: failed to read file in jail: %v", readErr), readErr)
-			}
-			if state.budgeted {
-				// 읽기 사후 차감: 실패하면 데이터를 결과에 담지 않고 버린다 (읽기는 부작용 없음)
-				if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, int64(len(data)), 0); consumeErr != nil {
-					return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
-				}
-			}
-			res.Data = data
-			res.BytesRead = len(data)
-
-		case domain.ActionFileWrite:
-			if writeErr := g.cfg.Jail.WriteFile(state.resource, req.Data); writeErr != nil {
-				return domain.NewError(domain.ReasonInternalError, string(Stage5FileIO), fmt.Sprintf("pep: failed to write file in jail: %v", writeErr), writeErr)
-			}
-			res.BytesWrote = len(req.Data)
-
-		case domain.ActionNetFetch:
-			data, fetchErr := g.cfg.NetGuard.Fetch(ctx, state.fetchTarget)
-			if fetchErr != nil {
-				return domain.NewError(domain.ReasonFromError(fetchErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("pep: net fetch failed: %v", fetchErr), fetchErr)
-			}
-			if state.budgeted {
-				if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 1, int64(len(data)), 0); consumeErr != nil {
-					return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
-				}
-			}
-			res.Data = data
-			res.BytesRead = len(data)
-
-		case domain.ActionExecRun:
+		plan := state.tool.BudgetPlan(call)
+		if !plan.RefundAfterStart {
 			// 실행이 시작되면 실패해도 환급하지 않는다(부작용이 이미 났을 수 있다).
 			state.consumed = false
-			out, runErr := g.cfg.ExecRunner.Run(ctx, state.resource, string(req.Data))
-			if runErr != nil {
-				return domain.NewError(domain.ReasonFromError(runErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("pep: exec failed: %v", runErr), runErr)
-			}
-			if state.budgeted {
-				if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, 0, int64(len(out)), 0); consumeErr != nil {
-					return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
-				}
-			}
-			res.Data = out
-			res.BytesRead = len(out)
 		}
+		out, execErr := state.tool.Execute(ctx, call)
+		if execErr != nil {
+			return execErr
+		}
+		if state.budgeted && plan.PostCharge {
+			// 사후 차감: 실패하면 데이터를 결과에 담지 않고 버린다. 사전 차감한 도구는 호출 수를 다시 세지 않는다.
+			calls := int64(1)
+			if plan.PreCharge {
+				calls = 0
+			}
+			if consumeErr := g.cfg.BudgetLedger.Consume(state.tokenJTI, calls, int64(len(out.Data)), 0); consumeErr != nil {
+				return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(Stage5FileIO), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
+			}
+		}
+		res.Data = out.Data
+		res.BytesRead = out.BytesRead
+		res.BytesWrote = out.BytesWrote
 
 		finalRes = res
 		return nil
