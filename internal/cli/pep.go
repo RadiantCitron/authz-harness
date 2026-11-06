@@ -303,7 +303,7 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 	if res.Allowed {
 		decisionStr = "ALLOW"
 	}
-	fmt.Fprintf(r.out, "DECISION: %s | EXIT CODE: %d (%s)\n", decisionStr, res.ExitCode, exitCodeName(res.ExitCode))
+	fmt.Fprintf(r.out, "DECISION: %s | EXIT CODE: %d (%s)\n", decisionStr, res.ExitCode, domain.ExitCodeName(res.ExitCode))
 	if !res.Allowed {
 		fmt.Fprintf(r.out, "Reason: %s: %s\n", res.Reason, res.Details)
 	}
@@ -429,29 +429,6 @@ func renderStageBoxes(w io.Writer, res *pep.Result) {
 			line += " " + b.Info
 		}
 		fmt.Fprintln(w, line)
-	}
-}
-
-func exitCodeName(c domain.ExitCode) string {
-	switch c {
-	case domain.ExitSuccess:
-		return "ExitSuccess"
-	case domain.ExitTokenInvalid:
-		return "ExitTokenInvalid"
-	case domain.ExitAuthzDenied:
-		return "ExitAuthzDenied"
-	case domain.ExitPathViolation:
-		return "ExitPathViolation"
-	case domain.ExitBadInput:
-		return "ExitBadInput"
-	case domain.ExitAuditFailure:
-		return "ExitAuditFailure"
-	case domain.ExitInternalError:
-		return "ExitInternalError"
-	case domain.ExitResourceLimit:
-		return "ExitResourceLimit"
-	default:
-		return "Unknown"
 	}
 }
 

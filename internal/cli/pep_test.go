@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
 )
 
@@ -475,10 +476,28 @@ func TestPEPCLI_JSONOutputFormat(t *testing.T) {
 	}
 }
 
-// TC-030-06
-func TestExitCodeName_ResourceLimit(t *testing.T) {
-	if got := exitCodeName(domain.ExitResourceLimit); got != "ExitResourceLimit" {
-		t.Fatalf("got %q", got)
+// 계획 014 N4 (구 TC-030-06 대체): 화면의 종료 코드 이름은 domain 이 정한 이름을 그대로 쓴다.
+// 이름 표 자체의 검증(ExitResourceLimit 포함 모든 코드)은 domain.TestExitCodeName_* 가 맡는다.
+func TestPEPCLI_RenderResult_ShowsDomainExitCodeName(t *testing.T) {
+	tests := []struct {
+		name     string
+		exitCode domain.ExitCode
+		want     string
+	}{
+		{"승인 대기", domain.ExitApprovalRequired, "EXIT CODE: 18 (ExitApprovalRequired)"},
+		{"자원 한계", domain.ExitResourceLimit, "EXIT CODE: 17 (ExitResourceLimit)"},
+		{"정의되지 않은 값", domain.ExitCode(99), "EXIT CODE: 99 (Unknown)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := setupPEPCLITestRig(t)
+			rig.out.Reset()
+			rig.runner.renderResult(pep.Request{Action: domain.ActionFileRead, Resource: "x.txt"},
+				&pep.Result{Allowed: false, ExitCode: tc.exitCode, Reason: domain.ReasonApprovalRequired}, "")
+			if !strings.Contains(rig.out.String(), tc.want) {
+				t.Fatalf("want %q in output:\n%s", tc.want, rig.out.String())
+			}
+		})
 	}
 }
 
