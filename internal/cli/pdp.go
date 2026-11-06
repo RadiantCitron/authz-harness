@@ -172,15 +172,10 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 		return domain.ExitInternalError
 	}
 
-	// 6단계 관문 상태 도출
+	// PDP 만 실행했으므로 판정 칸 하나만 그린다. 토큰 검증·경계·감사는 이 명령이 실행하지 않은 일이라 그리지 않는다.
 	pdpGateStatus := "[PASS]"
 	if decision.Decision != pdp.DecisionAllow {
 		pdpGateStatus = fmt.Sprintf("[FAIL] Reason: %s", decision.Reason)
-	}
-
-	pepGateStatus := "[PASS] Boundary enforced"
-	if decision.Decision != pdp.DecisionAllow {
-		pepGateStatus = "[SKIP] (Halted before file I/O)"
 	}
 
 	// 회수된 일시 등 매칭 Grant 상세
@@ -204,12 +199,7 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	fmt.Fprintf(r.out, "================================================================================\n")
 	fmt.Fprintf(r.out, "                    AUTHZ PIPELINE VERIFICATION REPORT\n")
 	fmt.Fprintf(r.out, "================================================================================\n")
-	fmt.Fprintf(r.out, " [1. AuthN & Signature]    : [PASS] (Simulated Context)\n")
-	fmt.Fprintf(r.out, " [2. Token Temporal Claims]: [PASS] (Simulated Context)\n")
-	fmt.Fprintf(r.out, " [3. Token Scope Match]    : [PASS] (Scope covers %s)\n", req.Action)
-	fmt.Fprintf(r.out, " [4. PDP Real-Time Engine] : %s\n", pdpGateStatus)
-	fmt.Fprintf(r.out, " [5. PEP & Jail Boundary]  : %s\n", pepGateStatus)
-	fmt.Fprintf(r.out, " [6. Audit Trace Evidence] : [PASS] Recorded to %s\n", r.auditPath)
+	fmt.Fprintf(r.out, " [%s] : %s\n", stageLabel(domain.StageAuthz), pdpGateStatus)
 	fmt.Fprintf(r.out, "--------------------------------------------------------------------------------\n")
 	fmt.Fprintf(r.out, " REQUEST CONTEXT:\n")
 	fmt.Fprintf(r.out, "  - Subject         : %s\n", req.Subject)
@@ -235,4 +225,14 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 
 	// explain 뷰는 설명 조회가 목적이므로 종료 코드 0 반환
 	return domain.ExitSuccess
+}
+
+// stageLabel 은 정식 단계 목록에서 화면 이름을 읽는다.
+func stageLabel(id domain.Stage) string {
+	for _, s := range domain.PEPStages() {
+		if s.ID == id {
+			return s.Label
+		}
+	}
+	return string(id)
 }

@@ -32,7 +32,7 @@ func (s *e2e07Scenario) Metadata() harness.ScenarioMetadata {
 		ID:                 "E2E-07",
 		Group:              "G3",
 		Name:               "토큰 누락 차단",
-		Description:        "토큰 문자열이 공백이거나 누락된 상태로 파일 접근을 시도할 경우 Gate 1에서 즉각 차단된다.",
+		Description:        "토큰 문자열이 공백이거나 누락된 상태로 파일 접근을 시도할 경우 신원 확인 단계에서 즉각 차단된다.",
 		AttackClass:        "MissingToken",
 		ParadoxExplanation: "Authorization 헤더나 토큰 문자열이 누락된 요청을 1차 관문에서 차단했습니다.",
 		Expected: harness.ExpectedAssertion{
@@ -209,7 +209,7 @@ func (s *e2e10Scenario) Metadata() harness.ScenarioMetadata {
 		ID:                 "E2E-10",
 		Group:              "G3",
 		Name:               "alg: none 공격 차단",
-		Description:        "서명 검증을 우회하려는 alg: none 토큰 공격을 Gate 1에서 즉각 차단한다.",
+		Description:        "서명 검증을 우회하려는 alg: none 토큰 공격을 신원 확인 단계에서 즉각 차단한다.",
 		AttackClass:        "AlgNoneAttack",
 		ParadoxExplanation: "서명 검증을 우회하려는 alg: none 취약점 공격 시도를 원천 차단했습니다.",
 		Expected: harness.ExpectedAssertion{

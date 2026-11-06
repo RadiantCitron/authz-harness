@@ -32,7 +32,7 @@ func (s *e2e28Scenario) Metadata() harness.ScenarioMetadata {
 		ID:                 "E2E-28",
 		Group:              "G7",
 		Name:               "trace_id 누락 요청 차단",
-		Description:        "감사 추적 및 분산 트레이싱에 필수적인 trace_id 인자가 누락된 경우 Gate 0에서 즉각 차단된다.",
+		Description:        "감사 추적 및 분산 트레이싱에 필수적인 trace_id 인자가 누락된 경우 입력 검사 단계에서 즉각 차단된다.",
 		AttackClass:        "MissingTraceID",
 		ParadoxExplanation: "감사 추적에 필수적인 단일 trace_id 컨텍스트가 누락된 요청을 거부했습니다.",
 		Expected: harness.ExpectedAssertion{

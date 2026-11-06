@@ -51,14 +51,13 @@ func RenderScenarioExplain(res harness.ScenarioResult) string {
 			sb.WriteString(fmt.Sprintf("    * %s\n", f))
 		}
 	}
-	sb.WriteString("\n [관문 상태 파이프라인]\n")
+	sb.WriteString("\n [단계 상태 파이프라인]\n")
 
-	gates := ComputePipelineGates(res)
-	sb.WriteString(RenderPipelineDiagram(gates))
-	sb.WriteString(RenderSupervisionLine(ComputeSupervision(res)))
+	view := BuildStageView(res)
+	sb.WriteString(RenderStageView(view))
 
 	sb.WriteString("\n [💡 초보자를 위한 보안 원리 해설 (부정 테스트의 역설)]\n")
-	explanation := generateExplanation(res, gates)
+	explanation := generateExplanation(res, view)
 	sb.WriteString(explanation)
 	sb.WriteString("================================================================================\n\n")
 
@@ -72,7 +71,7 @@ func summarizeFileStatus(assertion harness.AssertionResult) string {
 	return "부작용 검출"
 }
 
-func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
+func generateExplanation(res harness.ScenarioResult, view StageView) string {
 	meta := res.Metadata
 	actualExit := res.Assertion.ExitCodeActual
 	expectedExit := meta.Expected.ExitCode
@@ -82,7 +81,7 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 	if expectedExit == domain.ExitSuccess {
 		sb.WriteString("  - 질문: 왜 이 작업은 정상 종료(Exit Code 0)되어야 하나요?\n")
 		sb.WriteString("  - 해설: 올바른 권한과 유효한 서명 토큰을 제시하고 격리된 디렉터리 내에서\n")
-		sb.WriteString("          수행된 합법적인 요청입니다. 6대 관문을 모두 통과하여 I/O가 정상 수행되었습니다.\n")
+		sb.WriteString("          수행된 합법적인 요청입니다. 모든 단계를 통과하여 I/O가 정상 수행되었습니다.\n")
 		return sb.String()
 	}
 
@@ -96,18 +95,10 @@ func generateExplanation(res harness.ScenarioResult, gates []GateInfo) string {
 
 	sb.WriteString(fmt.Sprintf("  - 질문: 왜 프로세스는 실패(Exit Code %d)했는데 하네스는 PASS(통과)라고 하나요?\n", actualExit))
 
-	// 차단 관문 찾기
-	var blockedGate *GateInfo
-	for i := range gates {
-		if gates[i].Status == GateBlocked {
-			blockedGate = &gates[i]
-			break
-		}
-	}
-
-	gateName := "관문"
-	if blockedGate != nil {
-		gateName = blockedGate.Name
+	// 차단된 단계 찾기. 기록에 근거가 없으면 단계를 지어내지 않는다.
+	gateName := "해당 단계"
+	if b := view.Blocked(); b != nil {
+		gateName = b.Label
 	}
 
 	switch meta.Group {

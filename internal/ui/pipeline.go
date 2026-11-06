@@ -8,235 +8,172 @@ import (
 	"authz-harness/internal/harness"
 )
 
-// GateStatus 는 관문 판정 상태다.
-type GateStatus string
+// CellState 는 단계 칸의 표시 상태다.
+type CellState string
 
 const (
-	GatePass    GateStatus = "PASS"
-	GateBlocked GateStatus = "BLOCKED ❌"
-	GateSkipped GateStatus = "SKIPPED"
+	CellPassed   CellState = "통과"
+	CellBlocked  CellState = "차단"
+	CellSkipped  CellState = "건너뜀"   // 앞 단계가 막아서 돌지 않음
+	CellNA       CellState = "해당 없음" // 조건에 맞지 않아 돌지 않음
+	CellNotEnter CellState = "미진입"   // 요청이 PEP 에 닿지 않음
+	CellUnknown  CellState = "판단 불가" // 기록에 근거가 없음
 )
 
-// GateInfo 는 개별 관문의 평가 정보다.
-type GateInfo struct {
-	GateNumber int
-	Name       string
-	Status     GateStatus
-	Detail     string
+// StageCell 은 화면의 칸 하나다. 칸 목록과 이름은 domain.PEPStages() 에서 읽는다.
+type StageCell struct {
+	Stage  domain.Stage
+	Label  string
+	State  CellState
+	Detail string
 }
 
-// SupervisionInfo 는 부모 스포너의 실행 감독(시간·출력 한계) 결과다. 인가 관문과 별개다.
-type SupervisionInfo struct {
-	Blocked bool
-	Reason  domain.Reason // RESOURCE_TIMEOUT | RESOURCE_OUTPUT_LIMIT
-	Detail  string
+// StageView 는 한 시나리오의 화면 모델이다. 관문 밖 판정은 칸이 아니라 Side 줄로 둔다.
+type StageView struct {
+	Cells []StageCell
+	Side  []string
 }
 
-// ComputeSupervision 은 시나리오 결과에서 자원 한계 종료 여부를 도출한다.
-func ComputeSupervision(res harness.ScenarioResult) SupervisionInfo {
-	reason := res.Assertion.AuditActualReason
-	if reason == "" {
-		reason = res.Metadata.Expected.Audit.ExpectedReason
+// Blocked 는 차단 칸을 돌려준다. 없으면 nil.
+func (v StageView) Blocked() *StageCell {
+	for i := range v.Cells {
+		if v.Cells[i].State == CellBlocked {
+			return &v.Cells[i]
+		}
 	}
-	switch reason {
-	case domain.ReasonResourceTimeout:
-		return SupervisionInfo{Blocked: true, Reason: reason, Detail: "시간 상한 초과로 프로세스 그룹 종료"}
-	case domain.ReasonResourceOutputLimit:
-		return SupervisionInfo{Blocked: true, Reason: reason, Detail: "출력 상한 초과로 프로세스 그룹 종료"}
-	}
-	return SupervisionInfo{}
+	return nil
 }
 
-// RenderSupervisionLine 은 관문 표 아래에 붙는 "실행 감독" 한 줄을 만든다.
-func RenderSupervisionLine(s SupervisionInfo) string {
-	if s.Blocked {
-		return fmt.Sprintf("  실행 감독: 차단 (%s) — %s\n", s.Reason, s.Detail)
-	}
-	return "  실행 감독: 정상\n"
-}
+// BuildStageView 는 감사 기록에서 관측한 사실(Assertion.Observed, AuditActualStage)만으로 화면 모델을 만든다.
+// 시나리오 ID·그룹·기대값으로 추측하지 않는다. 근거가 없으면 판단 불가로 그린다.
+func BuildStageView(res harness.ScenarioResult) StageView {
+	a := res.Assertion
+	o := a.Observed
+	exit := a.ExitCodeActual
+	reason := a.AuditActualReason
 
-// ComputePipelineGates 는 시나리오 결과와 메타데이터로부터 6단계 관문 상태를 도출한다.
-func ComputePipelineGates(res harness.ScenarioResult) []GateInfo {
-	meta := res.Metadata
-	assertion := res.Assertion
-	expected := meta.Expected
-
-	// 실행 감독 종료는 인가 관문의 결과가 아니므로 모든 관문을 SKIPPED 로 표시한다.
-	if ComputeSupervision(res).Blocked {
-		return skippedGates()
+	all := func(s CellState, detail string) []StageCell {
+		specs := domain.PEPStages()
+		cells := make([]StageCell, len(specs))
+		for i, sp := range specs {
+			cells[i] = StageCell{Stage: sp.ID, Label: sp.Label, State: s, Detail: detail}
+		}
+		return cells
 	}
 
-	// 차단이 발생할 관문 결정 (0~5, 차단 없으면 -1)
-	blockedGate := -1
-	blockedDetail := ""
-
-	reason := assertion.AuditActualReason
-	if reason == "" {
-		reason = expected.Audit.ExpectedReason
-	}
-
-	// 1. 차단 사유 또는 메타데이터 기반으로 차단 관문 산출
 	switch {
-	// Gate 0: 컨텍스트 검증 (trace_id 누락 등)
-	case reason == domain.ReasonInvalidArguments || meta.ID == "E2E-28":
-		blockedGate = 0
-		blockedDetail = "trace_id 컨텍스트 누락 검증 차단"
-
-	// Gate 1: 토큰 & 서명 (Ed25519 서명, JWT 규격, 만료/미래, 키 폐기 등)
-	case meta.Group == "G2" || meta.Group == "G3" ||
-		reason == domain.ReasonTokenInvalidSignature ||
-		reason == domain.ReasonTokenExpired ||
-		reason == domain.ReasonTokenNotYetValid ||
-		reason == domain.ReasonTokenInvalidIssAud ||
-		reason == domain.ReasonTokenSubjectMismatch ||
-		reason == domain.ReasonTokenKeyRetired ||
-		reason == domain.ReasonTokenKeyNotFound ||
-		reason == domain.ReasonTokenInvalidType ||
-		reason == domain.ReasonTokenAlgNotAllowed ||
-		reason == domain.ReasonTokenMalformed ||
-		reason == domain.ReasonInvalidToken:
-		blockedGate = 1
-		if assertion.AuditActualReason != "" {
-			blockedDetail = fmt.Sprintf("토큰/서명 위반 사유: %s", assertion.AuditActualReason)
-		} else {
-			blockedDetail = fmt.Sprintf("토큰/서명 위반 사유: %s", expected.Audit.ExpectedReason)
-		}
-
-	// Gate 2: 위임 & 스코프 (축소 위임 불일치, Scope 권한 초과)
-	case meta.Group == "G5" && (reason == domain.ReasonDelegationScopeExceeded ||
-		reason == domain.ReasonDelegationDepthExceeded ||
-		reason == domain.ReasonDelegationTTLExceeded ||
-		reason == domain.ReasonDelegationSelfLoop ||
-		reason == domain.ReasonDelegationScopeEmpty ||
-		reason == domain.ReasonTokenInsufficientScope ||
-		meta.ID == "E2E-19" || meta.ID == "E2E-20" || meta.ID == "E2E-21" || meta.ID == "E2E-22"):
-		blockedGate = 2
-		if meta.ID == "E2E-22" {
-			blockedDetail = "요청: file:write / 축소위임: file:read"
-		} else if assertion.AuditActualReason != "" {
-			blockedDetail = fmt.Sprintf("위임/스코프 위반: %s", assertion.AuditActualReason)
-		} else {
-			blockedDetail = fmt.Sprintf("위임/스코프 위반: %s", expected.Audit.ExpectedReason)
-		}
-
-	// Gate 3: 실시간 Grant (PAP 실시간 회수, Replay, Subject Epoch)
-	case reason == domain.ReasonNoActiveGrant ||
-		reason == domain.ReasonGrantRevoked ||
-		reason == domain.ReasonTokenReplayDetected ||
-		reason == domain.ReasonSubjectEpochRevoked ||
-		reason == domain.ReasonApprovalRequired ||
-		reason == domain.ReasonApprovalExpired ||
-		reason == domain.ReasonApprovalMismatch ||
-		meta.ID == "E2E-03" || meta.ID == "E2E-18" || meta.ID == "E2E-23" || meta.ID == "E2E-24":
-		blockedGate = 3
-		if assertion.AuditActualReason != "" {
-			blockedDetail = fmt.Sprintf("실시간 Grant 검증 실패: %s", assertion.AuditActualReason)
-		} else {
-			blockedDetail = fmt.Sprintf("실시간 Grant 검증 실패: %s", expected.Audit.ExpectedReason)
-		}
-
-	// Gate 4: Jail 경로격리 (Workspace 경계 탈출, Symlink, DotDot)
-	case meta.Group == "G6" ||
-		reason == domain.ReasonPathViolation ||
-		reason == domain.ReasonPathTraversal ||
-		reason == domain.ReasonSymlinkEscape ||
-		reason == domain.ReasonInvalidPath:
-		blockedGate = 4
-		if assertion.AuditActualReason != "" {
-			blockedDetail = fmt.Sprintf("Jail 경로 격리 위반: %s", assertion.AuditActualReason)
-		} else {
-			blockedDetail = fmt.Sprintf("Jail 경로 격리 위반: %s", expected.Audit.ExpectedReason)
-		}
-
-	// Gate 5: 감사 & I/O (Fail-Closed, 해시 체인 무결성 위반)
-	case meta.Group == "G7" ||
-		reason == domain.ReasonAuditLogFailed ||
-		meta.ID == "E2E-29" || meta.ID == "E2E-30":
-		blockedGate = 5
-		if assertion.AuditActualReason != "" {
-			blockedDetail = fmt.Sprintf("감사 무결성/I/O 차단: %s", assertion.AuditActualReason)
-		} else {
-			blockedDetail = fmt.Sprintf("감사 무결성/I/O 차단: %s", expected.Audit.ExpectedReason)
-		}
-	}
-
-	// 정상 시나리오 (E2E-01, E2E-02 등 ExitCode == 0 이고 기대 판정이 allow 인 경우)
-	if expected.ExitCode == domain.ExitSuccess {
-		blockedGate = -1
-	}
-
-	gateNames := []string{
-		"Gate 0: 컨텍스트 검증",
-		"Gate 1: 토큰 & 서명",
-		"Gate 2: 위임 & 스코프",
-		"Gate 3: 실시간 Grant",
-		"Gate 4: Jail 경로격리",
-		"Gate 5: 감사 & I/O",
-	}
-
-	gates := make([]GateInfo, 6)
-	for i := 0; i < 6; i++ {
-		gates[i] = GateInfo{
-			GateNumber: i,
-			Name:       gateNames[i],
-		}
-
-		if blockedGate == -1 {
-			// 전 관문 통과
-			gates[i].Status = GatePass
-			gates[i].Detail = "정상 통과"
-		} else if i < blockedGate {
-			gates[i].Status = GatePass
-			gates[i].Detail = "정상 통과"
-		} else if i == blockedGate {
-			gates[i].Status = GateBlocked
-			gates[i].Detail = blockedDetail
-		} else {
-			gates[i].Status = GateSkipped
-			if i == 5 {
-				gates[i].Detail = "부작용 0바이트 보장 (선행 관문 차단)"
-			} else {
-				gates[i].Detail = "선행 관문 차단으로 실행 생략"
+	case o.ReadFailed:
+		return StageView{Cells: all(CellUnknown, "감사 기록을 읽지 못함")}
+	case o.Action == "token.issue.deny":
+		return StageView{Cells: all(CellNotEnter, ""), Side: []string{fmt.Sprintf("토큰 발급: 차단 (%s)", reason)}}
+	case o.Action == "token.exchange.deny":
+		return StageView{Cells: all(CellNotEnter, ""), Side: []string{fmt.Sprintf("토큰 교환: 차단 (%s)", reason)}}
+	case strings.HasPrefix(o.Action, "agent."):
+		side := fmt.Sprintf("실행 감독: 차단 (%s)", reason)
+		if o.Action == "agent.confined" {
+			side = "격리: 차단"
+			if reason != "" {
+				side = fmt.Sprintf("격리: 차단 (%s)", reason)
 			}
 		}
-	}
-
-	// 컨텍스트 검증 특화 상세
-	if blockedGate != 0 {
-		gates[0].Detail = "trace_id 존재 확인"
-	}
-	// 토큰 & 서명 특화 상세
-	if blockedGate > 1 || blockedGate == -1 {
-		gates[1].Detail = "Ed25519 서명 및 JWT 규격(at+jwt) 유효"
-	}
-	// Gate 5 정상 통과 상세
-	if blockedGate == -1 {
-		gates[5].Detail = "감사 기록 및 4중 무결성 검증 완료"
-	}
-
-	return gates
-}
-
-// skippedGates 는 6개 관문을 모두 SKIPPED 로 반환한다 (실행 감독에서 종료된 경우).
-func skippedGates() []GateInfo {
-	names := []string{"Gate 0: 컨텍스트 검증", "Gate 1: 토큰 & 서명", "Gate 2: 위임 & 스코프", "Gate 3: 실시간 Grant", "Gate 4: Jail 경로격리", "Gate 5: 감사 & I/O"}
-	gates := make([]GateInfo, 6)
-	for i := range gates {
-		gates[i] = GateInfo{GateNumber: i, Name: names[i], Status: GateSkipped, Detail: "실행 감독에서 종료됨 — 관문 판정과 무관"}
-	}
-	return gates
-}
-
-// RenderPipelineDiagram 은 관문 상태를 텍스트 다이어그램으로 렌더링한다.
-func RenderPipelineDiagram(gates []GateInfo) string {
-	var sb strings.Builder
-	for _, g := range gates {
-		statusStr := string(g.Status)
-		detailStr := ""
-		if g.Detail != "" {
-			detailStr = fmt.Sprintf(" (%s)", g.Detail)
+		if o.PEPFound {
+			v := pepCells(o.PEPAction, o.PEPStage, o.PEPSchema, exit, o, all)
+			v.Side = append(v.Side, side)
+			return v
 		}
-		sb.WriteString(fmt.Sprintf("  [%s] ──▶ %s%s\n", g.Name, statusStr, detailStr))
+		return StageView{Cells: all(CellNotEnter, ""), Side: []string{side}}
+	case o.Action == "pep.allow" || o.Action == "pep.deny":
+		return pepCells(o.Action, a.AuditActualStage, o.SchemaVersion, exit, o, all)
+	case exit == domain.ExitAuditFailure:
+		return StageView{Cells: all(CellUnknown, "단계 기록 없음"), Side: []string{"감사 기록: 실패"}}
+	case exit != domain.ExitSuccess:
+		return StageView{Cells: all(CellNotEnter, ""), Side: []string{"진입 전: 차단"}}
+	default:
+		return StageView{Cells: all(CellNotEnter, "")}
+	}
+}
+
+// pepCells 는 PEP 기록(종단 단계)에서 칸을 그린다. 앞 칸은 감사에 남지 않으므로 근거 있는 규칙으로만 그린다.
+func pepCells(action string, stage domain.Stage, schema int, exit domain.ExitCode, o harness.AuditObservation, all func(CellState, string) []StageCell) StageView {
+	if schema != 0 && schema < 4 {
+		return StageView{Cells: all(CellUnknown, "v3 이하 기록에는 단계가 없음")}
+	}
+	specs := domain.PEPStages()
+	end := -1
+	for i, sp := range specs {
+		if sp.ID == stage {
+			end = i
+		}
+	}
+	if end < 0 {
+		return StageView{Cells: all(CellUnknown, "알 수 없는 단계 기록")}
+	}
+	deny := action == "pep.deny"
+	cells := make([]StageCell, len(specs))
+	for i, sp := range specs {
+		c := StageCell{Stage: sp.ID, Label: sp.Label}
+		switch {
+		case i == end && deny:
+			c.State = CellBlocked
+		case i > end && deny:
+			c.State = CellSkipped
+		case i > end:
+			c.State, c.Detail = afterEnd(sp.ID, stage)
+		default:
+			c.State, c.Detail = beforeEnd(sp.ID, stage, o)
+		}
+		cells[i] = c
+	}
+	v := StageView{Cells: cells}
+	if !deny && exit == domain.ExitAuditFailure {
+		v.Side = append(v.Side, "감사 검증: 차단")
+	}
+	return v
+}
+
+// beforeEnd 는 종단 단계 이하(종단 포함, 허용일 때)의 칸 규칙이다.
+func beforeEnd(s, end domain.Stage, o harness.AuditObservation) (CellState, string) {
+	switch s {
+	case domain.StageApproval:
+		if o.ApprovalConsumed {
+			return CellPassed, "승인 소비 기록 있음"
+		}
+		return CellNA, "승인 소비 기록 없음"
+	case domain.StageBudget:
+		if end == domain.StageSettle {
+			return CellPassed, "정산 단계까지 갔으므로 예산 토큰"
+		}
+		return CellUnknown, "예산 토큰 여부를 알 수 있는 기록이 없음"
+	case domain.StageSettle:
+		if end == domain.StageSettle {
+			return CellPassed, ""
+		}
+		return CellNA, "정산 없이 완료"
+	}
+	return CellPassed, ""
+}
+
+// afterEnd 는 허용 기록의 종단 단계보다 뒤 칸이다. 완료 감사가 execute 이면 정산은 돌지 않은 것이고,
+// 그보다 앞에서 기록이 끝났으면(꼬리 절단 등) 뒤는 근거가 없다.
+func afterEnd(s, end domain.Stage) (CellState, string) {
+	if s == domain.StageSettle && end == domain.StageExecute {
+		return CellNA, "정산 없이 완료"
+	}
+	return CellUnknown, "완료 기록 없음"
+}
+
+// RenderStageView 는 화면 모델을 텍스트로 그린다.
+func RenderStageView(v StageView) string {
+	var sb strings.Builder
+	for _, c := range v.Cells {
+		detail := ""
+		if c.Detail != "" {
+			detail = fmt.Sprintf(" (%s)", c.Detail)
+		}
+		sb.WriteString(fmt.Sprintf("  [%s] ──▶ %s%s\n", c.Label, c.State, detail))
+	}
+	for _, s := range v.Side {
+		sb.WriteString(fmt.Sprintf("  %s\n", s))
 	}
 	return sb.String()
 }

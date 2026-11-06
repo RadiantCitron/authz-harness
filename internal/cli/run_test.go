@@ -51,8 +51,8 @@ func TestRunCLI_AT_CLI_02_ExplainOutput(t *testing.T) {
 	if !strings.Contains(outStr, "시나리오 [E2E-22]") {
 		t.Errorf("expected E2E-22 header in explain output, got:\n%s", outStr)
 	}
-	if !strings.Contains(outStr, "Gate 2: 위임 & 스코프") {
-		t.Errorf("expected Gate 2 in diagram, got:\n%s", outStr)
+	if !strings.Contains(outStr, "[권한 판정] ──▶ 차단") {
+		t.Errorf("expected authz blocked cell in diagram, got:\n%s", outStr)
 	}
 	if !strings.Contains(outStr, "부정 테스트의 역설") {
 		t.Errorf("expected paradox section, got:\n%s", outStr)

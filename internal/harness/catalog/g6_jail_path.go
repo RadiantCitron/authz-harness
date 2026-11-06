@@ -32,7 +32,7 @@ func (s *e2e25Scenario) Metadata() harness.ScenarioMetadata {
 		ID:                 "E2E-25",
 		Group:              "G6",
 		Name:               "상대 경로 탈출(../../etc/passwd) 차단",
-		Description:        "상대 경로(../)를 통해 격리 작업공간 외부에 접근하려는 순회 시도는 Gate 2c Jail에서 차단된다.",
+		Description:        "상대 경로(../)를 통해 격리 작업공간 외부에 접근하려는 순회 시도는 경계 검사 단계에서 차단된다.",
 		AttackClass:        "PathTraversal",
 		ParadoxExplanation: "상대 경로(../)를 통한 Workspace Jail 외부 디렉터리 접근 탈출을 차단했습니다.",
 		Expected: harness.ExpectedAssertion{

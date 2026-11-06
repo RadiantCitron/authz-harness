@@ -56,6 +56,7 @@ type AssertionResult struct {
 	AuditActualReason   domain.Reason   // 실제 기록된 사유 코드
 	AuditActualDecision string          // 실제 기록된 판정
 	AuditActualStage    domain.Stage    // 매칭한 감사 기록의 실제 단계(없으면 NoStageRecord)
+	Observed            AuditObservation // 화면이 추측 없이 그리기 위한 감사 기록 관측 사실
 	HashChainPassed     bool            // 4. 해시 체인 무결성 검증 결과
 	FailureReasons      []string        // 실패 사유 목록
 }
@@ -150,6 +151,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 		res.AuditPassed = false
 		res.HashChainPassed = false
 		res.Passed = false
+		res.Observed.ReadFailed = true
 		res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("failed to read audit events: %v", err))
 		return res
 	}
@@ -168,6 +170,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			var matchedDecision string
 			var matchedReason domain.Reason
 			var matchedStage domain.Stage
+			var matchedEv audit.Event
 			found := false
 
 			for i := len(events) - 1; i >= 0; i-- {
@@ -198,6 +201,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 					matchedDecision = evDecision
 					matchedReason = domain.Reason(evReason)
 					matchedStage = stageOf(ev)
+					matchedEv = ev
 					found = true
 					break
 				}
@@ -222,6 +226,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit reason mismatch: expected %q, got %q", exp.Audit.ExpectedReason, matchedReason))
 				}
 				res.AuditActualStage = matchedStage
+				res.Observed = observeAudit(events, &matchedEv)
 				if exp.Audit.ExpectedStage != "" && matchedStage != exp.Audit.ExpectedStage {
 					res.AuditPassed = false
 					res.Passed = false
@@ -237,6 +242,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 		for _, ev := range events {
 			if ev.Stage != "" {
 				res.AuditActualStage = domain.Stage(ev.Stage)
+				res.Observed = observeAudit(events, &ev)
 				break
 			}
 		}
@@ -325,6 +331,39 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 	}
 
 	return res
+}
+
+// AuditObservation 은 화면이 단계 칸을 그릴 때 쓰는 감사 기록의 관측 사실이다.
+// 기록에 없는 것은 추측하지 않고 비워 두며, 화면이 「판단 불가」로 그린다.
+type AuditObservation struct {
+	ReadFailed       bool         // 감사 기록을 읽지 못함
+	Action           string       // 매칭한 기록의 액션 (없으면 빈 값)
+	SchemaVersion    int          // 매칭한 기록의 스키마 버전
+	ApprovalConsumed bool         // 같은 요청의 approval.consumed 기록 유무
+	PEPFound         bool         // 같은 요청의 PEP 판정 기록 유무 (agent.* 매칭일 때만 조사)
+	PEPAction        string       // 같은 요청의 PEP 기록 액션
+	PEPStage         domain.Stage // 같은 요청의 PEP 기록 단계 (없으면 NoStageRecord)
+	PEPSchema        int          // 같은 요청의 PEP 기록 스키마 버전
+}
+
+func observeAudit(events []audit.Event, m *audit.Event) AuditObservation {
+	o := AuditObservation{Action: m.Action, SchemaVersion: m.SchemaVersion}
+	if m.TraceID == "" {
+		return o
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.TraceID != m.TraceID {
+			continue
+		}
+		if ev.Action == "approval.consumed" {
+			o.ApprovalConsumed = true
+		}
+		if !o.PEPFound && strings.HasPrefix(m.Action, "agent.") && (ev.Action == "pep.allow" || ev.Action == "pep.deny") {
+			o.PEPFound, o.PEPAction, o.PEPStage, o.PEPSchema = true, ev.Action, stageOf(ev), ev.SchemaVersion
+		}
+	}
+	return o
 }
 
 // NoStageRecord 는 매칭한 감사 기록에 단계가 적혀 있지 않아야 한다는 판정기의 명시값이다.
