@@ -417,7 +417,7 @@ func TestArchitectureGuardrails(t *testing.T) {
 			"internal/orchestrator/spawner.go#measureWall": true, // 프로세스 실행 벽시계 측정
 		}
 		var targets []string
-		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail", "pipeline", "storage", "observe", "netguard", "execguard", "subagent"} {
+		for _, rel := range []string{"domain", "authn", "authz", "orchestrator", "audit", "jail", "pipeline", "storage", "observe", "netguard", "execguard", "subagent", "mcp"} {
 			targets = append(targets, filepath.Join(root, "internal", rel))
 		}
 		for _, dir := range targets {

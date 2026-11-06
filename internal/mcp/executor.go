@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"authz-harness/internal/orchestrator"
 	"authz-harness/internal/subagent"
@@ -45,7 +44,11 @@ func (e *SubprocessExecutor) ExecuteTool(ctx context.Context, req *ToolCallReque
 		return nil, fmt.Errorf("spawner is not configured")
 	}
 
-	traceID := generateTraceID()
+	traceID, err := generateTraceID()
+	if err != nil {
+		// 난수원 고장 시 약한 대체 번호로 진행하지 않는다 (Fail-Closed, 자식 프로세스 미생성).
+		return nil, fmt.Errorf("generate trace id: %w", err)
+	}
 
 	subReq := subagent.SubagentRequest{
 		Version:  "1.0",
@@ -90,10 +93,13 @@ func (e *SubprocessExecutor) ExecuteTool(ctx context.Context, req *ToolCallReque
 	return MapSubprocessError(spawnRes.ExitCode, string(spawnRes.Reason), spawnRes.StderrRaw), nil
 }
 
-func generateTraceID() string {
+// randRead 는 시험에서 난수원 실패를 주입하기 위한 간접 참조다 (프로덕션은 crypto/rand.Read).
+var randRead = rand.Read
+
+func generateTraceID() (string, error) {
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return fmt.Sprintf("mcp-%d", time.Now().UnixNano())
+	if _, err := randRead(b); err != nil {
+		return "", err
 	}
-	return "mcp-" + hex.EncodeToString(b)
+	return "mcp-" + hex.EncodeToString(b), nil
 }

@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -177,5 +179,38 @@ func TestSubprocessExecutor_NoLoggerNoPanic(t *testing.T) {
 	mock := &mockSpawner{result: &orchestrator.SpawnResult{StderrRaw: "x", Response: &subagent.SubagentResponse{Output: "ok"}}}
 	if _, err := NewSubprocessExecutor(mock).ExecuteTool(context.Background(), &ToolCallRequest{Action: domain.ActionFileRead, Path: "a", AuthzToken: "t"}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// 계획 025 A1: 정상 경로는 mcp-<16자리 hex> 이고 호출마다 다르다.
+func TestGenerateTraceID_FormatAndUniqueness(t *testing.T) {
+	re := regexp.MustCompile(`^mcp-[0-9a-f]{16}$`)
+	a, errA := generateTraceID()
+	b, errB := generateTraceID()
+	if errA != nil || errB != nil {
+		t.Fatalf("unexpected error: %v %v", errA, errB)
+	}
+	if !re.MatchString(a) || !re.MatchString(b) {
+		t.Errorf("bad format: %q %q", a, b)
+	}
+	if a == b {
+		t.Errorf("trace ids must differ: %q", a)
+	}
+}
+
+// 계획 025 A2: 난수원이 실패하면 ExecuteTool 은 에러로 실패하고 Spawn 을 호출하지 않는다 (Fail-Closed).
+func TestSubprocessExecutor_TraceIDFailureIsFailClosed(t *testing.T) {
+	orig := randRead
+	randRead = func([]byte) (int, error) { return 0, errors.New("entropy source down") }
+	t.Cleanup(func() { randRead = orig })
+
+	mock := &mockSpawner{result: &orchestrator.SpawnResult{}}
+	exec := NewSubprocessExecutor(mock)
+	res, err := exec.ExecuteTool(context.Background(), &ToolCallRequest{AuthzToken: "t", Action: domain.ActionFileRead, Path: "a.txt"})
+	if err == nil || res != nil {
+		t.Fatalf("want error and nil result, got res=%v err=%v", res, err)
+	}
+	if mock.lastReq.TraceID != "" {
+		t.Errorf("Spawn must not be called, lastReq=%+v", mock.lastReq)
 	}
 }
