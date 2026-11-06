@@ -49,6 +49,30 @@ const (
 	Stage5FileIO Stage = "stage5_io"
 )
 
+// stageOrder 는 관문 단계의 정식 순서다. runPipeline 이 단계를 부르는 순서와 같아야 하며,
+// 화면(cli)처럼 단계 순서가 필요한 곳은 자기 표를 만들지 않고 Stages 로 이 목록을 읽는다.
+// 일치는 시험(TestStageOrder_*)이 강제한다.
+var stageOrder = [...]Stage{
+	StageGate0Input,
+	StageGate1AuthN,
+	StageGate2AuthZ,
+	StageReplay,
+	StageGate2cJail,
+	StageApproval,
+	StageBudget,
+	Stage4Audit,
+	Stage5FileIO,
+}
+
+// Stages 는 관문 단계의 정식 순서를 담은 복사본을 돌려준다. 호출자가 고쳐도 내부 목록은 바뀌지 않는다.
+// 승인(StageApproval)·예산(StageBudget)처럼 조건부로 도는 단계도 포함하므로,
+// 한 요청이 실제로 통과한 단계는 Result.Passed 로 확인한다.
+func Stages() []Stage {
+	out := make([]Stage, len(stageOrder))
+	copy(out, stageOrder[:])
+	return out
+}
+
 // NormalizeAction 은 사용자 입력 문자열을 표준 액션으로 바꾼다(domain.ParseAction 에 위임, read/write 별칭 허용).
 func NormalizeAction(act string) (domain.Action, error) {
 	return domain.ParseAction(act)
@@ -81,6 +105,9 @@ type Result struct {
 	BytesRead  int             `json:"bytes_read,omitempty"`
 	BytesWrote int             `json:"bytes_wrote,omitempty"`
 	Data       []byte          `json:"-"` // 읽기 요청 성공 시 반환되는 파일 내용 (JSON 직렬화 제외)
+	// Passed 는 이 요청이 실제로 통과한 단계를 통과한 순서대로 담는다. 실패한 단계는 들어 있지 않다.
+	// 조건부 단계(승인·예산)가 이 요청에 해당 없으면 빠져 있으므로, 화면은 순서를 추론하지 않고 이 기록을 읽는다.
+	Passed []Stage `json:"passed_stages,omitempty"`
 }
 
 // Gateway 는 파일 I/O 요청에 대한 인가 집행 관문 인터페이스다.
@@ -151,6 +178,7 @@ type pipelineState struct {
 	safePath    string
 	fetchTarget netguard.Target // net:fetch Gate 0 정규화 결과
 	failedStage Stage
+	passed      []Stage   // 통과한 단계 기록 (runStage 가 fn 성공 시 추가, finalize 가 Result.Passed 로 복사)
 	approvalID  string    // PDP 가 승인으로 allow 했을 때 소비할 승인 ID
 	evalNow     time.Time // PDP 판정과 승인 소비에 쓰는 같은 시각
 
@@ -186,8 +214,11 @@ func (g *gateway) runStage(ctx context.Context, state *pipelineState, stage Stag
 	)
 
 	err := fn()
-	if err == nil && g.cfg.StageObserver != nil {
-		g.cfg.StageObserver(stage)
+	if err == nil {
+		state.passed = append(state.passed, stage)
+		if g.cfg.StageObserver != nil {
+			g.cfg.StageObserver(stage)
+		}
 	}
 	durationMs := g.clock.Now().Sub(start).Milliseconds()
 
@@ -538,8 +569,11 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, res *Resul
 			Subject:  state.subject,
 			TokenJTI: state.tokenJTI,
 			SafePath: state.safePath,
+			Passed:   append([]Stage(nil), state.passed...),
 		}, nil
 	}
+
+	res.Passed = append([]Stage(nil), state.passed...)
 
 	// 정상 실행 완료 감사 기록
 	if auditErr := g.logEvent(state, Stage5FileIO, true, domain.ReasonAuthorized, "file I/O execution completed", domain.DataDigest(res.Data)); auditErr != nil {

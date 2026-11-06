@@ -169,8 +169,13 @@ func TestTOCTOUWindow(t *testing.T) {
 			t.Errorf("file = %q", b)
 		}
 		// TC-040-08: 통과한 단계만 순서대로
-		want := []pep.Stage{pep.StageGate0Input, pep.StageGate1AuthN, pep.StageGate2AuthZ,
-			pep.StageReplay, pep.StageGate2cJail, pep.StageBudget, pep.Stage4Audit, pep.Stage5FileIO}
+		// 정식 순서(pep.Stages)에서 이 요청에 해당 없는 승인 단계만 뺀 것이다 (순서를 여기서 다시 적지 않는다).
+		var want []pep.Stage
+		for _, s := range pep.Stages() {
+			if s != pep.StageApproval {
+				want = append(want, s)
+			}
+		}
 		if !reflect.DeepEqual(stages, want) {
 			t.Errorf("stages = %v, want %v", stages, want)
 		}
