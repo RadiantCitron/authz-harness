@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -139,7 +140,7 @@ func (r *KeysRunner) runRotate(args []string) domain.ExitCode {
 	newKey, err := r.mgr.RotateKey(auditCtx)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to rotate key: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	fmt.Fprintf(r.out, "Key rotated successfully.\nNew Active KID: %s\nAlgorithm: %s/%s\nStatus: %s\n",
@@ -177,12 +178,12 @@ func (r *KeysRunner) runRevoke(args []string) domain.ExitCode {
 	}
 
 	if err := r.mgr.RevokeKey(*kid, auditCtx); err != nil {
-		if err == keys.ErrKeyNotFound {
+		if errors.Is(err, keys.ErrKeyNotFound) {
 			fmt.Fprintf(r.errOut, "Error: key not found: %s\n", *kid)
 			return domain.ExitBadInput
 		}
 		fmt.Fprintf(r.errOut, "Error: failed to revoke key: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	fmt.Fprintf(r.out, "Key revoked successfully.\nRevoked KID: %s\n", *kid)
