@@ -191,14 +191,14 @@ func TestArchitectureGuardrails(t *testing.T) {
 	})
 
 	// TC-060-04-E: exchange.ExchangeService.Exchange 의 단일 출구(finalize) 정적 구조 검증 (계획 023 D-03)
-	// return 은 정확히 2개: engineErr 가드 블록 안 Fail-Closed 조기 반환 1개 + 마지막 문장 `return x.finalize(...)`.
+	// return 은 정확히 1개(마지막 문장)이고 engineErr Fail-Closed 분기와 finalize 호출이 있어야 한다.
 	t.Run("TC-060-04-E: exchange.Exchange 단일 출구(finalize) 정적 구조 검증", func(t *testing.T) {
 		if err := checkExchangeSESE(filepath.Join(root, "internal", "authn", "exchange", "service.go")); err != nil {
 			t.Errorf("violation of SESE: %v", err)
 		}
 	})
 
-	// TC-060-04-M: Exchange SESE 가드 변이 시험 (세 번째 return, 가드 밖 조기 반환, 마지막 문장 비-finalize)
+	// TC-060-04-M: Exchange SESE 가드 변이 시험 (조기 return, finalize 우회, engineErr 분기 삭제)
 	t.Run("TC-060-04-M: Exchange SESE 가드 변이 검출", func(t *testing.T) {
 		const head = "package x\n\ntype S struct{ engineErr error }\n\nfunc (s *S) finalize(a int) (int, error) { return a, nil }\n\n"
 		cases := []struct {
@@ -206,10 +206,10 @@ func TestArchitectureGuardrails(t *testing.T) {
 			body string
 			ok   bool
 		}{
-			{"정상", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\treturn s.finalize(1)", true},
-			{"세 번째 return", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\tif a := 1; a > 2 {\n\t\treturn 0, nil\n\t}\n\treturn s.finalize(1)", false},
-			{"조기 반환이 가드 밖", "if true {\n\t\treturn 0, nil\n\t}\n\treturn s.finalize(1)", false},
-			{"마지막 문장이 finalize 아님", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\treturn 1, nil", false},
+			{"정상", "var r int\n\tvar e error\n\tif s.engineErr != nil {\n\t\te = s.engineErr\n\t} else {\n\t\tr, e = s.finalize(1)\n\t}\n\treturn r, e", true},
+			{"조기 return 추가", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\treturn s.finalize(1)", false},
+			{"finalize 우회", "var e error\n\tif s.engineErr != nil {\n\t\te = s.engineErr\n\t}\n\treturn 1, e", false},
+			{"engineErr 분기 삭제", "r, e := s.finalize(1)\n\treturn r, e", false},
 		}
 		for _, c := range cases {
 			src := head + "func (s *S) Exchange() (int, error) {\n\t" + c.body + "\n}\n"
@@ -958,8 +958,9 @@ func findErrorStringParsing(path string) ([]string, error) {
 	return out, nil
 }
 
-// checkExchangeSESE 는 path 파일의 (recv).Exchange 가 계획 023 D-03 구조를 만족하는지 검사한다.
-// 조기 반환 1개를 허용하는 이유: engineErr(조립 실패) 시 finalize 없이 Fail-Closed 로 즉시 거부해야 하기 때문이다.
+// checkExchangeSESE 는 path 파일의 (recv).Exchange 가 단일 출구 구조를 만족하는지 검사한다.
+// return 은 정확히 1개이며 함수 마지막 문장이고, `if x.engineErr != nil` 조립 실패 분기와 x.finalize(...) 호출이 있어야 한다.
+// (계획 023 D-03 은 조기 반환 1개를 허용했으나, 프로덕션을 단일 return 으로 고친 뒤 Execute 와 같은 기준으로 강화했다.)
 func checkExchangeSESE(path string) error {
 	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
@@ -975,58 +976,38 @@ func checkExchangeSESE(path string) error {
 	if fn == nil {
 		return fmt.Errorf("Exchange method not found in %s", path)
 	}
-	var rets []*ast.ReturnStmt
+	var rets int
+	var hasFinalize, hasGuard bool
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if _, ok := n.(*ast.FuncLit); ok {
+		switch v := n.(type) {
+		case *ast.FuncLit:
 			return false
-		}
-		if r, ok := n.(*ast.ReturnStmt); ok {
-			rets = append(rets, r)
+		case *ast.ReturnStmt:
+			rets++
+		case *ast.CallExpr:
+			if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "finalize" {
+				hasFinalize = true
+			}
+		case *ast.IfStmt:
+			if bin, ok := v.Cond.(*ast.BinaryExpr); ok && bin.Op == token.NEQ {
+				if sel, ok := bin.X.(*ast.SelectorExpr); ok && sel.Sel.Name == "engineErr" {
+					hasGuard = true
+				}
+			}
 		}
 		return true
 	})
-	if len(rets) != 2 {
-		return fmt.Errorf("Exchange must have exactly 2 return statements, found %d", len(rets))
+	if rets != 1 {
+		return fmt.Errorf("Exchange must have exactly 1 return statement, found %d", rets)
 	}
-	// 마지막 문장은 return <recv>.finalize(...)
-	stmts := fn.Body.List
-	last, ok := stmts[len(stmts)-1].(*ast.ReturnStmt)
-	if !ok || len(last.Results) != 1 {
-		return fmt.Errorf("Exchange last statement must be 'return x.finalize(...)'")
+	if _, ok := fn.Body.List[len(fn.Body.List)-1].(*ast.ReturnStmt); !ok {
+		return fmt.Errorf("Exchange last statement must be the single return")
 	}
-	call, ok := last.Results[0].(*ast.CallExpr)
-	if !ok {
-		return fmt.Errorf("Exchange last return must call finalize")
+	if !hasGuard {
+		return fmt.Errorf("Exchange must keep the 'if x.engineErr != nil' fail-closed branch")
 	}
-	if sel, ok := call.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != "finalize" {
-		return fmt.Errorf("Exchange last return must call finalize")
-	}
-	// 나머지 return 1개는 `if x.engineErr != nil { ... }` 블록 안에 있어야 한다.
-	guarded := false
-	for _, st := range stmts {
-		ifs, ok := st.(*ast.IfStmt)
-		if !ok {
-			continue
-		}
-		bin, ok := ifs.Cond.(*ast.BinaryExpr)
-		if !ok || bin.Op != token.NEQ {
-			continue
-		}
-		sel, ok := bin.X.(*ast.SelectorExpr)
-		if !ok || sel.Sel.Name != "engineErr" {
-			continue
-		}
-		if id, ok := bin.Y.(*ast.Ident); !ok || id.Name != "nil" {
-			continue
-		}
-		for _, inner := range ifs.Body.List {
-			if r, ok := inner.(*ast.ReturnStmt); ok && (r == rets[0] || r == rets[1]) {
-				guarded = true
-			}
-		}
-	}
-	if !guarded {
-		return fmt.Errorf("Exchange early return must be inside 'if x.engineErr != nil' guard")
+	if !hasFinalize {
+		return fmt.Errorf("Exchange must close through x.finalize(...)")
 	}
 	return nil
 }

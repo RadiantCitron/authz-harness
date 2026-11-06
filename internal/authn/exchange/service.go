@@ -157,21 +157,24 @@ func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
 }
 
 // Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
-func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (*ExchangeResult, error) {
+// 출구는 맨 끝 return 하나뿐이다. 조립 실패(engineErr)는 엔진이 없어 감사 마감 대상이 아니므로 Fail-Closed 에러만 담는다.
+func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (res *ExchangeResult, err error) {
 	if s.engineErr != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "exchange pipeline assembly failed (fail-closed)", s.engineErr)
+		err = domain.NewError(domain.ReasonInternalError, "exchange pipeline assembly failed (fail-closed)", s.engineErr)
+	} else {
+		now := s.clock.Now().UTC()
+		traceID := auditCtx.TraceID
+		if traceID == "" {
+			traceID = fmt.Sprintf("trace-%d", now.UnixNano())
+		}
+		actor := auditCtx.Actor
+		if actor == "" {
+			actor = req.ClientID
+		}
+		c := &exchangeCall{ctx: ctx, req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
+		res, err = s.finalize(c, s.engine.Run(ctx, c))
 	}
-	now := s.clock.Now().UTC()
-	traceID := auditCtx.TraceID
-	if traceID == "" {
-		traceID = fmt.Sprintf("trace-%d", now.UnixNano())
-	}
-	actor := auditCtx.Actor
-	if actor == "" {
-		actor = req.ClientID
-	}
-	c := &exchangeCall{ctx: ctx, req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
-	return s.finalize(c, s.engine.Run(ctx, c))
+	return res, err
 }
 
 // finalize 는 단일 마감이다. 거부 감사, AUDIT_LOG_FAILED 승격, 성공 감사를 한 곳에서 처리한다.
