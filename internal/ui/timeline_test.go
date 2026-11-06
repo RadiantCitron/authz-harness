@@ -70,3 +70,17 @@ func TestTimelineFormatter_RenderTimeline(t *testing.T) {
 		t.Errorf("missing Reason in deny event: %s", out)
 	}
 }
+
+// 계획 015 B8: budget.consumed 줄도 타임라인에 오류 없이 보인다.
+func TestTimelineFormatter_ShowsBudgetConsumed(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	events := []audit.Event{
+		{Timestamp: now, TraceID: "tr-b", Step: "pep.budget_consume", Stage: "budget", Actor: "worker-01",
+			Action: "budget.consumed", Resource: "docs/out.txt", Decision: "allow", Reason: "AUTHORIZED", Success: true},
+	}
+	ui.NewTimelineFormatter(&buf).RenderTimeline("tr-b", true, events)
+	if !strings.Contains(buf.String(), "budget.consumed") && !strings.Contains(buf.String(), "pep.budget_consume") {
+		t.Fatalf("타임라인에 budget.consumed 줄이 없음:\n%s", buf.String())
+	}
+}
