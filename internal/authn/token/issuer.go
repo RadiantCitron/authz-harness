@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -100,53 +99,68 @@ func NewService(keyMgr keys.KeyManager, clients ClientRegistry, auditWriter audi
 }
 
 // IssueToken 은 클라이언트 인증 후 RFC 9068 Bearer Access Token을 생성하고 Zone A Ed25519 개인키로 서명한다.
+// 실패는 이 입구에서 token.issue.deny 로 한 곳에서 기록한다(성공 감사 실패는 다시 기록하지 않는다).
 func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domain.AuditContext) (*IssueResult, error) {
+	res, authnStage, err := s.issueToken(req, opts, auditCtx)
+	if err == nil {
+		return res, nil
+	}
+	if s.auditWriter == nil || domain.ReasonFromError(err, "") == domain.ReasonAuditLogFailed {
+		return nil, err
+	}
+	def, step := domain.ReasonInternalError, "token.issue"
+	if authnStage {
+		def, step = domain.ReasonInvalidToken, "token.issue_authn"
+	}
+	reason := domain.ReasonFromError(err, def)
+	traceID := auditCtx.TraceID
+	if traceID == "" {
+		traceID = fmt.Sprintf("trace-%d", s.clock.Now().UnixNano())
+	}
+	actor := auditCtx.Actor
+	if actor == "" {
+		actor = req.ClientID
+	}
+	if aerr := s.auditWriter.Log(audit.Event{
+		Timestamp: s.clock.Now().UTC(),
+		TraceID:   traceID,
+		Step:      step,
+		Actor:     actor,
+		Action:    "token.issue.deny",
+		Decision:  "deny",
+		Reason:    string(reason),
+		Success:   false,
+		Metadata: map[string]interface{}{
+			"client_id": req.ClientID,
+			"error":     err.Error(),
+			"reason":    string(reason),
+		},
+	}); aerr != nil {
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record issue deny audit log", aerr)
+	}
+	return nil, err
+}
+
+// issueToken 은 발급 본문이다. 두 번째 반환값은 실패가 클라이언트 인증 단계였는지 알린다.
+func (s *Service) issueToken(req IssueRequest, opts IssueOptions, auditCtx domain.AuditContext) (*IssueResult, bool, error) {
 	// 1. 클라이언트 인증
 	clientInfo, err := s.clients.AuthenticateClient(req.ClientID, req.ClientSecret)
 	if err != nil {
-		if s.auditWriter != nil {
-			reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
-			traceID := auditCtx.TraceID
-			if traceID == "" {
-				traceID = fmt.Sprintf("trace-%d", s.clock.Now().UnixNano())
-			}
-			actor := auditCtx.Actor
-			if actor == "" {
-				actor = req.ClientID
-			}
-			if aerr := s.auditWriter.Log(audit.Event{
-				Timestamp: s.clock.Now().UTC(),
-				TraceID:   traceID,
-				Step:      "token.issue_authn",
-				Actor:     actor,
-				Action:    "token.issue.deny",
-				Decision:  "deny",
-				Reason:    string(reason),
-				Success:   false,
-				Metadata: map[string]interface{}{
-					"client_id": req.ClientID,
-					"error":     err.Error(),
-					"reason":    string(reason),
-				},
-			}); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record issue deny audit log", aerr)
-			}
-		}
-		return nil, fmt.Errorf("client authentication failed: %w", err)
+		return nil, true, fmt.Errorf("client authentication failed: %w", err)
 	}
 
 	// 2. Subject 위임 권한 검사
 	if strings.TrimSpace(req.Subject) == "" {
-		return nil, errors.New("subject is required")
+		return nil, false, domain.NewError(domain.ReasonInvalidArguments, "subject is required", nil)
 	}
 	if !clientInfo.IsSubjectAllowed(req.Subject) {
-		return nil, domain.NewError(domain.ReasonNoActiveGrant, fmt.Sprintf("client %s is not authorized to request tokens for subject %s", req.ClientID, req.Subject), nil)
+		return nil, false, domain.NewError(domain.ReasonNoActiveGrant, fmt.Sprintf("client %s is not authorized to request tokens for subject %s", req.ClientID, req.Subject), nil)
 	}
 
 	// 3. 서명 키(Zone A Active Key) 획득
 	signingKey, err := s.keyMgr.GetActiveSigningKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get active signing key: %w", err)
+		return nil, false, domain.NewError(domain.ReasonInternalError, "failed to get active signing key", err)
 	}
 
 	// 4. 클레임 구성
@@ -166,7 +180,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 
 	jti, err := generateJTI()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate jti: %w", err)
+		return nil, false, fmt.Errorf("failed to generate jti: %w", err)
 	}
 
 	claims := domain.TokenClaims{
@@ -196,13 +210,13 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	}
 
 	if err := claims.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid token claims: %w", err)
+		return nil, false, fmt.Errorf("invalid token claims: %w", err)
 	}
 
 	// 4-1. 예산 루트(위임 체인 없음)는 원장 필수. 없으면 Fail-Closed 로 발급하지 않는다.
 	registerBudget := claims.Budget != nil && claims.Actor == nil
 	if registerBudget && s.budgets == nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "budget ledger is not configured for budget token issuance", nil)
+		return nil, false, domain.NewError(domain.ReasonInternalError, "budget ledger is not configured for budget token issuance", nil)
 	}
 
 	// 5. 헤더 구성
@@ -222,11 +236,11 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal header: %w", err)
+		return nil, false, fmt.Errorf("failed to marshal header: %w", err)
 	}
 	claimsJSON, err := json.Marshal(claims)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal claims: %w", err)
+		return nil, false, fmt.Errorf("failed to marshal claims: %w", err)
 	}
 
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
@@ -251,7 +265,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	// 5-1. 예산 루트 등록. 실패하면 토큰을 반환하지 않는다.
 	if registerBudget {
 		if err := s.budgets.Init(claims.JWTID, *claims.Budget, claims.ExpiresAt); err != nil {
-			return nil, fmt.Errorf("failed to register budget ledger entry: %w", err)
+			return nil, false, fmt.Errorf("failed to register budget ledger entry: %w", err)
 		}
 	}
 
@@ -288,7 +302,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 			},
 		}
 		if err := s.auditWriter.Log(auditEv); err != nil {
-			return nil, fmt.Errorf("failed to write audit event: %w", err)
+			return nil, false, domain.NewError(domain.ReasonAuditLogFailed, "failed to write audit event", err)
 		}
 	}
 
@@ -296,7 +310,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		TokenString: tokenString,
 		Claims:      claims,
 		KeyID:       header.KeyID,
-	}, nil
+	}, false, nil
 }
 
 func generateJTI() (string, error) {

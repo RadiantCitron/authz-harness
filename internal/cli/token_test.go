@@ -241,8 +241,9 @@ func TestCLI_TokenExchange(t *testing.T) {
 		"--ttl", "30m",
 	}
 	exitCode = runner.Run(context.Background(), exceedArgs)
-	if exitCode != domain.ExitTokenInvalid {
-		t.Fatalf("expected exit 11 for scope exceeded, got %d", exitCode)
+	// 계획 017 D-03·D-05: 교환 거부는 사유별 종료 코드를 따른다(축소 위임 위반은 12).
+	if exitCode != domain.ExitAuthzDenied {
+		t.Fatalf("expected exit 12 for scope exceeded, got %d", exitCode)
 	}
 	if !strings.Contains(out.String(), "DELEGATION_SCOPE_EXCEEDED") {
 		t.Fatalf("expected DELEGATION_SCOPE_EXCEEDED in output, got: %s", out.String())

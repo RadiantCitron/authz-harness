@@ -133,7 +133,7 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 	result, err := r.stack.TokenIssuer.IssueToken(req, opts, auditCtx)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "FAIL: [ISSUE_DENIED] %v\n", err)
-		return domain.ExitTokenInvalid
+		return domain.ExitCodeFromError(err, domain.ExitTokenInvalid)
 	}
 
 	// CLI stdout 출력: 토큰 문자열 및 메타데이터 안내
@@ -230,7 +230,7 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [GATE_1_BLOCKED] %s\n", reason)
 		fmt.Fprintf(r.errOut, "Detail: %v\n", err)
-		return domain.ExitTokenInvalid
+		return domain.ExitCodeFromError(err, domain.ExitTokenInvalid)
 	}
 
 	// authn 단계 통과 파이프라인 시각화
@@ -318,7 +318,7 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [EXCHANGE_DENIED] %s\n", reason)
 		fmt.Fprintf(r.errOut, "Detail: %v\n", err)
-		return domain.ExitTokenInvalid
+		return domain.ExitCodeFromError(err, domain.ExitTokenInvalid)
 	}
 
 	// CLI 표준 위임 성공 뷰 출력
