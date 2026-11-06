@@ -88,70 +88,63 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 	})
 
-	// TC-060-03: internal/ 전체 문자열 에러 파싱 0% (strings.Contains(err.Error(), ...))
-	t.Run("TC-060-03: internal/ 전체 코드의 문자열 에러 파싱(strings.Contains) 0% 검증", func(t *testing.T) {
-		internalDir := filepath.Join(root, "internal")
-		fset := token.NewFileSet()
-
+	// TC-060-03: internal/ 전체 문자열 에러 파싱 0% (strings.Contains·HasPrefix 등 + err.Error())
+	// 계획 023 D-04: 첫 인자가 .Error() 호출이거나, 같은 함수 안에서 .Error() 결과를 담은 지역 변수인 경우를 잡는다.
+	// 한계: 함수 경계(인자·반환·필드)를 넘는 추적은 하지 않는다.
+	t.Run("TC-060-03: internal/ 전체 코드의 문자열 에러 파싱(strings.Contains 등) 0% 검증", func(t *testing.T) {
 		var violations []string
-
-		err := filepath.WalkDir(internalDir, func(path string, d fs.DirEntry, err error) error {
+		err := filepath.WalkDir(filepath.Join(root, "internal"), func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() {
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil
 			}
-			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				// 테스트 코드가 아닌 프로덕션 코드 대상
-				return nil
+			vs, perr := findErrorStringParsing(path)
+			if perr != nil {
+				return perr
 			}
-
-			fileNode, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return err
+			for _, v := range vs {
+				rel, _ := filepath.Rel(root, path)
+				violations = append(violations, rel+":"+v)
 			}
-
-			ast.Inspect(fileNode, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-
-				// strings.Contains(...) 호출 감지
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkgIdent, ok := sel.X.(*ast.Ident)
-				if !ok || pkgIdent.Name != "strings" || sel.Sel.Name != "Contains" {
-					return true
-				}
-
-				// 첫 번째 인자가 .Error() 호출인지 확인
-				if len(call.Args) > 0 {
-					if innerCall, ok := call.Args[0].(*ast.CallExpr); ok {
-						if innerSel, ok := innerCall.Fun.(*ast.SelectorExpr); ok {
-							if innerSel.Sel.Name == "Error" {
-								pos := fset.Position(call.Pos())
-								rel, _ := filepath.Rel(root, pos.Filename)
-								violations = append(violations, rel+":"+pos.String())
-							}
-						}
-					}
-				}
-				return true
-			})
-
 			return nil
 		})
-
 		if err != nil {
 			t.Fatalf("failed to walk internal dir: %v", err)
 		}
-
 		if len(violations) > 0 {
-			t.Fatalf("violation of AP-01: found %d strings.Contains(err.Error(), ...) occurrences:\n%s", len(violations), strings.Join(violations, "\n"))
+			t.Fatalf("violation of AP-01: found %d string-based error parsing occurrences:\n%s", len(violations), strings.Join(violations, "\n"))
+		}
+	})
+
+	// TC-060-03-M: 문자열 오류 파싱 가드 변이·오탐 시험
+	t.Run("TC-060-03-M: 문자열 오류 파싱 가드 변이·오탐 검출", func(t *testing.T) {
+		cases := []struct {
+			name string
+			body string
+			want int
+		}{
+			{"Contains 직접", `_ = strings.Contains(err.Error(), "x")`, 1},
+			{"HasPrefix 직접", `_ = strings.HasPrefix(err.Error(), "x")`, 1},
+			{"EqualFold 직접", `_ = strings.EqualFold(err.Error(), "x")`, 1},
+			{"변수 우회", "msg := err.Error()\n\t_ = strings.Contains(msg, \"x\")", 1},
+			{"var 선언 우회", "var msg = err.Error()\n\t_ = strings.Index(msg, \"x\")", 1},
+			{"메시지 조립만(오탐 금지)", "msg := err.Error()\n\t_ = fmt.Sprintf(\"%s\", msg)\n\t_ = strings.Contains(\"a\", \"b\")", 0},
+		}
+		for _, c := range cases {
+			src := "package x\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\nfunc f(err error) {\n\t" + c.body + "\n\t_ = fmt.Sprint()\n}\n"
+			p := filepath.Join(t.TempDir(), "x.go")
+			if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			got, err := findErrorStringParsing(p)
+			if err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if len(got) != c.want {
+				t.Errorf("%s: want %d violations, got %v", c.name, c.want, got)
+			}
 		}
 	})
 
@@ -855,4 +848,75 @@ func findIgnoredAuditLog(t *testing.T, dir string) []string {
 		t.Fatalf("walk %s: %v", dir, err)
 	}
 	return out
+}
+
+// findErrorStringParsing 은 strings.{Contains,ContainsAny,HasPrefix,HasSuffix,Index,EqualFold} 의 첫 인자가
+// .Error() 호출이거나 같은 함수 안에서 .Error() 결과를 담은 지역 변수인 호출 위치를 반환한다 (계획 023 D-04).
+func findErrorStringParsing(path string) ([]string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	targets := map[string]bool{"Contains": true, "ContainsAny": true, "HasPrefix": true, "HasSuffix": true, "Index": true, "EqualFold": true}
+	isErrorCall := func(e ast.Expr) bool {
+		c, ok := e.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		s, ok := c.Fun.(*ast.SelectorExpr)
+		return ok && s.Sel.Name == "Error" && len(c.Args) == 0
+	}
+	var out []string
+	for _, decl := range f.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		errVars := map[string]bool{}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.AssignStmt:
+				if len(v.Lhs) == len(v.Rhs) {
+					for i, r := range v.Rhs {
+						if id, ok := v.Lhs[i].(*ast.Ident); ok && isErrorCall(r) {
+							errVars[id.Name] = true
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				if len(v.Names) == len(v.Values) {
+					for i, r := range v.Values {
+						if isErrorCall(r) {
+							errVars[v.Names[i].Name] = true
+						}
+					}
+				}
+			}
+			return true
+		})
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) == 0 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "strings" || !targets[sel.Sel.Name] {
+				return true
+			}
+			hit := isErrorCall(call.Args[0])
+			if id, ok := call.Args[0].(*ast.Ident); ok && errVars[id.Name] {
+				hit = true
+			}
+			if hit {
+				out = append(out, fset.Position(call.Pos()).String())
+			}
+			return true
+		})
+	}
+	return out, nil
 }
