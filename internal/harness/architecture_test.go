@@ -190,6 +190,43 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 	})
 
+	// TC-060-04-E: exchange.ExchangeService.Exchange 의 단일 출구(finalize) 정적 구조 검증 (계획 023 D-03)
+	// return 은 정확히 2개: engineErr 가드 블록 안 Fail-Closed 조기 반환 1개 + 마지막 문장 `return x.finalize(...)`.
+	t.Run("TC-060-04-E: exchange.Exchange 단일 출구(finalize) 정적 구조 검증", func(t *testing.T) {
+		if err := checkExchangeSESE(filepath.Join(root, "internal", "authn", "exchange", "service.go")); err != nil {
+			t.Errorf("violation of SESE: %v", err)
+		}
+	})
+
+	// TC-060-04-M: Exchange SESE 가드 변이 시험 (세 번째 return, 가드 밖 조기 반환, 마지막 문장 비-finalize)
+	t.Run("TC-060-04-M: Exchange SESE 가드 변이 검출", func(t *testing.T) {
+		const head = "package x\n\ntype S struct{ engineErr error }\n\nfunc (s *S) finalize(a int) (int, error) { return a, nil }\n\n"
+		cases := []struct {
+			name string
+			body string
+			ok   bool
+		}{
+			{"정상", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\treturn s.finalize(1)", true},
+			{"세 번째 return", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\tif a := 1; a > 2 {\n\t\treturn 0, nil\n\t}\n\treturn s.finalize(1)", false},
+			{"조기 반환이 가드 밖", "if true {\n\t\treturn 0, nil\n\t}\n\treturn s.finalize(1)", false},
+			{"마지막 문장이 finalize 아님", "if s.engineErr != nil {\n\t\treturn 0, s.engineErr\n\t}\n\treturn 1, nil", false},
+		}
+		for _, c := range cases {
+			src := head + "func (s *S) Exchange() (int, error) {\n\t" + c.body + "\n}\n"
+			p := filepath.Join(t.TempDir(), "x.go")
+			if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := checkExchangeSESE(p)
+			if c.ok && err != nil {
+				t.Errorf("%s: false positive: %v", c.name, err)
+			}
+			if !c.ok && err == nil {
+				t.Errorf("%s: mutation not detected", c.name)
+			}
+		}
+	})
+
 	// TC-080-01: internal/ 전체 프로덕션 코드의 `_ = <expr>.Log(` 감사 오류 무시 0건 검증
 	t.Run("TC-080-01: internal 전체 비즈니스 코드의 감사 에러 무시(_ = ...Log) 0건 검증", func(t *testing.T) {
 		if v := findIgnoredAuditLog(t, filepath.Join(root, "internal")); len(v) > 0 {
@@ -919,4 +956,77 @@ func findErrorStringParsing(path string) ([]string, error) {
 		})
 	}
 	return out, nil
+}
+
+// checkExchangeSESE 는 path 파일의 (recv).Exchange 가 계획 023 D-03 구조를 만족하는지 검사한다.
+// 조기 반환 1개를 허용하는 이유: engineErr(조립 실패) 시 finalize 없이 Fail-Closed 로 즉시 거부해야 하기 때문이다.
+func checkExchangeSESE(path string) error {
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return err
+	}
+	var fn *ast.FuncDecl
+	for _, d := range f.Decls {
+		if fd, ok := d.(*ast.FuncDecl); ok && fd.Name.Name == "Exchange" && fd.Recv != nil && fd.Body != nil {
+			fn = fd
+			break
+		}
+	}
+	if fn == nil {
+		return fmt.Errorf("Exchange method not found in %s", path)
+	}
+	var rets []*ast.ReturnStmt
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
+		}
+		if r, ok := n.(*ast.ReturnStmt); ok {
+			rets = append(rets, r)
+		}
+		return true
+	})
+	if len(rets) != 2 {
+		return fmt.Errorf("Exchange must have exactly 2 return statements, found %d", len(rets))
+	}
+	// 마지막 문장은 return <recv>.finalize(...)
+	stmts := fn.Body.List
+	last, ok := stmts[len(stmts)-1].(*ast.ReturnStmt)
+	if !ok || len(last.Results) != 1 {
+		return fmt.Errorf("Exchange last statement must be 'return x.finalize(...)'")
+	}
+	call, ok := last.Results[0].(*ast.CallExpr)
+	if !ok {
+		return fmt.Errorf("Exchange last return must call finalize")
+	}
+	if sel, ok := call.Fun.(*ast.SelectorExpr); !ok || sel.Sel.Name != "finalize" {
+		return fmt.Errorf("Exchange last return must call finalize")
+	}
+	// 나머지 return 1개는 `if x.engineErr != nil { ... }` 블록 안에 있어야 한다.
+	guarded := false
+	for _, st := range stmts {
+		ifs, ok := st.(*ast.IfStmt)
+		if !ok {
+			continue
+		}
+		bin, ok := ifs.Cond.(*ast.BinaryExpr)
+		if !ok || bin.Op != token.NEQ {
+			continue
+		}
+		sel, ok := bin.X.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "engineErr" {
+			continue
+		}
+		if id, ok := bin.Y.(*ast.Ident); !ok || id.Name != "nil" {
+			continue
+		}
+		for _, inner := range ifs.Body.List {
+			if r, ok := inner.(*ast.ReturnStmt); ok && (r == rets[0] || r == rets[1]) {
+				guarded = true
+			}
+		}
+	}
+	if !guarded {
+		return fmt.Errorf("Exchange early return must be inside 'if x.engineErr != nil' guard")
+	}
+	return nil
 }
