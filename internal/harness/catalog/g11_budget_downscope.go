@@ -286,14 +286,6 @@ func newG11E2E52() harness.Scenario {
 	return s
 }
 
-// offsetClock 은 기준 시계에서 일정 시간 앞선 시각을 돌려주는 시계다 (E2E-53 의 "T + 120초" 스택용).
-type offsetClock struct {
-	base   domain.Clock
-	offset time.Duration
-}
-
-func (c offsetClock) Now() time.Time { return c.base.Now().Add(c.offset) }
-
 // ----------------------------------------------------------------------------
 // E2E-53: 자식 만료 후 예약 자동 회수 및 재위임
 // ----------------------------------------------------------------------------
@@ -344,7 +336,7 @@ func newG11E2E53() harness.Scenario {
 			later, err := app.BuildStack(app.AppConfig{
 				StatePath: env.StatePath, PrivKeyPath: env.PrivKeyPath, PubJWKSPath: env.PubJWKSPath,
 				ReplayPath: env.ReplayPath, AuditPath: env.AuditPath, WorkspaceDir: env.WorkspaceDir,
-				Clock: offsetClock{base: env.MockClock, offset: 120 * time.Second},
+				Clock: domain.NewOffsetClock(env.MockClock, 120*time.Second),
 			})
 			if err != nil {
 				return domain.ExitInternalError, fmt.Errorf("build later stack: %w", err)

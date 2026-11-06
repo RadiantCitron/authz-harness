@@ -8,29 +8,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
 
-// getRepoRoot 는 runtime.Caller(0)을 기준으로 상위로 거슬러 올라가 go.mod가 있는 최상위 레포지토리 루트 절대경로를 반환한다.
+// getRepoRoot 는 go.mod 가 있는 레포지토리 루트 절대경로를 반환한다(탐색은 binary.go 의 locateRepoRoot 와 같다).
 func getRepoRoot(t *testing.T) string {
 	t.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to get caller info from runtime")
+	root, err := locateRepoRoot()
+	if err != nil {
+		t.Fatal(err)
 	}
-	dir := filepath.Dir(filename)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("failed to locate repo root containing go.mod")
-		}
-		dir = parent
-	}
+	return root
 }
 
 // TestArchitectureGuardrails 는 07번 로드맵의 12대 안티패턴 재발을 영구 방지하는

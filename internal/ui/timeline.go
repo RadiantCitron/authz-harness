@@ -8,16 +8,6 @@ import (
 	"authz-harness/internal/audit"
 )
 
-// ProcessNode 는 프로세스 계보 트리의 단일 노드를 나타낸다.
-type ProcessNode struct {
-	PID      int
-	Subject  string
-	Role     string
-	Caller   string
-	Depth    int
-	Children []*ProcessNode
-}
-
 // TimelineFormatter 는 단일 TraceID에 속한 감사 이벤트들을 프로세스 계보 및 시계열로 렌더링한다.
 type TimelineFormatter struct {
 	out io.Writer

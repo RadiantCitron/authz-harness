@@ -20,13 +20,3 @@ func NewFormatter(out io.Writer) *Formatter {
 func (f *Formatter) PrintBanner(version string) {
 	fmt.Fprintf(f.out, "authz-harness v%s — Authorization & Delegation Test Harness\n", version)
 }
-
-// PrintPass 는 성공(PASS) 판정 시나리오 결과를 규격에 맞게 출력한다.
-func (f *Formatter) PrintPass(scenarioID, description string) {
-	fmt.Fprintf(f.out, "PASS: [%s] %s\n", scenarioID, description)
-}
-
-// PrintFail 은 실패(FAIL) 판정 시나리오 결과를 규격에 맞게 출력한다.
-func (f *Formatter) PrintFail(scenarioID, reason string) {
-	fmt.Fprintf(f.out, "FAIL: [%s] %s\n", scenarioID, reason)
-}
