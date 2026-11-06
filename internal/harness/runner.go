@@ -141,6 +141,10 @@ func (r *DefaultRunner) Register(s Scenario) error {
 		return fmt.Errorf("harness runner: scenario ID cannot be empty")
 	}
 
+	if meta.Expected.Audit.ExpectedStage == "" {
+		return fmt.Errorf("harness runner: scenario %q has no expected audit stage", meta.ID)
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -15,11 +15,11 @@ import (
 
 // G7: 관측성, 무결성 및 Fail-Closed 감사 (E2E-28 ~ E2E-30)
 func g7Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e28Scenario{},
 		&e2e29Scenario{},
 		&e2e30Scenario{},
-	}
+	})
 }
 
 // E2E-28: trace_id 누락 요청 차단

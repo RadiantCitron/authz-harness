@@ -21,7 +21,7 @@ const g9Target = "data/g9-target.txt"
 
 // G9: 서브프로세스 자원·수명 통제 검증 (E2E-40 ~ E2E-44)
 func g9Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&g9FaultScenario{id: "E2E-40", name: "멈춘 워커 시간 초과 강제 종료", mode: "hang",
 			limits: orchestrator.Limits{Timeout: 300 * time.Millisecond},
 			reason: domain.ReasonResourceTimeout, term: orchestrator.TermTimedOut},
@@ -33,7 +33,7 @@ func g9Scenarios() []harness.Scenario {
 			reason: domain.ReasonResourceOutputLimit, term: orchestrator.TermOutputExceeded, checkOutputCap: 16 * 1024},
 		&e2e43Scenario{},
 		&e2e44Scenario{},
-	}
+	})
 }
 
 func g9LimitExpectation(reason domain.Reason) harness.ExpectedAssertion {

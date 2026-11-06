@@ -17,9 +17,9 @@ import (
 // 승인은 (주체, 액션, 리소스, jti, 선택적 인자 지문)에 묶인 1회용·TTL 한정이며, Grant 회수·Epoch 가 승인보다 우선함을 증명한다.
 // 감사 기대는 ExpectedAction 을 pep.deny/pep.allow 로 명시해 서브프로세스 모드의 orchestrator.collect 이벤트를 건너뛴다.
 func g14Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		newG14E2E67(), newG14E2E68(), newG14E2E69(), newG14E2E70(), newG14E2E71(), newG14E2E72(), newG14E2E73(),
-	}
+	})
 }
 
 const (

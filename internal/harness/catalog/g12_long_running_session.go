@@ -19,9 +19,9 @@ import (
 // 중간 단계 기대값이 어긋나면 Invariantf 로 시나리오를 FAIL 시킨다(실행 결과에 기대값을 맞추지 않는다).
 // 시간은 SessionDriver.AdvanceClock 으로만 흐르며 실제 대기는 하지 않는다.
 func g12Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		newG12E2E55(), newG12E2E56(), newG12E2E57(), newG12E2E58(), newG12E2E59(), newG12E2E60(),
-	}
+	})
 }
 
 const g12Scope = "file:read file:write"

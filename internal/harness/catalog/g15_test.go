@@ -11,7 +11,7 @@ import (
 func runG15(t *testing.T, sc harness.Scenario) harness.ScenarioResult {
 	t.Helper()
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
-	if err := runner.Register(sc); err != nil {
+	if err := runner.Register(stagedScenario{sc}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)

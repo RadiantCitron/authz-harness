@@ -354,6 +354,7 @@ func TestHarnessRunner_LifecycleSmoke(t *testing.T) {
 			Description: "Verify Setup -> Execute -> QuadAssert -> Teardown",
 			Expected: ExpectedAssertion{
 				ExitCode: domain.ExitSuccess,
+				Audit:    AuditExpectation{ExpectedStage: NoStageRecord},
 				File: FileExpectation{
 					RelPath:         "hello.txt",
 					ExpectExist:     true,
@@ -401,6 +402,7 @@ func TestHarnessRunner_NoCrossContamination(t *testing.T) {
 			ID: "E2E-SC-A",
 			Expected: ExpectedAssertion{
 				ExitCode: domain.ExitSuccess,
+				Audit:    AuditExpectation{ExpectedStage: NoStageRecord},
 			},
 		},
 		execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
@@ -417,6 +419,7 @@ func TestHarnessRunner_NoCrossContamination(t *testing.T) {
 			ID: "E2E-SC-B",
 			Expected: ExpectedAssertion{
 				ExitCode: domain.ExitSuccess,
+				Audit:    AuditExpectation{ExpectedStage: NoStageRecord},
 				File: FileExpectation{
 					RelPath:            "contamination.txt",
 					ExpectZeroMutation: true,
@@ -589,7 +592,7 @@ func TestRunner_InvariantViolationJudgement(t *testing.T) {
 			sc := &dummyScenario{
 				meta: ScenarioMetadata{
 					ID: "E2E-TEST-INV", Group: "G0", Name: "invariant",
-					Expected: ExpectedAssertion{ExitCode: domain.ExitAuthzDenied},
+					Expected: ExpectedAssertion{ExitCode: domain.ExitAuthzDenied, Audit: AuditExpectation{ExpectedStage: NoStageRecord}},
 				},
 				execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
 					return tc.code, tc.err
@@ -626,7 +629,8 @@ func (s stubProvider) GetBinaryPath() (string, error) { return s.path, nil }
 func TestRunner_RequiresSubprocessSkippedInProc(t *testing.T) {
 	calls := 0
 	sc := &dummyScenario{
-		meta:    ScenarioMetadata{ID: "E2E-SUB", Group: "G9", RequiresSubprocess: true},
+		meta:    ScenarioMetadata{ID: "E2E-SUB", Group: "G9", RequiresSubprocess: true,
+			Expected: ExpectedAssertion{Audit: AuditExpectation{ExpectedStage: NoStageRecord}}},
 		setupFn: func(ctx context.Context, env *SandboxEnvironment) error { calls++; return nil },
 		execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
 			calls++
@@ -647,7 +651,7 @@ func TestRunner_InjectsFaultWorkerPath(t *testing.T) {
 	mk := func(id string, req bool, dst *string) *dummyScenario {
 		return &dummyScenario{
 			meta: ScenarioMetadata{ID: id, Group: "G9", RequiresSubprocess: req,
-				Expected: ExpectedAssertion{ExitCode: domain.ExitSuccess}},
+				Expected: ExpectedAssertion{ExitCode: domain.ExitSuccess, Audit: AuditExpectation{ExpectedStage: NoStageRecord}}},
 			execFn: func(ctx context.Context, env *SandboxEnvironment) (domain.ExitCode, error) {
 				*dst = env.FaultWorkerPath
 				return domain.ExitSuccess, nil

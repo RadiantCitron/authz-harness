@@ -17,7 +17,7 @@ import (
 
 // G5: RFC 8693 위임 및 PDP 인가 정책 (E2E-19 ~ E2E-24, E2E-31 ~ E2E-32)
 func g5Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e19Scenario{},
 		&e2e20Scenario{},
 		&e2e21Scenario{},
@@ -26,7 +26,7 @@ func g5Scenarios() []harness.Scenario {
 		&e2e24Scenario{},
 		&e2e31Scenario{},
 		&e2e32Scenario{},
-	}
+	})
 }
 
 // E2E-19: 팀장 Scope 초과 위임 시도 거부

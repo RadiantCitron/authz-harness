@@ -13,13 +13,13 @@ import (
 
 // G4: 클레임 바인딩, 시간 유효성 및 Replay 공격 방어 (E2E-14 ~ E2E-18)
 func g4Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e14Scenario{},
 		&e2e15Scenario{},
 		&e2e16Scenario{},
 		&e2e17Scenario{},
 		&e2e18Scenario{},
-	}
+	})
 }
 
 // E2E-14: 만료된 토큰 즉시 거부

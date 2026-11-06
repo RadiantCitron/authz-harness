@@ -21,7 +21,7 @@ import (
 
 // G13: 감사 확장 및 관측성 포트 (E2E-61 ~ E2E-66)
 func g13Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		newG13Tamper("E2E-61", "꼬리 절단 적발", "체인은 유효하지만 서명 체크포인트보다 기록이 짧아진 것을 적발한다.",
 			"AuditTailTruncation", "마지막 감사 줄을 잘라 내도 해시 체인은 유효하지만, 서명 체크포인트가 절단을 적발했습니다.", g13Truncate),
 		newG13Tamper("E2E-62", "전체 재작성 적발", "공격자가 해시를 모두 재계산해 체인이 유효해도 서명 체크포인트가 재작성을 적발한다.",
@@ -31,7 +31,7 @@ func g13Scenarios() []harness.Scenario {
 		&g13Payload{},
 		&g13PanicObs{},
 		&g13Mixed{},
-	}
+	})
 }
 
 func g13Paths(env *harness.SandboxEnvironment) (priv, pub, ckpt string) {

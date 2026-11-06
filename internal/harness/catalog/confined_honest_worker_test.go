@@ -37,7 +37,7 @@ func (s *confinedHonestScenario) Metadata() harness.ScenarioMetadata {
 	return harness.ScenarioMetadata{
 		ID: "T-055-04", Group: "T", Name: "격리 하 정직 워커", AttackClass: "none",
 		RequiresSubprocess: true, RequiresConfinement: true,
-		Expected: harness.ExpectedAssertion{ExitCode: domain.ExitSuccess},
+		Expected: harness.ExpectedAssertion{ExitCode: domain.ExitSuccess, Audit: harness.AuditExpectation{ExpectedStage: harness.NoStageRecord}},
 	}
 }
 

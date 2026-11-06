@@ -28,9 +28,9 @@ import (
 // 표기 우회·리다이렉트·인자 주입·자원 폭주·PEP 우회가 막힘을 증명한다.
 // 판정은 종료 코드 + 감사 이벤트 + 부모가 관찰한 사실(서버 요청 수·리스너 accept 수·출력)로만 내린다.
 func g15Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		newG15E2E74(), newG15E2E75(), newG15E2E76(), newG15E2E77(), newG15E2E78(), newG15E2E79(),
-	}
+	})
 }
 
 const g15Subject = "worker-01"

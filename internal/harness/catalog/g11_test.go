@@ -32,7 +32,7 @@ func TestG11(t *testing.T) {
 // E2E-52 는 inproc 모드에서 Skipped 이고 실패가 아니다.
 func TestG11_E2E52SkippedInProc(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
-	_ = runner.Register(newG11E2E52())
+	_ = runner.Register(stagedScenario{newG11E2E52()})
 	res, err := runner.RunScenario(context.Background(), "E2E-52")
 	if err != nil || !res.Skipped {
 		t.Fatalf("skipped=%v err=%v", res.Skipped, err)
@@ -42,7 +42,7 @@ func TestG11_E2E52SkippedInProc(t *testing.T) {
 // 변이 검증: 기대 종료 코드를 0 으로 바꾸면 FAIL 이어야 한다 (동어반복 판정 방지).
 func TestG11_MutationExpectedExitCodeFails(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
-	_ = runner.Register(mutatedExpectation{Scenario: newG11E2E50(), code: 0})
+	_ = runner.Register(mutatedExpectation{Scenario: stagedScenario{newG11E2E50()}, code: 0})
 	res, err := runner.RunScenario(context.Background(), "E2E-50")
 	if err != nil {
 		t.Fatal(err)

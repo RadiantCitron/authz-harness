@@ -314,7 +314,7 @@ func TestG9_MutationLivePIDFailsByInvariant(t *testing.T) {
 		reason: domain.ReasonResourceTimeout, term: orchestrator.TermTimedOut, checkGrandchild: true,
 		pidOverride: func(int) int { return os.Getpid() }}
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))
-	_ = runner.Register(sc)
+	_ = runner.Register(stagedScenario{sc})
 	res, err := runner.RunScenario(context.Background(), "E2E-41")
 	if err != nil {
 		t.Fatal(err)
@@ -373,7 +373,7 @@ func g10RunMutant(t *testing.T, sc *g10Scenario) harness.ScenarioResult {
 	if !confinement.Platform().Available() {
 		t.Skip("confinement unavailable")
 	}
-	_ = runner.Register(sc)
+	_ = runner.Register(stagedScenario{sc})
 	res, err := runner.RunScenario(context.Background(), sc.id)
 	if err != nil {
 		t.Fatal(err)
@@ -410,7 +410,7 @@ func TestG10_MutationControlWithConfinementFails(t *testing.T) {
 func TestG10_SkippedWhenProbeFalse(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithConfinementProbe(func() bool { return false }))
 	for _, sc := range g10Scenarios() {
-		_ = runner.Register(sc)
+		_ = runner.Register(stagedScenario{sc})
 	}
 	for _, sc := range g10Scenarios() {
 		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)
@@ -424,7 +424,7 @@ func TestG10_SkippedWhenProbeFalse(t *testing.T) {
 func TestG10_SkippedInProc(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
 	for _, sc := range g10Scenarios() {
-		_ = runner.Register(sc)
+		_ = runner.Register(stagedScenario{sc})
 	}
 	for _, sc := range g10Scenarios() {
 		res, err := runner.RunScenario(context.Background(), sc.Metadata().ID)

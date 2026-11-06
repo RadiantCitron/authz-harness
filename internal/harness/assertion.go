@@ -28,6 +28,7 @@ type AuditExpectation struct {
 	ExpectedDecision string          // 기대 판정 ("allow", "deny", "")
 	ExpectedReason   domain.Reason   // 기대 사유 코드 (예: domain.ReasonTokenExpired)
 	ExpectedTraceID  string          // 단일 체인 trace_id 기대값
+	ExpectedStage    domain.Stage    // 매칭한 감사 기록의 기대 단계. 단계 기록이 없어야 하면 NoStageRecord
 }
 
 // HashChainExpectation 은 감사 해시 체인 및 데이터 무결성 검증 명세다.
@@ -54,6 +55,7 @@ type AssertionResult struct {
 	AuditPassed         bool            // 3. 감사 로그 사유 검증 결과
 	AuditActualReason   domain.Reason   // 실제 기록된 사유 코드
 	AuditActualDecision string          // 실제 기록된 판정
+	AuditActualStage    domain.Stage    // 매칭한 감사 기록의 실제 단계(없으면 NoStageRecord)
 	HashChainPassed     bool            // 4. 해시 체인 무결성 검증 결과
 	FailureReasons      []string        // 실패 사유 목록
 }
@@ -165,6 +167,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 			// 가장 최근 또는 일치하는 유의미한 결정/사유 이벤트 탐색 (역순)
 			var matchedDecision string
 			var matchedReason domain.Reason
+			var matchedStage domain.Stage
 			found := false
 
 			for i := len(events) - 1; i >= 0; i-- {
@@ -194,6 +197,7 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 				if evDecision != "" || evReason != "" {
 					matchedDecision = evDecision
 					matchedReason = domain.Reason(evReason)
+					matchedStage = stageOf(ev)
 					found = true
 					break
 				}
@@ -217,7 +221,29 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 					res.Passed = false
 					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit reason mismatch: expected %q, got %q", exp.Audit.ExpectedReason, matchedReason))
 				}
+				res.AuditActualStage = matchedStage
+				if exp.Audit.ExpectedStage != "" && matchedStage != exp.Audit.ExpectedStage {
+					res.AuditPassed = false
+					res.Passed = false
+					res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit stage mismatch: expected %q, got %q", exp.Audit.ExpectedStage, matchedStage))
+				}
 			}
+		}
+	}
+
+	// 3-1. 매칭할 감사 기록을 요구하지 않는 시나리오: 감사 전체에 단계 기록이 없어야 NoStageRecord 로 합격한다.
+	if !(exp.Audit.RequireEvent || exp.Audit.ExpectedDecision != "" || exp.Audit.ExpectedReason != "") {
+		res.AuditActualStage = NoStageRecord
+		for _, ev := range events {
+			if ev.Stage != "" {
+				res.AuditActualStage = domain.Stage(ev.Stage)
+				break
+			}
+		}
+		if exp.Audit.ExpectedStage != "" && res.AuditActualStage != exp.Audit.ExpectedStage {
+			res.AuditPassed = false
+			res.Passed = false
+			res.FailureReasons = append(res.FailureReasons, fmt.Sprintf("audit stage mismatch: expected %q, got %q", exp.Audit.ExpectedStage, res.AuditActualStage))
 		}
 	}
 
@@ -299,6 +325,18 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 	}
 
 	return res
+}
+
+// NoStageRecord 는 매칭한 감사 기록에 단계가 적혀 있지 않아야 한다는 판정기의 명시값이다.
+// 도메인 단계가 아니므로 domain 에 두지 않는다.
+const NoStageRecord domain.Stage = "no_stage_record"
+
+// stageOf 는 감사 이벤트의 단계를 읽는다. 비어 있으면 건너뛰지 않고 NoStageRecord 로 대조한다.
+func stageOf(ev audit.Event) domain.Stage {
+	if ev.Stage == "" {
+		return NoStageRecord
+	}
+	return domain.Stage(ev.Stage)
 }
 
 // computeEventHash 는 이벤트와 이전 해시를 바탕으로 정규화된 SHA-256 해시를 계산한다.

@@ -11,11 +11,11 @@ import (
 
 // G2: 워크로드 인증 (AuthN) 거부 (E2E-04 ~ E2E-06)
 func g2Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e04Scenario{},
 		&e2e05Scenario{},
 		&e2e06Scenario{},
-	}
+	})
 }
 
 // E2E-04: 미등록 클라이언트 토큰 요청 거부

@@ -22,9 +22,9 @@ import (
 //   - E2E-50: 자식 B(4)는 루트 클레임(5) 이하라 정적 검사를 통과하고, 루트 잔여(3)를 넘어 원장 검사에서만 막힌다.
 //   - E2E-51: MaxCalls 를 넉넉히(5) 두어 3회차 거부 원인이 쓰기 바이트뿐이 되게 한다.
 func g11Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		newG11E2E50(), newG11E2E51(), newG11E2E52(), newG11E2E53(), newG11E2E54(),
-	}
+	})
 }
 
 // g11Scenario 는 시나리오 5건이 공유하는 얇은 골격이다.

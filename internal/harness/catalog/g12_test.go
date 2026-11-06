@@ -45,7 +45,7 @@ func TestG12_MutationNoBumpFails(t *testing.T) {
 	}
 	_ = orig
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
-	_ = runner.Register(sc)
+	_ = runner.Register(stagedScenario{sc})
 	res, err := runner.RunScenario(context.Background(), "E2E-56")
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestG12_MutationShortAdvanceFails(t *testing.T) {
 		return 11, nil
 	}
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()), harness.WithExecutionMode(harness.ModeInProc))
-	_ = runner.Register(sc)
+	_ = runner.Register(stagedScenario{sc})
 	res, err := runner.RunScenario(context.Background(), "E2E-60")
 	if err != nil {
 		t.Fatal(err)

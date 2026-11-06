@@ -15,11 +15,11 @@ import (
 
 // G6: Workspace Jail 파일 격리 및 경로 순회 탈출 방어 (E2E-25 ~ E2E-27)
 func g6Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e25Scenario{},
 		&e2e26Scenario{},
 		&e2e27Scenario{},
-	}
+	})
 }
 
 // E2E-25: 상대 경로 탈출(../../etc/passwd) 차단

@@ -17,7 +17,7 @@ import (
 
 // G8: MCP/Tool-Call 보안 게이트웨이 어댑터 검증 (E2E-33 ~ E2E-39)
 func g8Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e33Scenario{},
 		&e2e34Scenario{},
 		&e2e35Scenario{},
@@ -25,7 +25,7 @@ func g8Scenarios() []harness.Scenario {
 		&e2e37Scenario{},
 		&e2e38Scenario{},
 		&e2e39Scenario{},
-	}
+	})
 }
 
 // newMCPSpawner 는 MCP 호출 경로가 사용할 표준 Spawner 를 조립한다 (G8·G9 공유).

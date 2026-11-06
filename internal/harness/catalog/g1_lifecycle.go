@@ -14,11 +14,11 @@ import (
 
 // G1: 정상 생명주기 및 동적 권한 회수 (E2E-01 ~ E2E-03)
 func g1Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e01Scenario{},
 		&e2e02Scenario{},
 		&e2e03Scenario{},
-	}
+	})
 }
 
 // E2E-01: 정상 단일 파일 읽기

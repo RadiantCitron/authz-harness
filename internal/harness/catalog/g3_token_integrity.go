@@ -13,7 +13,7 @@ import (
 
 // G3: 토큰 무결성 및 암호학적 서명 검증 (E2E-07 ~ E2E-13)
 func g3Scenarios() []harness.Scenario {
-	return []harness.Scenario{
+	return withStages([]harness.Scenario{
 		&e2e07Scenario{},
 		&e2e08Scenario{},
 		&e2e09Scenario{},
@@ -21,7 +21,7 @@ func g3Scenarios() []harness.Scenario {
 		&e2e11Scenario{},
 		&e2e12Scenario{},
 		&e2e13Scenario{},
-	}
+	})
 }
 
 // E2E-07: 토큰 누락 차단
