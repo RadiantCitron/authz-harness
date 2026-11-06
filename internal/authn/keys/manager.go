@@ -329,7 +329,7 @@ func (m *Manager) RevokeKey(kid string, auditCtx domain.AuditContext) error {
 
 func (m *Manager) revokeKey(kid string, auditCtx domain.AuditContext) error {
 	if kid == "" {
-		return errEmptyKID
+		return domain.NewError(domain.ReasonInvalidArguments, errEmptyKID.Error(), errEmptyKID)
 	}
 
 	privState, err := m.store.LoadPrivate()
@@ -363,7 +363,7 @@ func (m *Manager) revokeKey(kid string, auditCtx domain.AuditContext) error {
 	}
 
 	if !found {
-		return ErrKeyNotFound
+		return domain.NewError(domain.ReasonInvalidArguments, ErrKeyNotFound.Error(), ErrKeyNotFound)
 	}
 
 	privState.UpdatedAt = now

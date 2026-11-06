@@ -121,3 +121,20 @@ func TestRevokeKey_DenyAuditFailure(t *testing.T) {
 		t.Fatalf("expected AUDIT_LOG_FAILED, got %v", err)
 	}
 }
+
+// 계획 022 K1: 폐기 입력 오류는 도메인 오류(INVALID_ARGUMENTS/ExitBadInput)이며 sentinel 은 유지된다.
+func TestRevokeKey_InputErrorsAreDomainErrors(t *testing.T) {
+	m, _ := newCapturedManager(t)
+	for name, c := range map[string]struct {
+		kid  string
+		want error
+	}{"empty": {"", errEmptyKID}, "unknown": {"no-such-kid", ErrKeyNotFound}} {
+		err := m.RevokeKey(c.kid, denyCtx)
+		if !errors.Is(err, c.want) {
+			t.Errorf("%s: sentinel lost: %v", name, err)
+		}
+		if domain.ReasonFromError(err, "") != domain.ReasonInvalidArguments || domain.ExitCodeFromError(err, domain.ExitInternalError) != domain.ExitBadInput {
+			t.Errorf("%s: want INVALID_ARGUMENTS/ExitBadInput, got %v", name, err)
+		}
+	}
+}

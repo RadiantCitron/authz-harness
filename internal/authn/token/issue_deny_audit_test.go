@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/keys"
@@ -169,5 +170,18 @@ func TestIssueDeny_T9_NoSecretsInAudit(t *testing.T) {
 				t.Errorf("%s: audit leaks %q", name, banned)
 			}
 		}
+	}
+}
+
+// 계획 022 T1: 1초 미만 TTL(1ns)(exp == iat)은 입력 불량이며 INTERNAL_ERROR 가 아니다.
+func TestIssueDeny_P022T1_SubSecondTTLIsInvalidArguments(t *testing.T) {
+	w := &captureWriter{}
+	req := okReq()
+	req.TTL = time.Nanosecond
+	res, err := issueWith(t, w, nil, req)
+	wantOneDeny(t, w, res, err, domain.ReasonInvalidArguments)
+	var de *domain.Error
+	if !errors.As(err, &de) || de.ExitCode != domain.ExitBadInput {
+		t.Errorf("exit code: want ExitBadInput, got %v", err)
 	}
 }

@@ -210,7 +210,7 @@ func (s *Service) issueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	}
 
 	if err := claims.Validate(); err != nil {
-		return nil, false, fmt.Errorf("invalid token claims: %w", err)
+		return nil, false, domain.NewError(domain.ReasonInvalidArguments, fmt.Sprintf("invalid token claims: %v", err), err)
 	}
 
 	// 4-1. 예산 루트(위임 체인 없음)는 원장 필수. 없으면 Fail-Closed 로 발급하지 않는다.

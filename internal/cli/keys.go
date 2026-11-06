@@ -180,7 +180,7 @@ func (r *KeysRunner) runRevoke(args []string) domain.ExitCode {
 	if err := r.mgr.RevokeKey(*kid, auditCtx); err != nil {
 		if errors.Is(err, keys.ErrKeyNotFound) {
 			fmt.Fprintf(r.errOut, "Error: key not found: %s\n", *kid)
-			return domain.ExitBadInput
+			return domain.ExitCodeFromError(err, domain.ExitBadInput)
 		}
 		fmt.Fprintf(r.errOut, "Error: failed to revoke key: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
