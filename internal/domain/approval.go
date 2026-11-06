@@ -83,7 +83,7 @@ func ValidateApprovalTTL(ttl time.Duration) (time.Duration, error) {
 		return DefaultApprovalTTL, nil
 	}
 	if ttl < 0 || ttl > MaxApprovalTTL {
-		return 0, NewError(ReasonInvalidArguments, "approval", fmt.Sprintf("approval ttl must be within (0, %s]", MaxApprovalTTL), nil)
+		return 0, NewError(ReasonInvalidArguments, fmt.Sprintf("approval ttl must be within (0, %s]", MaxApprovalTTL), nil)
 	}
 	return ttl, nil
 }
@@ -96,5 +96,5 @@ func ValidateArgHash(s string) error {
 	if s == "" || argHashPattern.MatchString(s) {
 		return nil
 	}
-	return NewError(ReasonInvalidArguments, "approval", "arg_hash must be empty or sha256:<64 hex>", nil)
+	return NewError(ReasonInvalidArguments, "arg_hash must be empty or sha256:<64 hex>", nil)
 }

@@ -260,19 +260,19 @@ func (w *JSONLWriter) Log(event Event) error {
 	defer w.mu.Unlock()
 
 	if w.file == nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", "audit writer is closed", nil)
+		return domain.NewError(domain.ReasonAuditLogFailed, "audit writer is closed", nil)
 	}
 
 	// 1. syscall.Flock 배타 락 획득 (다중 프로세스 원자적 동기화)
 	lockPath := w.path + ".lock"
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
 	}
 	defer lockFile.Close()
 
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
 	}
 	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 
@@ -288,7 +288,7 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 	// 3. 파일의 마지막 레코드로부터 prev_hash 추출 (다중 프로세스 체인 연속성 보장)
 	prevHash := ""
 	if _, endsNL, terr := tailState(w.file); terr != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to inspect audit file tail: %v", terr), terr)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to inspect audit file tail: %v", terr), terr)
 	} else if !endsNL {
 		// 줄바꿈 없이 끝나는 파일에 이어 쓰면 두 기록이 한 줄로 붙는다. 쓰지 않고 사유만 고른다.
 		reason := domain.ReasonAuditTailIncomplete
@@ -296,7 +296,7 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 		if isReason(verr, domain.ReasonAuditIntegrityBroken) {
 			reason = domain.ReasonAuditIntegrityBroken
 		}
-		return domain.NewError(reason, "audit", "audit file does not end with newline; run 'audit recover'", verr)
+		return domain.NewError(reason, "audit file does not end with newline; run 'audit recover'", verr)
 	}
 	lastEv, err := readLastEvent(w.file)
 	if err != nil {
@@ -304,7 +304,7 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 		if verr := VerifyHashChain(w.path); isReason(verr, domain.ReasonAuditTailIncomplete) {
 			reason = domain.ReasonAuditTailIncomplete
 		}
-		return domain.NewError(reason, "audit", fmt.Sprintf("failed to read last event from audit file: %v", err), err)
+		return domain.NewError(reason, fmt.Sprintf("failed to read last event from audit file: %v", err), err)
 	}
 	if lastEv != nil {
 		if lastEv.CurrHash != "" {
@@ -331,19 +331,19 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 	// 4. JSON 직렬화 및 쓰기
 	data, err := json.Marshal(event)
 	if err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to marshal audit event: %v", err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to marshal audit event: %v", err), err)
 	}
 	if len(data) > MaxRecordBytes {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("audit record is %d bytes, exceeds MaxRecordBytes %d", len(data), MaxRecordBytes), nil)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("audit record is %d bytes, exceeds MaxRecordBytes %d", len(data), MaxRecordBytes), nil)
 	}
 
 	data = append(data, '\n')
 	if _, err := w.file.Write(data); err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to write audit event: %v", err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to write audit event: %v", err), err)
 	}
 
 	if err := w.file.Sync(); err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to sync audit file: %v", err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to sync audit file: %v", err), err)
 	}
 
 	w.lastHash = event.CurrHash
@@ -374,14 +374,14 @@ func VerifyHashChain(path string) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to open audit file %s: %v", path, err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open audit file %s: %v", path, err), err)
 	}
 	defer f.Close()
 
 	// 파일이 \n 으로 끝나지 않으면 마지막 조각은 잘린 꼬리다(plan-010, D-03).
 	_, endsNL, err := tailState(f)
 	if err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to inspect audit file tail %s: %v", path, err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to inspect audit file tail %s: %v", path, err), err)
 	}
 
 	scanner := bufio.NewScanner(f)
@@ -395,28 +395,28 @@ func VerifyHashChain(path string) error {
 	check := func(line string, n int, atTail bool) error {
 		// No Raw Token Leak 검사
 		if domain.ContainsRawToken(line) {
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("raw token leak detected in audit record #%d", n), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("raw token leak detected in audit record #%d", n), nil)
 		}
 
 		var ev Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			if atTail {
 				// 앞 레코드는 모두 통과했고, 줄바꿈 없는 마지막 조각만 깨짐 → 기록 도중 충돌(T1).
-				return domain.NewError(domain.ReasonAuditTailIncomplete, "audit", fmt.Sprintf("audit record #%d is an incomplete tail (no newline, not valid JSON); run 'audit recover'", n), err)
+				return domain.NewError(domain.ReasonAuditTailIncomplete, fmt.Sprintf("audit record #%d is an incomplete tail (no newline, not valid JSON); run 'audit recover'", n), err)
 			}
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d is not valid JSON: %v", n, err), err)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d is not valid JSON: %v", n, err), err)
 		}
 
 		// 다운그레이드·주입 규칙
 		switch {
 		case ev.SchemaVersion < 0 || ev.SchemaVersion > CurrentSchemaVersion:
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has unknown schema_version %d", n, ev.SchemaVersion), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d has unknown schema_version %d", n, ev.SchemaVersion), nil)
 		case ev.SchemaVersion < 2 && (ev.ArgHash != "" || ev.ResultHash != ""):
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has v2 fields without schema_version 2", n), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d has v2 fields without schema_version 2", n), nil)
 		case ev.SchemaVersion < 4 && ev.Stage != "":
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d has stage without schema_version 4", n), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d has stage without schema_version 4", n), nil)
 		case prevVersion >= 2 && ev.SchemaVersion < prevVersion:
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d downgrades schema version from v%d to v%d", n, prevVersion, ev.SchemaVersion), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d downgrades schema version from v%d to v%d", n, prevVersion, ev.SchemaVersion), nil)
 		}
 		prevVersion = ev.SchemaVersion
 
@@ -434,23 +434,23 @@ func VerifyHashChain(path string) error {
 		}
 
 		if evCurrHash == "" {
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d missing curr_hash", n), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d missing curr_hash", n), nil)
 		}
 
 		if evPrevHash != expectedPrevHash {
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("prev_hash mismatch at record #%d: expected %q, got %q", n, expectedPrevHash, evPrevHash), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("prev_hash mismatch at record #%d: expected %q, got %q", n, expectedPrevHash, evPrevHash), nil)
 		}
 
 		computedCurrHash := ComputeEventHash(expectedPrevHash, ev)
 		if evCurrHash != computedCurrHash {
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("curr_hash mismatch at record #%d: expected %q, got %q", n, computedCurrHash, evCurrHash), nil)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("curr_hash mismatch at record #%d: expected %q, got %q", n, computedCurrHash, evCurrHash), nil)
 		}
 
 		expectedPrevHash = evCurrHash
 
 		if atTail {
 			// 해시 검증까지 통과한 온전한 기록이 줄바꿈만 빠진 상태(T2).
-			return domain.NewError(domain.ReasonAuditTailIncomplete, "audit", fmt.Sprintf("audit record #%d is a complete record missing trailing newline; run 'audit recover'", n), nil)
+			return domain.NewError(domain.ReasonAuditTailIncomplete, fmt.Sprintf("audit record #%d is a complete record missing trailing newline; run 'audit recover'", n), nil)
 		}
 		return nil
 	}
@@ -488,15 +488,15 @@ func VerifyHashChain(path string) error {
 			}
 		} else if !endsNL {
 			// 공백만 남은 꼬리.
-			return domain.NewError(domain.ReasonAuditTailIncomplete, "audit", "audit file ends without newline after the last record; run 'audit recover'", nil)
+			return domain.NewError(domain.ReasonAuditTailIncomplete, "audit file ends without newline after the last record; run 'audit recover'", nil)
 		}
 	}
 
 	if err := scanErr; err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
-			return domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", fmt.Sprintf("audit record #%d exceeds MaxRecordBytes %d", lineNum+1, MaxRecordBytes), err)
+			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d exceeds MaxRecordBytes %d", lineNum+1, MaxRecordBytes), err)
 		}
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("error scanning audit file %s: %v", path, err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("error scanning audit file %s: %v", path, err), err)
 	}
 
 	return nil

@@ -1015,7 +1015,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 
 	t.Run("TC-060-05-2: Gate 1 AuthN 실패 시 PDP/Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
 		verifier := &stubVerifier{
-			errToReturn: domain.NewError(domain.ReasonTokenInvalidSignature, "verify", "bad sig", token.ErrInvalidSignature),
+			errToReturn: domain.NewError(domain.ReasonTokenInvalidSignature, "bad sig", token.ErrInvalidSignature),
 		}
 		pdpStub := &stubPDP{}
 		jailStub := &stubJail{}

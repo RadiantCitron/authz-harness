@@ -29,7 +29,7 @@ func (NoopConfiner) Available() bool { return false }
 // Prepare 는 필수 모드이면 16 으로 거부하고, 아니면 cmd 를 바꾸지 않는다.
 func (NoopConfiner) Prepare(_ *exec.Cmd, p Policy) error {
 	if p.Require {
-		return domain.NewError(domain.ReasonConfinementUnavailable, "confinement", "no confinement adapter available but confinement is required", nil)
+		return domain.NewError(domain.ReasonConfinementUnavailable, "no confinement adapter available but confinement is required", nil)
 	}
 	return nil
 }

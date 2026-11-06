@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	stageName       = "execguard"
 	defaultMaxBytes = int64(64 << 10)
 	defaultTimeout  = 5 * time.Second
 	waitDelay       = 200 * time.Millisecond
@@ -37,10 +36,10 @@ var argPattern = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,63}$`)
 // Validate 는 id 와 arg 가 허용 형식인지 프로세스 없이 검사한다.
 func Validate(id, arg string) error {
 	if _, ok := registry[id]; !ok {
-		return domain.NewError(domain.ReasonExecNotAllowed, stageName, "exec id not registered", nil)
+		return domain.NewError(domain.ReasonExecNotAllowed, "exec id not registered", nil)
 	}
 	if arg != "" && !argPattern.MatchString(arg) {
-		return domain.NewError(domain.ReasonExecArgRejected, stageName, "exec argument rejected", nil)
+		return domain.NewError(domain.ReasonExecArgRejected, "exec argument rejected", nil)
 	}
 	return nil
 }
@@ -111,13 +110,13 @@ func (r *Runner) Run(ctx context.Context, id, arg string) ([]byte, error) {
 	cmd.Stdout = out
 	err := cmd.Run()
 	if errors.Is(ctx2.Err(), context.DeadlineExceeded) {
-		return nil, domain.NewError(domain.ReasonToolLimitExceeded, stageName, "exec timed out", err)
+		return nil, domain.NewError(domain.ReasonToolLimitExceeded, "exec timed out", err)
 	}
 	if out.exceeded {
-		return nil, domain.NewError(domain.ReasonToolLimitExceeded, stageName, "exec output exceeds byte limit", nil)
+		return nil, domain.NewError(domain.ReasonToolLimitExceeded, "exec output exceeds byte limit", nil)
 	}
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, stageName, "exec failed", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "exec failed", err)
 	}
 	return out.buf, nil
 }

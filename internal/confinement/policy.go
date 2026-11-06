@@ -9,8 +9,6 @@ import (
 	"authz-harness/internal/domain"
 )
 
-const stagePolicy = "confinement_policy"
-
 // Policy 는 허용 목록 기반 격리 정책이다. ProtectedRoot 아래는 목록에 없는 한 읽기·쓰기 모두 거부한다.
 //
 // 최소 보장 계약(모든 어댑터 공통, 더 엄격한 것은 허용·더 느슨한 것은 불가):
@@ -32,31 +30,31 @@ type Policy struct {
 // Validate 는 정책의 구조적 유효성을 검사한다. 모호하면 거부한다(Fail-Closed).
 func (p Policy) Validate() error {
 	if p.ProtectedRoot == "" {
-		return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "protected root must not be empty", nil)
+		return domain.NewError(domain.ReasonInvalidArguments, "protected root must not be empty", nil)
 	}
 	if !filepath.IsAbs(p.ProtectedRoot) {
-		return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "protected root must be absolute", nil)
+		return domain.NewError(domain.ReasonInvalidArguments, "protected root must be absolute", nil)
 	}
 	root := filepath.Clean(p.ProtectedRoot)
 	for _, rp := range p.ReadPaths {
 		if !filepath.IsAbs(rp) {
-			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "read path must be absolute: "+rp, nil)
+			return domain.NewError(domain.ReasonInvalidArguments, "read path must be absolute: "+rp, nil)
 		}
 		if !within(root, filepath.Clean(rp)) {
-			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "read path outside protected root: "+rp, nil)
+			return domain.NewError(domain.ReasonInvalidArguments, "read path outside protected root: "+rp, nil)
 		}
 	}
 	for _, wp := range p.WritePaths {
 		if !filepath.IsAbs(wp) {
-			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "write path must be absolute: "+wp, nil)
+			return domain.NewError(domain.ReasonInvalidArguments, "write path must be absolute: "+wp, nil)
 		}
 	}
 	if p.AllowNetwork && len(p.AllowConnectPorts) > 0 {
-		return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "allow_network and allow_connect_ports are mutually exclusive", nil)
+		return domain.NewError(domain.ReasonInvalidArguments, "allow_network and allow_connect_ports are mutually exclusive", nil)
 	}
 	for _, port := range p.AllowConnectPorts {
 		if port < 1 || port > 65535 {
-			return domain.NewError(domain.ReasonInvalidArguments, stagePolicy, fmt.Sprintf("connect port out of range: %d", port), nil)
+			return domain.NewError(domain.ReasonInvalidArguments, fmt.Sprintf("connect port out of range: %d", port), nil)
 		}
 	}
 	return nil

@@ -171,17 +171,17 @@ func Create(auditPath, privPath, pubPath, outPath string, clock domain.Clock) (*
 		return rerr
 	})
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("checkpoint: read audit: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("checkpoint: read audit: %v", err), err)
 	}
 	if len(lines) == 0 {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", "checkpoint: audit log is missing or empty", nil)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, "checkpoint: audit log is missing or empty", nil)
 	}
 	if err := audit.VerifyHashChain(auditPath); err != nil {
 		return nil, err
 	}
 	head, err := currHashOf(lines[len(lines)-1])
 	if err != nil || head == "" {
-		return nil, domain.NewError(domain.ReasonAuditIntegrityBroken, "audit", "checkpoint: last record has no curr_hash", err)
+		return nil, domain.NewError(domain.ReasonAuditIntegrityBroken, "checkpoint: last record has no curr_hash", err)
 	}
 	kid, err := EnsureKeyPair(privPath, pubPath, clock)
 	if err != nil {
@@ -209,7 +209,7 @@ func Create(auditPath, privPath, pubPath, outPath string, clock domain.Clock) (*
 }
 
 func mismatch(msg string, err error) error {
-	return domain.NewError(domain.ReasonAuditCheckpointMismatch, "audit", msg, err)
+	return domain.NewError(domain.ReasonAuditCheckpointMismatch, msg, err)
 }
 
 // Verify 는 해시 체인과 서명 체크포인트를 대조한다. 키를 생성하지 않는다.
@@ -239,11 +239,12 @@ func Verify(auditPath, ckptPath, pubPath string) error {
 
 	lines, err := readLines(auditPath)
 	if err != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("read audit: %v", err), err)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("read audit: %v", err), err)
 	}
 	if len(lines) < c.LineCount || c.LineCount <= 0 {
-		return domain.NewError(domain.ReasonAuditTruncationDetected, "audit",
+		return domain.NewError(domain.ReasonAuditTruncationDetected,
 			fmt.Sprintf("audit log has %d records, checkpoint covers %d", len(lines), c.LineCount), nil)
+
 	}
 	h, err := currHashOf(lines[c.LineCount-1])
 	if err != nil || h != c.HeadHash {

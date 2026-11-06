@@ -38,7 +38,7 @@ func resolveRealPath(p string) (string, error) {
 
 func sbplQuote(s string) (string, error) {
 	if strings.ContainsAny(s, "\n\r") {
-		return "", domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "path contains newline", nil)
+		return "", domain.NewError(domain.ReasonInvalidArguments, "path contains newline", nil)
 	}
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
@@ -49,7 +49,7 @@ func sbplQuote(s string) (string, error) {
 func sbplPath(p string) (string, error) {
 	real, err := resolveRealPath(p)
 	if err != nil {
-		return "", domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "cannot resolve path: "+p, err)
+		return "", domain.NewError(domain.ReasonInvalidArguments, "cannot resolve path: "+p, err)
 	}
 	q, err := sbplQuote(real)
 	if err != nil {
@@ -71,7 +71,7 @@ func RenderSeatbeltProfile(p Policy) (string, error) {
 	}
 	root, err := resolveRealPath(p.ProtectedRoot)
 	if err != nil {
-		return "", domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "cannot resolve protected root", err)
+		return "", domain.NewError(domain.ReasonInvalidArguments, "cannot resolve protected root", err)
 	}
 	rootQ, err := sbplQuote(root)
 	if err != nil {
@@ -138,7 +138,7 @@ func (c SeatbeltConfiner) Prepare(cmd *exec.Cmd, p Policy) error {
 		return err
 	}
 	if !c.Available() {
-		return domain.NewError(domain.ReasonConfinementUnavailable, "confinement", "seatbelt unavailable (nested sandbox or missing sandbox-exec)", nil)
+		return domain.NewError(domain.ReasonConfinementUnavailable, "seatbelt unavailable (nested sandbox or missing sandbox-exec)", nil)
 	}
 	profile, err := RenderSeatbeltProfile(p)
 	if err != nil {

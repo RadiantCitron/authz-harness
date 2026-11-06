@@ -5,10 +5,9 @@ import (
 	"fmt"
 )
 
-// Error 는 사유 코드(Reason), 발생 관문(Stage), 종료 코드(ExitCode)를 내장한 표준 도메인 에러다.
+// Error 는 사유 코드(Reason), 종료 코드(ExitCode)를 내장한 표준 도메인 에러다.
 type Error struct {
 	Reason   Reason
-	Stage    string
 	ExitCode ExitCode
 	Message  string
 	Cause    error
@@ -28,10 +27,9 @@ func (e *Error) Unwrap() error {
 }
 
 // NewError 는 원인 에러와 사유 코드로 표준 *domain.Error 를 생성하며, Reason 에 대응하는 표준 ExitCode 를 자동 매핑한다.
-func NewError(reason Reason, stage, message string, cause error) *Error {
+func NewError(reason Reason, message string, cause error) *Error {
 	return &Error{
 		Reason:   reason,
-		Stage:    stage,
 		ExitCode: ExitCodeForReason(reason),
 		Message:  message,
 		Cause:    cause,
@@ -39,11 +37,11 @@ func NewError(reason Reason, stage, message string, cause error) *Error {
 }
 
 // WrapError 는 원인 에러를 기반으로 표준 *domain.Error 를 생성한다. cause 가 nil 이면 nil 을 반환한다.
-func WrapError(reason Reason, stage string, cause error) *Error {
+func WrapError(reason Reason, cause error) *Error {
 	if cause == nil {
 		return nil
 	}
-	return NewError(reason, stage, cause.Error(), cause)
+	return NewError(reason, cause.Error(), cause)
 }
 
 // ReasonFromError 는 에러 체인에서 *domain.Error 를 찾아 Reason 을 반환한다 (문자열 파싱 일체 없음).

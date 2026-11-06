@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	stageName       = "netguard"
 	defaultMaxBytes = int64(1 << 20)
 	defaultTimeout  = 5 * time.Second
 )
@@ -32,7 +31,7 @@ type Target struct {
 }
 
 func deny(msg string) error {
-	return domain.NewError(domain.ReasonEgressDenied, stageName, msg, nil)
+	return domain.NewError(domain.ReasonEgressDenied, msg, nil)
 }
 
 // ParseTarget 은 raw 를 정규 Target 으로 바꾸는 순수 함수다(소켓·DNS·allow-list 없음).
@@ -148,7 +147,7 @@ func (g *Guard) Fetch(ctx context.Context, t Target) ([]byte, error) {
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, stageName, "build request", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "build request", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -163,7 +162,7 @@ func (g *Guard) Fetch(ctx context.Context, t Target) ([]byte, error) {
 		return nil, g.mapErr(err)
 	}
 	if int64(len(body)) > g.maxBytes {
-		return nil, domain.NewError(domain.ReasonToolLimitExceeded, stageName, "response exceeds byte limit", nil)
+		return nil, domain.NewError(domain.ReasonToolLimitExceeded, "response exceeds byte limit", nil)
 	}
 	return body, nil
 }
@@ -175,7 +174,7 @@ func (g *Guard) mapErr(err error) error {
 	}
 	var ne net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
-		return domain.NewError(domain.ReasonToolLimitExceeded, stageName, "request timed out", err)
+		return domain.NewError(domain.ReasonToolLimitExceeded, "request timed out", err)
 	}
-	return domain.NewError(domain.ReasonInternalError, stageName, "fetch failed", err)
+	return domain.NewError(domain.ReasonInternalError, "fetch failed", err)
 }

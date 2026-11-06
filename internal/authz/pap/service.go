@@ -110,7 +110,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 	}
 
 	if err := grant.Validate(); err != nil {
-		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: validation failed", err)
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: validation failed", err)
 	}
 
 	err := s.store.Update(func(st *state.GrantsState) error {
@@ -118,7 +118,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 		return nil
 	})
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store grant", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to store grant", err)
 	}
 
 	// 감사 이벤트 기록 (실패 시 방금 추가한 Grant 를 롤백하여 무증거 상태 변경 방지)
@@ -150,7 +150,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 				}
 				return nil
 			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
 		}
 	}
 
@@ -161,7 +161,7 @@ func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*
 func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.Grant, error) {
 	cleanID := strings.TrimSpace(grantID)
 	if cleanID == "" {
-		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: grant id required", domain.ErrEmptyGrantID)
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: grant id required", domain.ErrEmptyGrantID)
 	}
 
 	now := s.clock.Now().UTC()
@@ -184,9 +184,9 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 	})
 	if err != nil {
 		if errors.Is(err, ErrGrantNotFound) {
-			return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: grant not found", ErrGrantNotFound)
+			return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: grant not found", ErrGrantNotFound)
 		}
-		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to revoke grant", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to revoke grant", err)
 	}
 
 	// 감사 이벤트 기록 (실패 시 이전 상태로 롤백하여 무증거 회수 방지)
@@ -217,7 +217,7 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 				}
 				return nil
 			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
 		}
 	}
 
@@ -228,7 +228,7 @@ func (s *papService) RevokeGrant(ctx context.Context, grantID string) (*domain.G
 func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
 	cleanSub := strings.TrimSpace(subject)
 	if cleanSub == "" {
-		return 0, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: subject required", domain.ErrEmptySubject)
+		return 0, domain.NewError(domain.ReasonInvalidArguments, "pap: subject required", domain.ErrEmptySubject)
 	}
 
 	var newEpoch domain.Epoch
@@ -244,7 +244,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 		return nil
 	})
 	if err != nil {
-		return 0, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to bump epoch", err)
+		return 0, domain.NewError(domain.ReasonInternalError, "pap: failed to bump epoch", err)
 	}
 
 	// 감사 이벤트 기록 (실패 시 이전 Epoch 로 롤백하여 무증거 변경 방지)
@@ -269,7 +269,7 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 				}
 				return nil
 			})
-			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
+			return 0, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
 		}
 	}
 
@@ -308,7 +308,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 	}
 	sub, res, jti := strings.TrimSpace(req.Subject), strings.TrimSpace(req.Resource), strings.TrimSpace(req.TokenJTI)
 	if sub == "" || strings.TrimSpace(string(req.Action)) == "" || res == "" || jti == "" {
-		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap", "pap: approval requires subject, action, resource, jti", nil)
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: approval requires subject, action, resource, jti", nil)
 	}
 
 	now := s.clock.Now().UTC()
@@ -323,7 +323,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 		ExpiresAt: now.Add(ttl),
 	}
 	if err := state.CreateApproval(s.store, a, now); err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "pap", "pap: failed to store approval", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to store approval", err)
 	}
 
 	// 감사는 잠금(Update)을 반환한 뒤에만 기록하며, 실패 시 방금 추가한 승인을 롤백한다.
@@ -358,7 +358,7 @@ func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalReque
 				}
 				return nil
 			})
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap", "pap: audit logging failed", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", err)
 		}
 	}
 	return &a, nil

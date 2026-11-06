@@ -73,7 +73,7 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 	// 1. Scope 공백 검사
 	childScopes := ParseScopes(requestedScope)
 	if len(childScopes) == 0 {
-		return domain.NewError(domain.ReasonDelegationScopeEmpty, "downscope_validator", "requested scope is empty", ErrScopeEmpty)
+		return domain.NewError(domain.ReasonDelegationScopeEmpty, "requested scope is empty", ErrScopeEmpty)
 	}
 
 	// 2. Scope 부분집합 검증 ($S_{child} \subseteq S_{parent}$)
@@ -90,7 +90,7 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 		}
 	}
 	if len(exceededScopes) > 0 {
-		return domain.NewError(domain.ReasonDelegationScopeExceeded, "downscope_validator", fmt.Sprintf("[%s] not in parent scopes", strings.Join(exceededScopes, ", ")), ErrScopeExceeded)
+		return domain.NewError(domain.ReasonDelegationScopeExceeded, fmt.Sprintf("[%s] not in parent scopes", strings.Join(exceededScopes, ", ")), ErrScopeExceeded)
 	}
 
 	// 3. 만료 시각 상한 검증 ($exp_{child} \le exp_{parent}$)
@@ -99,13 +99,13 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 	}
 	childExp := now.Add(childTTL).Unix()
 	if childExp > parentClaims.ExpiresAt {
-		return domain.NewError(domain.ReasonDelegationTTLExceeded, "downscope_validator", fmt.Sprintf("child exp (%d) > parent exp (%d)", childExp, parentClaims.ExpiresAt), ErrTTLExceeded)
+		return domain.NewError(domain.ReasonDelegationTTLExceeded, fmt.Sprintf("child exp (%d) > parent exp (%d)", childExp, parentClaims.ExpiresAt), ErrTTLExceeded)
 	}
 
 	// 4. 위임 깊이 검증 (DelegationDepth + 1 <= MaxDepth)
 	nextDepth := parentClaims.DelegationDepth + 1
 	if nextDepth > v.maxDepth {
-		return domain.NewError(domain.ReasonDelegationDepthExceeded, "downscope_validator", fmt.Sprintf("next depth %d exceeds max %d", nextDepth, v.maxDepth), ErrDepthExceeded)
+		return domain.NewError(domain.ReasonDelegationDepthExceeded, fmt.Sprintf("next depth %d exceeds max %d", nextDepth, v.maxDepth), ErrDepthExceeded)
 	}
 
 	// 5. 순환 위임 검증 (부모 sub == 자식 sub 또는 이전 act 체인에 존재)
@@ -114,13 +114,13 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 		return errors.New("child subject is required")
 	}
 	if cleanChildSub == parentClaims.Subject {
-		return domain.NewError(domain.ReasonDelegationSelfLoop, "downscope_validator", fmt.Sprintf("child subject matches parent subject %s", cleanChildSub), ErrSelfLoop)
+		return domain.NewError(domain.ReasonDelegationSelfLoop, fmt.Sprintf("child subject matches parent subject %s", cleanChildSub), ErrSelfLoop)
 	}
 
 	currActor := parentClaims.Actor
 	for currActor != nil {
 		if currActor.Subject == cleanChildSub {
-			return domain.NewError(domain.ReasonDelegationSelfLoop, "downscope_validator", fmt.Sprintf("child subject %s already exists in actor chain", cleanChildSub), ErrSelfLoop)
+			return domain.NewError(domain.ReasonDelegationSelfLoop, fmt.Sprintf("child subject %s already exists in actor chain", cleanChildSub), ErrSelfLoop)
 		}
 		currActor = currActor.Actor
 	}
@@ -133,7 +133,7 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 // 부모만 예산이 있고 자식이 없으면 무제한 격상이므로 거부한다.
 func ValidateBudgetDownscope(parent, child *domain.Budget) error {
 	deny := func(msg string) error {
-		return domain.NewError(domain.ReasonDelegationBudgetExceeded, "downscope_validator", msg, nil)
+		return domain.NewError(domain.ReasonDelegationBudgetExceeded, msg, nil)
 	}
 	switch {
 	case parent == nil && child == nil:

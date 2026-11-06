@@ -129,7 +129,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 					"reason":    string(reason),
 				},
 			}); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "issue", "failed to record issue deny audit log", aerr)
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record issue deny audit log", aerr)
 			}
 		}
 		return nil, fmt.Errorf("client authentication failed: %w", err)
@@ -140,7 +140,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 		return nil, errors.New("subject is required")
 	}
 	if !clientInfo.IsSubjectAllowed(req.Subject) {
-		return nil, domain.NewError(domain.ReasonNoActiveGrant, "issue", fmt.Sprintf("client %s is not authorized to request tokens for subject %s", req.ClientID, req.Subject), nil)
+		return nil, domain.NewError(domain.ReasonNoActiveGrant, fmt.Sprintf("client %s is not authorized to request tokens for subject %s", req.ClientID, req.Subject), nil)
 	}
 
 	// 3. 서명 키(Zone A Active Key) 획득
@@ -202,7 +202,7 @@ func (s *Service) IssueToken(req IssueRequest, opts IssueOptions, auditCtx domai
 	// 4-1. 예산 루트(위임 체인 없음)는 원장 필수. 없으면 Fail-Closed 로 발급하지 않는다.
 	registerBudget := claims.Budget != nil && claims.Actor == nil
 	if registerBudget && s.budgets == nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "issue", "budget ledger is not configured for budget token issuance", nil)
+		return nil, domain.NewError(domain.ReasonInternalError, "budget ledger is not configured for budget token issuance", nil)
 	}
 
 	// 5. 헤더 구성

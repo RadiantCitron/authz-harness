@@ -234,7 +234,7 @@ func (h stageHook) OnStepEnd(ctx context.Context, id string, c *Call, err error)
 func (g *gateway) input(_ context.Context, c *Call) error {
 	st, req := c.st, c.req
 	if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
-		return domain.NewError(domain.ReasonMissingTraceContext, string(domain.StageInput), "trace_id is required but missing", nil)
+		return domain.NewError(domain.ReasonMissingTraceContext, "trace_id is required but missing", nil)
 	}
 	normAction, actErr := NormalizeAction(string(req.Action))
 	var tool Tool
@@ -246,7 +246,7 @@ func (g *gateway) input(_ context.Context, c *Call) error {
 		}
 	}
 	if actErr != nil || st.resource == "" {
-		return domain.NewError(domain.ReasonInvalidArguments, string(domain.StageInput), "action must be file:read, file:write, net:fetch or exec:run, and resource cannot be empty", actErr)
+		return domain.NewError(domain.ReasonInvalidArguments, "action must be file:read, file:write, net:fetch or exec:run, and resource cannot be empty", actErr)
 	}
 	st.normAction = normAction
 	st.tool = tool
@@ -270,7 +270,7 @@ func (g *gateway) authn(_ context.Context, c *Call) error {
 	}, auditCtx)
 	if verifyErr != nil {
 		reason := extractReasonFromTokenError(verifyErr)
-		return domain.NewError(reason, string(domain.StageAuthn), fmt.Sprintf("Gate 1 authentication failed: %v", verifyErr), verifyErr)
+		return domain.NewError(reason, fmt.Sprintf("Gate 1 authentication failed: %v", verifyErr), verifyErr)
 	}
 	st.claims = vc
 	st.subject = vc.Claims.Subject
@@ -281,7 +281,7 @@ func (g *gateway) authn(_ context.Context, c *Call) error {
 	if vc.Claims.Budget != nil {
 		st.budgeted = true
 		if g.cfg.BudgetLedger == nil {
-			return domain.NewError(domain.ReasonInternalError, string(domain.StageAuthn), "budget token presented but no budget ledger is configured (fail-closed)", nil)
+			return domain.NewError(domain.ReasonInternalError, "budget token presented but no budget ledger is configured (fail-closed)", nil)
 		}
 	}
 	return nil
@@ -305,7 +305,7 @@ func (g *gateway) authz(ctx context.Context, c *Call) error {
 		Now:          st.evalNow,
 	})
 	if decideErr != nil {
-		return domain.NewError(domain.ReasonFromError(decideErr, domain.ReasonInternalError), string(domain.StageAuthz), fmt.Sprintf("pdp evaluation error: %v", decideErr), decideErr)
+		return domain.NewError(domain.ReasonFromError(decideErr, domain.ReasonInternalError), fmt.Sprintf("pdp evaluation error: %v", decideErr), decideErr)
 	}
 	if decision == nil || decision.Decision != pdp.DecisionAllow {
 		reason := domain.ReasonNoActiveGrant
@@ -314,7 +314,7 @@ func (g *gateway) authz(ctx context.Context, c *Call) error {
 			reason = decision.Reason
 			details = decision.Details
 		}
-		return domain.NewError(reason, string(domain.StageAuthz), details, nil)
+		return domain.NewError(reason, details, nil)
 	}
 	st.approvalID = decision.ApprovalID
 	return nil
@@ -334,15 +334,15 @@ func (g *gateway) replay(_ context.Context, c *Call) error {
 func (g *gateway) approval(_ context.Context, c *Call) error {
 	st := c.st
 	if g.cfg.ApprovalConsumer == nil {
-		return domain.NewError(domain.ReasonInternalError, string(domain.StageApproval), "approval required but no approval consumer is configured (fail-closed)", nil)
+		return domain.NewError(domain.ReasonInternalError, "approval required but no approval consumer is configured (fail-closed)", nil)
 	}
 	binding := domain.ApprovalBinding{Subject: st.subject, Action: st.normAction, Resource: st.resource, TokenJTI: st.tokenJTI, ArgHash: st.argHash}
 	if consumeErr := g.cfg.ApprovalConsumer.ConsumeApproval(st.approvalID, binding, st.evalNow); consumeErr != nil {
-		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(domain.StageApproval), fmt.Sprintf("approval consume denied: %v", consumeErr), consumeErr)
+		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), fmt.Sprintf("approval consume denied: %v", consumeErr), consumeErr)
 	}
 	// 잠금은 이미 풀렸다. 감사 실패는 Fail-Closed(승인은 이미 소멸).
 	if auditErr := g.logApprovalConsumed(st); auditErr != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, string(domain.StageApproval), fmt.Sprintf("approval audit failure (fail-closed): %v", auditErr), auditErr)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("approval audit failure (fail-closed): %v", auditErr), auditErr)
 	}
 	return nil
 }
@@ -355,7 +355,7 @@ func (g *gateway) budget(_ context.Context, c *Call) error {
 		n = int64(len(c.req.Data))
 	}
 	if consumeErr := g.cfg.BudgetLedger.Consume(st.tokenJTI, 1, 0, n); consumeErr != nil {
-		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(domain.StageBudget), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
+		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
 	}
 	st.consumed = true
 	st.refundWriteBytes = n
@@ -379,10 +379,10 @@ func (g *gateway) refund(ctx context.Context, c *Call) {
 // precommit_audit: 실행 전 감사 증거 기록 (Fail-Closed, 실패 시 부작용 없음)
 func (g *gateway) precommitAudit(_ context.Context, c *Call) error {
 	if c.req.InjectAuditFailure {
-		return domain.NewError(domain.ReasonAuditLogFailed, string(domain.StagePrecommitAudit), "injected audit failure simulation (fail-closed)", nil)
+		return domain.NewError(domain.ReasonAuditLogFailed, "injected audit failure simulation (fail-closed)", nil)
 	}
 	if auditErr := g.logEvent(c.st, domain.StagePrecommitAudit, true, domain.ReasonAuthorized, "pre-commit audit check passed", ""); auditErr != nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, string(domain.StagePrecommitAudit), fmt.Sprintf("audit writer failure (fail-closed): %v", auditErr), auditErr)
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("audit writer failure (fail-closed): %v", auditErr), auditErr)
 	}
 	return nil
 }
@@ -405,7 +405,7 @@ func (g *gateway) execute(ctx context.Context, c *Call) error {
 func (g *gateway) settle(_ context.Context, c *Call) error {
 	st := c.st
 	if consumeErr := g.cfg.BudgetLedger.Consume(st.tokenJTI, 0, int64(len(st.out.Data)), 0); consumeErr != nil {
-		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), string(domain.StageSettle), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
+		return domain.NewError(domain.ReasonFromError(consumeErr, domain.ReasonInternalError), fmt.Sprintf("budget consume denied: %v", consumeErr), consumeErr)
 	}
 	return nil
 }

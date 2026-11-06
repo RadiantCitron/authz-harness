@@ -104,17 +104,17 @@ func (r *InMemoryClientRegistry) RegisterClient(clientID, secret, description st
 func (r *InMemoryClientRegistry) AuthenticateClient(clientID, clientSecret string) (*ClientInfo, error) {
 	entry, exists := r.clients[clientID]
 	if !exists {
-		return nil, domain.NewError(domain.ReasonAuthnUnknownClient, "client_auth", fmt.Sprintf("%s", clientID), ErrUnknownClient)
+		return nil, domain.NewError(domain.ReasonAuthnUnknownClient, fmt.Sprintf("%s", clientID), ErrUnknownClient)
 	}
 
 	if !entry.info.Active {
-		return nil, domain.NewError(domain.ReasonAuthnClientSuspended, "client_auth", fmt.Sprintf("%s", clientID), ErrClientSuspended)
+		return nil, domain.NewError(domain.ReasonAuthnClientSuspended, fmt.Sprintf("%s", clientID), ErrClientSuspended)
 	}
 
 	secA := []byte(clientSecret)
 	secB := []byte(entry.secret)
 	if subtle.ConstantTimeCompare(secA, secB) != 1 {
-		return nil, domain.NewError(domain.ReasonAuthnInvalidSecret, "client_auth", fmt.Sprintf("%s", clientID), ErrInvalidSecret)
+		return nil, domain.NewError(domain.ReasonAuthnInvalidSecret, fmt.Sprintf("%s", clientID), ErrInvalidSecret)
 	}
 
 	info := entry.info

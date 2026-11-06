@@ -169,7 +169,7 @@ func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
 // Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
 func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (*ExchangeResult, error) {
 	if s.engineErr != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "exchange", "exchange pipeline assembly failed (fail-closed)", s.engineErr)
+		return nil, domain.NewError(domain.ReasonInternalError, "exchange pipeline assembly failed (fail-closed)", s.engineErr)
 	}
 	now := s.clock.Now().UTC()
 	traceID := auditCtx.TraceID
@@ -192,7 +192,7 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 			d = &denial{reason: domain.ReasonInternalError, details: tr.Err.Error(), ret: tr.Err}
 		}
 		if aerr := s.recordAuditDenied(c, domain.Stage(tr.Failed), d.reason, d.details); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record exchange deny audit log", aerr)
 		}
 		return nil, d.ret
 	}
@@ -223,7 +223,7 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 			},
 		}
 		if err := s.auditWriter.Log(auditEv); err != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange audit log", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record exchange audit log", err)
 		}
 	}
 
@@ -264,7 +264,7 @@ func (s *ExchangeService) parentToken(c *exchangeCall) error {
 	verified, err := s.verifier.VerifyToken(c.req.ParentToken, token.VerifyOptions{RecordReplay: false}, c.auditCtx)
 	if err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
-		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "parent token verification failed", err)}
+		return &denial{reason, err.Error(), domain.NewError(reason, "parent token verification failed", err)}
 	}
 	c.parentClaims = verified.Claims
 	c.parentJTI = c.parentClaims.JWTID
@@ -278,7 +278,7 @@ func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
 	snap, snapErr := s.snapshots.GetSubjectSnapshot(c.ctx, p.Subject)
 	if snapErr != nil || snap == nil {
 		details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
-		return &denial{domain.ReasonInternalError, details, domain.NewError(domain.ReasonInternalError, "exchange", details, snapErr)}
+		return &denial{domain.ReasonInternalError, details, domain.NewError(domain.ReasonInternalError, details, snapErr)}
 	}
 	parentEpoch := domain.Epoch(p.Epoch)
 	if parentEpoch < 1 {
@@ -286,12 +286,12 @@ func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
 	}
 	if parentEpoch != snap.CurrentEpoch {
 		details := fmt.Sprintf("parent %q epoch (%d) does not match current epoch (%d)", p.Subject, parentEpoch, snap.CurrentEpoch)
-		return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)}
+		return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, details, nil)}
 	}
 	for a := p.Actor; a != nil; a = a.Actor {
 		if a.Epoch < 1 || snap.SubjectEpochs == nil || snap.SubjectEpochs.Get(a.Subject) != a.Epoch {
 			details := fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", a.Subject, a.Epoch)
-			return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)}
+			return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, details, nil)}
 		}
 	}
 	return nil
@@ -301,7 +301,7 @@ func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
 func (s *ExchangeService) downscope(c *exchangeCall) error {
 	if err := s.validator.ValidateDownscope(&c.parentClaims, c.req.ChildSubject, c.req.Scope, c.req.TTL, c.now); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
-		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "downscope validation failed", err)}
+		return &denial{reason, err.Error(), domain.NewError(reason, "downscope validation failed", err)}
 	}
 	return nil
 }
@@ -310,11 +310,11 @@ func (s *ExchangeService) downscope(c *exchangeCall) error {
 func (s *ExchangeService) budgetDownscope(c *exchangeCall) error {
 	if err := ValidateBudgetDownscope(c.parentClaims.Budget, c.req.Budget); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
-		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "budget downscope validation failed", err)}
+		return &denial{reason, err.Error(), domain.NewError(reason, "budget downscope validation failed", err)}
 	}
 	if s.budgets == nil {
 		err := errors.New("budget ledger is not configured")
-		return &denial{domain.ReasonInternalError, err.Error(), domain.NewError(domain.ReasonInternalError, "exchange", "budget exchange requires a budget ledger", err)}
+		return &denial{domain.ReasonInternalError, err.Error(), domain.NewError(domain.ReasonInternalError, "budget exchange requires a budget ledger", err)}
 	}
 	return nil
 }
@@ -356,7 +356,7 @@ func (s *ExchangeService) tokenIssue(c *exchangeCall) error {
 func (s *ExchangeService) budgetReserve(c *exchangeCall) error {
 	if err := s.budgets.Reserve(c.parentClaims.JWTID, c.child.Claims.JWTID, *c.req.Budget, c.child.Claims.ExpiresAt); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonInternalError)
-		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "budget reservation failed", err)}
+		return &denial{reason, err.Error(), domain.NewError(reason, "budget reservation failed", err)}
 	}
 	return nil
 }

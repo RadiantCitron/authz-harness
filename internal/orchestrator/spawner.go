@@ -104,7 +104,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 				"requested_action": req.Action,
 			},
 		}); err != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_spawn", "failed to record pre-spawn audit log", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record pre-spawn audit log", err)
 		}
 	}
 
@@ -156,7 +156,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 				ev.Reason = string(domain.ReasonFromError(perr, domain.ReasonConfinementUnavailable))
 			}
 			if err := s.cfg.Audit.Log(ev); err != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_confine", "failed to record confinement audit log", err)
+				return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record confinement audit log", err)
 			}
 		}
 		if perr != nil {
@@ -251,7 +251,7 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 			}
 		}
 		if err := s.cfg.Audit.Log(ev); err != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "orchestrator_collect", "failed to record post-spawn audit log", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "failed to record post-spawn audit log", err)
 		}
 	}
 

@@ -36,8 +36,9 @@ func DefaultLimits() Limits {
 // Normalize 는 음수 필드를 거부하고 영값 필드를 기본값으로 채운 사본을 반환한다.
 func (l Limits) Normalize() (Limits, error) {
 	if l.Timeout < 0 || l.WaitDelay < 0 || l.MaxOutputBytes < 0 {
-		return Limits{}, domain.NewError(domain.ReasonInvalidArguments, "orchestrator_limits",
+		return Limits{}, domain.NewError(domain.ReasonInvalidArguments,
 			fmt.Sprintf("negative limit: timeout=%v wait_delay=%v max_output_bytes=%d", l.Timeout, l.WaitDelay, l.MaxOutputBytes), nil)
+
 	}
 	d := DefaultLimits()
 	if l.Timeout == 0 {

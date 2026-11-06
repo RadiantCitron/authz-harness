@@ -31,11 +31,11 @@ func RecoverIncompleteTail(path string, clock domain.Clock) (*RecoveryResult, er
 	lockPath := path + ".lock"
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open lock file %s: %v", lockPath, err), err)
 	}
 	defer lockFile.Close()
 	if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX); err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to acquire flock on %s: %v", lockPath, err), err)
 	}
 	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 
@@ -49,7 +49,7 @@ func RecoverIncompleteTail(path string, clock domain.Clock) (*RecoveryResult, er
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to read audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to read audit file: %v", err), err)
 	}
 	keep := bytes.LastIndexByte(data, '\n') + 1
 	partial := data[keep:]
@@ -68,26 +68,26 @@ func RecoverIncompleteTail(path string, clock domain.Clock) (*RecoveryResult, er
 	}
 
 	if err := storage.AtomicWriteFile(res.PartialPath, partial, 0o600); err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to preserve truncated tail: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to preserve truncated tail: %v", err), err)
 	}
 
 	f, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to open audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open audit file: %v", err), err)
 	}
 	if err := f.Truncate(int64(keep)); err != nil {
 		f.Close()
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to truncate audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to truncate audit file: %v", err), err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to sync audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to sync audit file: %v", err), err)
 	}
 	f.Close()
 
 	w, err := NewJSONLWriter(path)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", err.Error(), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, err.Error(), err)
 	}
 	defer w.Close()
 	ev := Event{
@@ -128,23 +128,23 @@ func partialBase(p string) string {
 func recoverNewline(path string, clock domain.Clock, recordNo int) (*RecoveryResult, error) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to open audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to open audit file: %v", err), err)
 	}
 	if _, err := f.Write([]byte{'\n'}); err != nil {
 		f.Close()
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to append newline: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to append newline: %v", err), err)
 	}
 	if err := f.Sync(); err != nil {
 		f.Close()
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to sync audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to sync audit file: %v", err), err)
 	}
 	if err := f.Close(); err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", fmt.Sprintf("failed to close audit file: %v", err), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to close audit file: %v", err), err)
 	}
 
 	w, err := NewJSONLWriter(path)
 	if err != nil {
-		return nil, domain.NewError(domain.ReasonAuditLogFailed, "audit", err.Error(), err)
+		return nil, domain.NewError(domain.ReasonAuditLogFailed, err.Error(), err)
 	}
 	defer w.Close()
 	ev := Event{

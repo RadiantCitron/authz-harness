@@ -11,8 +11,6 @@ import (
 	"authz-harness/internal/storage"
 )
 
-const stage = "budget_ledger"
-
 // Entry 는 토큰 하나의 예산 장부 줄이다.
 type Entry struct {
 	TokenJTI  string        `json:"token_jti"`
@@ -59,7 +57,7 @@ func NewFileLedger(path string, clock domain.Clock) (*FileLedger, error) {
 	)
 	l := &FileLedger{store: store, clock: clock}
 	if _, err := store.Read(); err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, stage, "failed to initialize budget ledger", err)
+		return nil, domain.NewError(domain.ReasonInternalError, "failed to initialize budget ledger", err)
 	}
 	return l, nil
 }
@@ -84,7 +82,7 @@ func classify(err error) error {
 	if errors.As(err, &de) {
 		return err
 	}
-	return domain.NewError(domain.ReasonInternalError, stage, "budget ledger I/O failure", err)
+	return domain.NewError(domain.ReasonInternalError, "budget ledger I/O failure", err)
 }
 
 // Init 는 루트 예산 엔트리를 등록한다. 같은 jti 의 재등록은 거부한다.
@@ -94,7 +92,7 @@ func (l *FileLedger) Init(jti string, b domain.Budget, exp int64) error {
 	}
 	return l.update(func(st *LedgerState) error {
 		if _, ok := st.Entries[jti]; ok {
-			return domain.NewError(domain.ReasonDelegationBudgetExceeded, stage, "budget entry already exists", nil)
+			return domain.NewError(domain.ReasonDelegationBudgetExceeded, "budget entry already exists", nil)
 		}
 		st.Entries[jti] = Entry{TokenJTI: jti, Initial: b, Remaining: b, ExpiresAt: exp}
 		return nil
@@ -107,7 +105,7 @@ func (l *FileLedger) Reserve(parentJTI, childJTI string, req domain.Budget, chil
 		return err
 	}
 	denied := func(msg string) error {
-		return domain.NewError(domain.ReasonDelegationBudgetExceeded, stage, msg, nil)
+		return domain.NewError(domain.ReasonDelegationBudgetExceeded, msg, nil)
 	}
 	return l.update(func(st *LedgerState) error {
 		parent, ok := st.Entries[parentJTI]
@@ -146,7 +144,7 @@ func (l *FileLedger) Reserve(parentJTI, childJTI string, req domain.Budget, chil
 
 func checkAmounts(calls, readBytes, writeBytes int64) error {
 	if calls < 0 || readBytes < 0 || writeBytes < 0 {
-		return domain.NewError(domain.ReasonInvalidArguments, stage, "negative budget amount", nil)
+		return domain.NewError(domain.ReasonInvalidArguments, "negative budget amount", nil)
 	}
 	return nil
 }
@@ -157,7 +155,7 @@ func (l *FileLedger) Consume(jti string, calls, readBytes, writeBytes int64) err
 		return err
 	}
 	exhausted := func(msg string) error {
-		return domain.NewError(domain.ReasonBudgetExhausted, stage, msg, nil)
+		return domain.NewError(domain.ReasonBudgetExhausted, msg, nil)
 	}
 	return l.update(func(st *LedgerState) error {
 		e, ok := st.Entries[jti]
@@ -196,7 +194,7 @@ func (l *FileLedger) Refund(jti string, calls, readBytes, writeBytes int64) erro
 	return l.update(func(st *LedgerState) error {
 		e, ok := st.Entries[jti]
 		if !ok {
-			return domain.NewError(domain.ReasonInternalError, stage, "budget entry not found for refund", nil)
+			return domain.NewError(domain.ReasonInternalError, "budget entry not found for refund", nil)
 		}
 		if e.Reclaimed {
 			return nil

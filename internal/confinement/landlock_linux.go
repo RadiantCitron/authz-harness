@@ -85,7 +85,7 @@ func landlockABI() int {
 }
 
 func unavailable(msg string, cause error) error {
-	return domain.NewError(domain.ReasonConfinementUnavailable, "confinement", msg, cause)
+	return domain.NewError(domain.ReasonConfinementUnavailable, msg, cause)
 }
 
 func handledFS(abi int) uint64 {

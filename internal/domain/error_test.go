@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"authz-harness/internal/domain"
@@ -17,7 +18,7 @@ import (
 // TC-010-01: *domain.Error 생성 및 errors.As 추출
 func TestTC_010_01_ErrorCreationAndExtraction(t *testing.T) {
 	sentinel := errors.New("sentinel token expired")
-	domErr := domain.NewError(domain.ReasonTokenExpired, "gate1", "token expired", sentinel)
+	domErr := domain.NewError(domain.ReasonTokenExpired, "token expired", sentinel)
 
 	// 다중 래핑
 	wrapped := fmt.Errorf("outer wrap: %w", fmt.Errorf("inner wrap: %w", domErr))
@@ -36,8 +37,8 @@ func TestTC_010_01_ErrorCreationAndExtraction(t *testing.T) {
 // TC-010-02: 에러 메시지 문구 변경 불변성
 func TestTC_010_02_MessageIndependence(t *testing.T) {
 	sentinel := errors.New("original underlying error")
-	err1 := domain.NewError(domain.ReasonTokenExpired, "gate1", "English message: token expired", sentinel)
-	err2 := domain.NewError(domain.ReasonTokenExpired, "gate1", "완전히 다른 한글 문구: 토큰이 만료되었습니다", sentinel)
+	err1 := domain.NewError(domain.ReasonTokenExpired, "English message: token expired", sentinel)
+	err2 := domain.NewError(domain.ReasonTokenExpired, "완전히 다른 한글 문구: 토큰이 만료되었습니다", sentinel)
 
 	if domain.ReasonFromError(err1, "") != domain.ReasonFromError(err2, "") {
 		t.Fatalf("reasons differ despite same Reason constant: %s vs %s",
@@ -53,7 +54,7 @@ func TestTC_010_02_MessageIndependence(t *testing.T) {
 // TC-010-03: 기존 센티넬 에러 errors.Is 호환성
 func TestTC_010_03_SentinelCompatibility(t *testing.T) {
 	sentinelSig := errors.New("invalid signature sentinel")
-	domErr := domain.NewError(domain.ReasonTokenInvalidSignature, "gate1", "signature fail", sentinelSig)
+	domErr := domain.NewError(domain.ReasonTokenInvalidSignature, "signature fail", sentinelSig)
 
 	if !errors.Is(domErr, sentinelSig) {
 		t.Fatal("errors.Is(domErr, sentinelSig) should be true via Unwrap")
@@ -119,7 +120,7 @@ func TestTC_010_04_AllReasonsMappedToExitCode(t *testing.T) {
 			t.Errorf("reason %s: expected exit code %d, got %d", tc.reason, tc.expected, got)
 		}
 
-		err := domain.NewError(tc.reason, "stage", "msg", nil)
+		err := domain.NewError(tc.reason, "msg", nil)
 		if err.ExitCode != tc.expected {
 			t.Errorf("NewError for reason %s: expected ExitCode %d, got %d", tc.reason, tc.expected, err.ExitCode)
 		}
@@ -190,5 +191,12 @@ func TestTC_010_10_NoStringContainsOnErrors(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("AP-10 violation detected! Found %d strings.Contains(*.Error(), ...) call(s):\n%s",
 			len(violations), violations)
+	}
+}
+
+// TC-090-01: domain.Error 는 단계 필드를 갖지 않는다. 단계는 엔진이 안다.
+func TestError_HasNoStageField(t *testing.T) {
+	if _, ok := reflect.TypeOf(domain.Error{}).FieldByName("Stage"); ok {
+		t.Fatal("domain.Error must not have a Stage field")
 	}
 }

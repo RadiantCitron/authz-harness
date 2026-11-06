@@ -12,7 +12,7 @@ import (
 func EncodePolicy(p Policy) (string, error) {
 	b, err := json.Marshal(p)
 	if err != nil {
-		return "", domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "cannot encode policy", err)
+		return "", domain.NewError(domain.ReasonInvalidArguments, "cannot encode policy", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }
@@ -22,12 +22,12 @@ func DecodePolicy(s string) (Policy, error) {
 	var p Policy
 	b, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
-		return p, domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "policy is not valid base64", err)
+		return p, domain.NewError(domain.ReasonInvalidArguments, "policy is not valid base64", err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
-		return Policy{}, domain.NewError(domain.ReasonInvalidArguments, stagePolicy, "policy is not valid JSON", err)
+		return Policy{}, domain.NewError(domain.ReasonInvalidArguments, "policy is not valid JSON", err)
 	}
 	return p, nil
 }

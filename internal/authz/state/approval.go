@@ -7,8 +7,6 @@ import (
 	"authz-harness/internal/domain"
 )
 
-const stageApprovalStore = "approval_store"
-
 // pruneExpired 는 now >= ExpiresAt 인 승인을 지운다.
 func pruneExpired(st *GrantsState, now time.Time) {
 	kept := st.Approvals[:0]
@@ -26,7 +24,7 @@ func CreateApproval(s Store, a domain.Approval, now time.Time) error {
 		pruneExpired(st, now)
 		for _, e := range st.Approvals {
 			if e.ID == a.ID {
-				return domain.NewError(domain.ReasonInternalError, stageApprovalStore, fmt.Sprintf("approval id %s already exists", a.ID), nil)
+				return domain.NewError(domain.ReasonInternalError, fmt.Sprintf("approval id %s already exists", a.ID), nil)
 			}
 		}
 		st.Approvals = append(st.Approvals, a)
@@ -48,11 +46,11 @@ func ConsumeApproval(s Store, id string, b domain.ApprovalBinding, now time.Time
 			}
 		}
 		if idx < 0 {
-			outcome = domain.NewError(domain.ReasonApprovalRequired, stageApprovalStore, "approval not found or already consumed", nil)
+			outcome = domain.NewError(domain.ReasonApprovalRequired, "approval not found or already consumed", nil)
 			return nil
 		}
 		if r := st.Approvals[idx].Matches(b, now); r != domain.ReasonAuthorized {
-			outcome = domain.NewError(r, stageApprovalStore, "approval does not match request", nil)
+			outcome = domain.NewError(r, "approval does not match request", nil)
 			return nil
 		}
 		st.Approvals = append(st.Approvals[:idx], st.Approvals[idx+1:]...)
