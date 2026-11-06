@@ -84,7 +84,7 @@ func TestStageView_NonPEPRecords(t *testing.T) {
 		side  string
 	}{
 		{"발급 거부", obsResult(domain.ExitTokenInvalid, domain.ReasonAuthnUnknownClient, harness.NoStageRecord, harness.AuditObservation{Action: "token.issue.deny"}), CellNotEnter, "토큰 발급: 차단"},
-		{"교환 거부", obsResult(domain.ExitAuthzDenied, domain.ReasonDelegationScopeExceeded, harness.NoStageRecord, harness.AuditObservation{Action: "token.exchange.deny"}), CellNotEnter, "토큰 교환: 차단"},
+		{"교환 거부", obsResult(domain.ExitAuthzDenied, domain.ReasonDelegationScopeExceeded, domain.StageDownscope, harness.AuditObservation{Action: "token.exchange.deny"}), CellNotEnter, "토큰 교환: 축소 위임 판정 차단"},
 		{"사전 감사 실패", obsResult(domain.ExitAuditFailure, "", harness.NoStageRecord, harness.AuditObservation{}), CellUnknown, "감사 기록: 실패"},
 		{"자식 미기동", obsResult(domain.ExitBadInput, "", harness.NoStageRecord, harness.AuditObservation{}), CellNotEnter, "진입 전: 차단"},
 		{"격리", obsResult(domain.ExitPathViolation, "", harness.NoStageRecord, harness.AuditObservation{Action: "agent.confined"}), CellNotEnter, "격리: 차단"},
@@ -110,6 +110,7 @@ func TestStageView_UnknownEvidence(t *testing.T) {
 	for name, res := range map[string]harness.ScenarioResult{
 		"모르는 단계":       obsResult(domain.ExitAuthzDenied, "", "weird", harness.AuditObservation{Action: "pep.deny", SchemaVersion: 4}),
 		"읽기 실패":        obsResult(domain.ExitAuthzDenied, "", "", harness.AuditObservation{ReadFailed: true}),
+		"모르는 교환 단계":    obsResult(domain.ExitAuthzDenied, "", "weird", harness.AuditObservation{Action: "token.exchange.deny", SchemaVersion: 4}),
 		"v3 기록":        obsResult(domain.ExitAuthzDenied, "", domain.StageAuthz, harness.AuditObservation{Action: "pep.deny", SchemaVersion: 3}),
 		"단계 없는 PEP 기록": obsResult(domain.ExitAuthzDenied, "", harness.NoStageRecord, harness.AuditObservation{Action: "pep.deny", SchemaVersion: 4}),
 	} {

@@ -62,3 +62,37 @@ func TestPEPStagesIDLabelHygiene(t *testing.T) {
 		}
 	}
 }
+
+// 080: ADR 0007 4장 기준으로 직접 적은 교환 단계 기대값.
+func TestExchangeStagesMatchSpec(t *testing.T) {
+	want := []struct {
+		id   domain.Stage
+		kind domain.StageKind
+		cond bool
+	}{
+		{"client_auth", "check", false},
+		{"delegation_subject", "check", false},
+		{"parent_token", "check", false},
+		{"lineage_epoch", "check", true},
+		{"downscope", "decide", false},
+		{"budget_downscope", "check", true},
+		{"token_issue", "execute", false},
+		{"budget_reserve", "settle", true},
+	}
+	got := domain.ExchangeStages()
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got), len(want))
+	}
+	pep := map[domain.Stage]bool{}
+	for _, s := range domain.PEPStages() {
+		pep[s.ID] = true
+	}
+	for i, w := range want {
+		if got[i].ID != w.id || got[i].Kind != w.kind || got[i].Conditional != w.cond || got[i].Label == "" {
+			t.Errorf("[%d] = %+v, want %+v", i, got[i], w)
+		}
+		if pep[got[i].ID] {
+			t.Errorf("exchange stage %q collides with a PEP stage", got[i].ID)
+		}
+	}
+}

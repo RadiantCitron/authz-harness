@@ -1,0 +1,591 @@
+{
+ "budget_downscope_static": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "child budget exceeds parent budget (DELEGATION_BUDGET_EXCEEDED)",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "DELEGATION_BUDGET_EXCEEDED",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "DELEGATION_BUDGET_EXCEEDED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "budget_no_ledger": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "budget ledger is not configured",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "INTERNAL_ERROR",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "INTERNAL_ERROR",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "budget_reserve_fail": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.issued",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-subagent",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt",
+    "subject": "worker-01",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "trace-snap"
+  },
+  {
+   "action": "token.exchanged",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "child_epoch": 1,
+    "child_jti": "\u003cx\u003e",
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "delegation_depth": 1,
+    "expires_at": "\u003cx\u003e",
+    "parent_epoch": 1,
+    "parent_jti": "\u003cx\u003e",
+    "parent_sub": "orchestrator-main",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "AUTHORIZED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": true,
+   "trace_id": "trace-snap"
+  },
+  {
+   "action": "token.issued",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-subagent",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt",
+    "subject": "worker-02",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "trace-snap"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-02",
+    "client_id": "client-subagent",
+    "details": "child calls exceed parent remaining (DELEGATION_BUDGET_EXCEEDED)",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "DELEGATION_BUDGET_EXCEEDED",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "DELEGATION_BUDGET_EXCEEDED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "client_auth": [
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "client-subagent: invalid client secret (AUTHN_INVALID_SECRET)",
+    "parent_jti": "",
+    "reason": "AUTHN_INVALID_SECRET",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "AUTHN_INVALID_SECRET",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "downscope": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "[file:write:docs/zzz.txt] not in parent scopes: requested scope exceeds parent scope (DELEGATION_SCOPE_EXCEEDED)",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "DELEGATION_SCOPE_EXCEEDED",
+    "scope": "file:write:docs/zzz.txt"
+   },
+   "reason": "DELEGATION_SCOPE_EXCEEDED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "lineage_epoch_mismatch": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "parent \"orchestrator-main\" epoch (1) does not match current epoch (5)",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "SUBJECT_EPOCH_REVOKED",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "SUBJECT_EPOCH_REVOKED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "lineage_snapshot_error": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "failed to query parent subject snapshot: pip down",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "INTERNAL_ERROR",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "INTERNAL_ERROR",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "parent_token": [
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "must contain 3 parts, got 1: malformed token structure (TOKEN_MALFORMED)",
+    "parent_jti": "",
+    "reason": "TOKEN_MALFORMED",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "TOKEN_MALFORMED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "subject_empty": [
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "",
+    "client_id": "client-subagent",
+    "details": "child subject is required",
+    "parent_jti": "",
+    "reason": "INVALID_TOKEN",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "INVALID_TOKEN",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "subject_not_allowed": [
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "someone-else",
+    "client_id": "client-subagent",
+    "details": "client client-subagent is not authorized to request tokens for subject someone-else (NO_ACTIVE_GRANT)",
+    "parent_jti": "",
+    "reason": "NO_ACTIVE_GRANT",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "NO_ACTIVE_GRANT",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "success_budget": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.issued",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-subagent",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt",
+    "subject": "worker-01",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "trace-snap"
+  },
+  {
+   "action": "token.exchanged",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "child_epoch": 1,
+    "child_jti": "\u003cx\u003e",
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "delegation_depth": 1,
+    "expires_at": "\u003cx\u003e",
+    "parent_epoch": 1,
+    "parent_jti": "\u003cx\u003e",
+    "parent_sub": "orchestrator-main",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "AUTHORIZED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": true,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "success_plain": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.issued",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-subagent",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt",
+    "subject": "worker-01",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "trace-snap"
+  },
+  {
+   "action": "token.exchanged",
+   "actor": "snap",
+   "decision": "allow",
+   "metadata": {
+    "child_epoch": 1,
+    "child_jti": "\u003cx\u003e",
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "delegation_depth": 1,
+    "expires_at": "\u003cx\u003e",
+    "parent_epoch": 1,
+    "parent_jti": "\u003cx\u003e",
+    "parent_sub": "orchestrator-main",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "AUTHORIZED",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": true,
+   "trace_id": "trace-snap"
+  }
+ ],
+ "token_issue_fail": [
+  {
+   "action": "token.issued",
+   "actor": "client-orchestrator",
+   "decision": "allow",
+   "metadata": {
+    "audience": "authz-harness",
+    "client_id": "client-orchestrator",
+    "epoch": 1,
+    "expires_at": "\u003cx\u003e",
+    "scope": "file:read:docs/a.txt file:write:docs/b.txt",
+    "subject": "orchestrator-main",
+    "tampered": false,
+    "token_alg": "EdDSA",
+    "token_jti": "\u003cx\u003e",
+    "token_kid": "\u003cx\u003e",
+    "token_typ": "at+jwt"
+   },
+   "schema_version": 4,
+   "step": "token.issue",
+   "success": true,
+   "token_jti": "\u003cx\u003e",
+   "trace_id": "\u003cauto\u003e"
+  },
+  {
+   "action": "token.exchange.deny",
+   "actor": "snap",
+   "decision": "deny",
+   "metadata": {
+    "child_sub": "worker-01",
+    "client_id": "client-subagent",
+    "details": "issuer down",
+    "parent_jti": "\u003cx\u003e",
+    "reason": "INVALID_TOKEN",
+    "scope": "file:read:docs/a.txt"
+   },
+   "reason": "INVALID_TOKEN",
+   "schema_version": 4,
+   "step": "token.exchange",
+   "success": false,
+   "trace_id": "trace-snap"
+  }
+ ]
+}

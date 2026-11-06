@@ -67,7 +67,13 @@ func BuildStageView(res harness.ScenarioResult) StageView {
 	case o.Action == "token.issue.deny":
 		return StageView{Cells: all(CellNotEnter, ""), Side: []string{fmt.Sprintf("토큰 발급: 차단 (%s)", reason)}}
 	case o.Action == "token.exchange.deny":
-		return StageView{Cells: all(CellNotEnter, ""), Side: []string{fmt.Sprintf("토큰 교환: 차단 (%s)", reason)}}
+		// 교환 거부는 PEP 에 닿지 않았다. 실패 단계가 정식 교환 단계에 있으면 이름을 붙이고, 아니면 판단 불가로 그린다.
+		for _, sp := range domain.ExchangeStages() {
+			if sp.ID == a.AuditActualStage {
+				return StageView{Cells: all(CellNotEnter, ""), Side: []string{fmt.Sprintf("토큰 교환: %s 차단 (%s)", sp.Label, reason)}}
+			}
+		}
+		return StageView{Cells: all(CellUnknown, "알 수 없는 교환 단계 기록")}
 	case strings.HasPrefix(o.Action, "agent."):
 		side := fmt.Sprintf("실행 감독: 차단 (%s)", reason)
 		if o.Action == "agent.confined" {

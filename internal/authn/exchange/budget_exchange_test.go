@@ -24,6 +24,7 @@ type budgetEnv struct {
 	ledgerP  string
 	clk      *mutableClock
 	auditP   string
+	aw       audit.Writer
 }
 
 func newBudgetEnv(t *testing.T, withExchangeLedger, withIssuerLedger bool) *budgetEnv {
@@ -67,7 +68,7 @@ func newBudgetEnv(t *testing.T, withExchangeLedger, withIssuerLedger bool) *budg
 		eopts = append(eopts, exchange.WithBudgetLedger(ledger))
 	}
 	svc := exchange.NewExchangeService(issuer, verifier, clients, nil, aw, clk, eopts...)
-	return &budgetEnv{svc, issuer, verifier, ledger, ledgerP, clk, filepath.Join(dir, "audit.jsonl")}
+	return &budgetEnv{svc, issuer, verifier, ledger, ledgerP, clk, filepath.Join(dir, "audit.jsonl"), aw}
 }
 
 func (e *budgetEnv) root(t *testing.T, b *domain.Budget) *token.IssueResult {

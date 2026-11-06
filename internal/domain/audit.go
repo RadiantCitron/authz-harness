@@ -8,7 +8,7 @@ type AuditEvent struct {
 	Timestamp     time.Time              `json:"timestamp"`
 	TraceID       string                 `json:"trace_id"`
 	Step          string                 `json:"step,omitempty"`
-	Stage         string                 `json:"stage,omitempty"` // v4: PEP 파이프라인 단계 ID(ADR 0007). 파이프라인 밖 이벤트는 비운다
+	Stage         string                 `json:"stage,omitempty"` // v4: 파이프라인 단계 ID(PEP 단계: ADR 0007, 토큰 교환 단계: domain.ExchangeStages). 파이프라인 밖 이벤트는 비운다
 	Actor         string                 `json:"actor"`
 	AgentID       string                 `json:"agent_id,omitempty"`
 	Action        string                 `json:"action,omitempty"`

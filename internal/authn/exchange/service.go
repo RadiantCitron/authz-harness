@@ -11,6 +11,7 @@ import (
 	"authz-harness/internal/authn/budget"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
+	"authz-harness/internal/pipeline"
 )
 
 // ExchangeRequest 는 RFC 8693 Token Exchange 요청 명세다.
@@ -49,6 +50,8 @@ type ExchangeService struct {
 	clock       domain.Clock
 	budgets     budget.Ledger
 	snapshots   domain.SnapshotProvider
+	engine      *pipeline.Engine[exchangeCall]
+	engineErr   error
 }
 
 // Option 은 ExchangeService 의 선택적 의존성 주입 옵션이다.
@@ -95,11 +98,79 @@ func NewExchangeService(
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.engine, s.engineErr = pipeline.New[exchangeCall](s.assemble(), nil)
 	return s
+}
+
+// exchangeCall 은 파이프라인이 단계마다 채워 가는 한 번의 교환 상태다. 필드마다 채우는 단계를 밝힌다.
+type exchangeCall struct {
+	ctx      context.Context
+	req      ExchangeRequest
+	auditCtx domain.AuditContext
+	now      time.Time // Exchange
+	traceID  string    // Exchange
+	actor    string    // Exchange
+
+	clientInfo     *token.ClientInfo // client_auth
+	parentClaims   domain.TokenClaims
+	parentJTI      string // parent_token 이 통과해야 채워진다. 그 전의 거부 감사에는 빈 값이 남는다
+	budgetInvolved bool   // parent_token
+	childEpoch     domain.Epoch
+	childDepth     int
+	child          *token.IssueResult // token_issue
+}
+
+// denial 은 단계 실패의 감사 사유와 호출자에게 돌려줄 오류를 함께 나른다.
+// 둘이 단계마다 다르고 일부는 *domain.Error 가 아니어서, 마감이 그대로 돌려준다.
+type denial struct {
+	reason  domain.Reason
+	details string
+	ret     error
+}
+
+func (d *denial) Error() string { return d.ret.Error() }
+func (d *denial) Unwrap() error { return d.ret }
+
+// kindOf 는 도메인 성격을 엔진 성격으로 바꾼다. pipeline 은 domain 을 모르므로 변환 표는 조립 쪽에 둔다.
+var kindOf = map[domain.StageKind]pipeline.Kind{
+	domain.KindCheck:   pipeline.Check,
+	domain.KindDecide:  pipeline.Decide,
+	domain.KindConsume: pipeline.Consume,
+	domain.KindRecord:  pipeline.Record,
+	domain.KindExecute: pipeline.Execute,
+	domain.KindSettle:  pipeline.Settle,
+}
+
+func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bool, run func(*exchangeCall) error) pipeline.Step[exchangeCall] {
+	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: kindOf[kind], Run: func(_ context.Context, c *exchangeCall) error { return run(c) }}
+	if applies != nil {
+		s.Applies = applies
+	}
+	return s
+}
+
+// assemble 은 교환의 조립 목록이다. 순서와 성격은 domain.ExchangeStages() 와 같아야 하며 시험이 강제한다.
+// 교환은 Compensate 를 쓰지 않는다: 마지막 단계(예약)의 실패를 되돌릴 앞선 소비가 없다.
+func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
+	hasSnapshots := func(*exchangeCall) bool { return s.snapshots != nil }
+	hasBudget := func(c *exchangeCall) bool { return c.budgetInvolved }
+	return []pipeline.Step[exchangeCall]{
+		step(domain.StageClientAuth, domain.KindCheck, nil, s.clientAuth),
+		step(domain.StageDelegationSubject, domain.KindCheck, nil, s.delegationSubject),
+		step(domain.StageParentToken, domain.KindCheck, nil, s.parentToken),
+		step(domain.StageLineageEpoch, domain.KindCheck, hasSnapshots, s.lineageEpoch),
+		step(domain.StageDownscope, domain.KindDecide, nil, s.downscope),
+		step(domain.StageBudgetDownscope, domain.KindCheck, hasBudget, s.budgetDownscope),
+		step(domain.StageTokenIssue, domain.KindExecute, nil, s.tokenIssue),
+		step(domain.StageBudgetReserve, domain.KindSettle, hasBudget, s.budgetReserve),
+	}
 }
 
 // Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
 func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (*ExchangeResult, error) {
+	if s.engineErr != nil {
+		return nil, domain.NewError(domain.ReasonInternalError, "exchange", "exchange pipeline assembly failed (fail-closed)", s.engineErr)
+	}
 	now := s.clock.Now().UTC()
 	traceID := auditCtx.TraceID
 	if traceID == "" {
@@ -109,181 +180,46 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	if actor == "" {
 		actor = req.ClientID
 	}
+	c := &exchangeCall{ctx: ctx, req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
+	return s.finalize(c, s.engine.Run(ctx, c))
+}
 
-	// 1. 클라이언트 인증
-	clientInfo, err := s.clients.AuthenticateClient(req.ClientID, req.ClientSecret)
-	if err != nil {
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonAuthnInvalidSecret, err.Error()); aerr != nil {
+// finalize 는 단일 마감이다. 거부 감사, AUDIT_LOG_FAILED 승격, 성공 감사를 한 곳에서 처리한다.
+func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*ExchangeResult, error) {
+	if tr.Err != nil {
+		var d *denial
+		if !errors.As(tr.Err, &d) {
+			d = &denial{reason: domain.ReasonInternalError, details: tr.Err.Error(), ret: tr.Err}
+		}
+		if aerr := s.recordAuditDenied(c, domain.Stage(tr.Failed), d.reason, d.details); aerr != nil {
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
 		}
-		return nil, fmt.Errorf("client authentication failed: %w", err)
+		return nil, d.ret
 	}
 
-	// 2. Child Subject 허용 여부 검사
-	if strings.TrimSpace(req.ChildSubject) == "" {
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonInvalidToken, "child subject is required"); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-		}
-		return nil, errors.New("child subject is required")
-	}
-	if !clientInfo.IsSubjectAllowed(req.ChildSubject) {
-		err := fmt.Errorf("client %s is not authorized to request tokens for subject %s (%s)",
-			req.ClientID, req.ChildSubject, domain.ReasonNoActiveGrant)
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", domain.ReasonNoActiveGrant, err.Error()); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-		}
-		return nil, err
-	}
-
-	// 3. 부모 토큰 Gate 1 무결성 및 암호학적 검증
-	// 교환 시 부모 토큰의 jti 를 즉시 소비(RecordReplay)하지 않고, 무결성/유효성만 검사한다.
-	verifiedParent, err := s.verifier.VerifyToken(req.ParentToken, token.VerifyOptions{
-		RecordReplay: false,
-	}, auditCtx)
-	if err != nil {
-		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, "", reason, err.Error()); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-		}
-		return nil, domain.NewError(reason, "exchange", "parent token verification failed", err)
-	}
-
-	parentClaims := verifiedParent.Claims
-
-	// 3-1. 부모 및 위임 조상(act 사슬) Security Epoch 실시간 사전 검증 (SnapshotProvider 가 배선된 경우)
-	if s.snapshots != nil {
-		snap, snapErr := s.snapshots.GetSubjectSnapshot(ctx, parentClaims.Subject)
-		if snapErr != nil || snap == nil {
-			details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
-			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, details); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-			}
-			return nil, domain.NewError(domain.ReasonInternalError, "exchange", details, snapErr)
-		}
-		parentEpoch := domain.Epoch(parentClaims.Epoch)
-		if parentEpoch < 1 {
-			parentEpoch = 1
-		}
-		if parentEpoch != snap.CurrentEpoch {
-			details := fmt.Sprintf("parent %q epoch (%d) does not match current epoch (%d)", parentClaims.Subject, parentEpoch, snap.CurrentEpoch)
-			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonSubjectEpochRevoked, details); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-			}
-			return nil, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)
-		}
-		for a := parentClaims.Actor; a != nil; a = a.Actor {
-			if a.Epoch < 1 || snap.SubjectEpochs == nil || snap.SubjectEpochs.Get(a.Subject) != a.Epoch {
-				details := fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", a.Subject, a.Epoch)
-				if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonSubjectEpochRevoked, details); aerr != nil {
-					return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-				}
-				return nil, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)
-			}
-		}
-	}
-
-	// 4. 축소 위임(Downscoping) 불변식 검증
-	if err := s.validator.ValidateDownscope(&parentClaims, req.ChildSubject, req.Scope, req.TTL, now); err != nil {
-		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-		}
-		return nil, domain.NewError(reason, "exchange", "downscope validation failed", err)
-	}
-
-	// 4-1. 예산 정적 검사 및 원장 필수 확인 (예산이 관여할 때만)
-	budgetInvolved := parentClaims.Budget != nil || req.Budget != nil
-	if budgetInvolved {
-		if err := ValidateBudgetDownscope(parentClaims.Budget, req.Budget); err != nil {
-			reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
-			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-			}
-			return nil, domain.NewError(reason, "exchange", "budget downscope validation failed", err)
-		}
-		if s.budgets == nil {
-			err := errors.New("budget ledger is not configured")
-			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInternalError, err.Error()); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-			}
-			return nil, domain.NewError(domain.ReasonInternalError, "exchange", "budget exchange requires a budget ledger", err)
-		}
-	}
-
-	// 5. act 체인 구성 및 깊이 계산
-	// 부모 정보를 현재 act 로 지정하고 부모의 기존 act 체인을 중첩
-	childActor := &domain.ActorClaim{
-		Subject: parentClaims.Subject,
-		JWTID:   parentClaims.JWTID,
-		Epoch:   parentClaims.Epoch,
-		Actor:   parentClaims.Actor,
-	}
-	childDepth := parentClaims.DelegationDepth + 1
-	childEpoch := req.ChildEpoch
-	if childEpoch == 0 {
-		childEpoch = 1
-	}
-
-	aud := req.Audience
-	if strings.TrimSpace(aud) == "" {
-		aud = parentClaims.Audience
-	}
-
-	// 6. 자식 토큰 발급
-	issueReq := token.IssueRequest{
-		ClientID:        req.ClientID,
-		ClientSecret:    req.ClientSecret,
-		Subject:         req.ChildSubject,
-		Scope:           req.Scope,
-		Audience:        aud,
-		TTL:             req.TTL,
-		Epoch:           childEpoch,
-		Actor:           childActor,
-		DelegationDepth: childDepth,
-		Budget:          req.Budget,
-	}
-
-	childResult, err := s.issuer.IssueToken(issueReq, token.IssueOptions{}, auditCtx)
-	if err != nil {
-		if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, domain.ReasonInvalidToken, err.Error()); aerr != nil {
-			return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-		}
-		return nil, fmt.Errorf("failed to issue child token: %w", err)
-	}
-
-	// 6-1. 원장 예약. 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
-	if budgetInvolved {
-		if err := s.budgets.Reserve(parentClaims.JWTID, childResult.Claims.JWTID, *req.Budget, childResult.Claims.ExpiresAt); err != nil {
-			reason := domain.ReasonFromError(err, domain.ReasonInternalError)
-			if aerr := s.recordAuditDenied(now, traceID, actor, req, parentClaims.JWTID, reason, err.Error()); aerr != nil {
-				return nil, domain.NewError(domain.ReasonAuditLogFailed, "token_exchange", "failed to record exchange deny audit log", aerr)
-			}
-			return nil, domain.NewError(reason, "exchange", "budget reservation failed", err)
-		}
-	}
-
-	// 7. Zero Leakage 감사 이벤트 기록: token.exchanged (원시 JWT 노출 배제)
+	// Zero Leakage 감사 이벤트 기록: token.exchanged (원시 JWT 노출 배제). Stage 는 마지막 통과 단계다.
 	if s.auditWriter != nil {
 		auditEv := audit.Event{
-			Timestamp: now,
-			TraceID:   traceID,
+			Timestamp: c.now,
+			TraceID:   c.traceID,
 			Step:      "token.exchange",
-			Actor:     actor,
+			Stage:     tr.Passed[len(tr.Passed)-1],
+			Actor:     c.actor,
 			Action:    "token.exchanged",
 			Decision:  "allow",
 			Reason:    string(domain.ReasonAuthorized),
 			Success:   true,
 			Metadata: map[string]interface{}{
-				"parent_jti":       parentClaims.JWTID,
-				"parent_sub":       parentClaims.Subject,
-				"child_jti":        childResult.Claims.JWTID,
-				"child_sub":        childResult.Claims.Subject,
-				"client_id":        req.ClientID,
-				"scope":            childResult.Claims.Scope,
-				"delegation_depth": childDepth,
-				"child_epoch":      childEpoch,
-				"parent_epoch":     parentClaims.Epoch,
-				"expires_at":       childResult.Claims.ExpiresAt,
+				"parent_jti":       c.parentClaims.JWTID,
+				"parent_sub":       c.parentClaims.Subject,
+				"child_jti":        c.child.Claims.JWTID,
+				"child_sub":        c.child.Claims.Subject,
+				"client_id":        c.req.ClientID,
+				"scope":            c.child.Claims.Scope,
+				"delegation_depth": c.childDepth,
+				"child_epoch":      c.childEpoch,
+				"parent_epoch":     c.parentClaims.Epoch,
+				"expires_at":       c.child.Claims.ExpiresAt,
 			},
 		}
 		if err := s.auditWriter.Log(auditEv); err != nil {
@@ -292,34 +228,161 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	}
 
 	return &ExchangeResult{
-		TokenString:     childResult.TokenString,
-		Claims:          childResult.Claims,
-		ParentJTI:       parentClaims.JWTID,
-		DelegationDepth: childDepth,
+		TokenString:     c.child.TokenString,
+		Claims:          c.child.Claims,
+		ParentJTI:       c.parentClaims.JWTID,
+		DelegationDepth: c.childDepth,
 	}, nil
 }
 
-func (s *ExchangeService) recordAuditDenied(now time.Time, traceID, actor string, req ExchangeRequest, parentJTI string, reason domain.Reason, details string) error {
+// client_auth: 클라이언트 인증
+func (s *ExchangeService) clientAuth(c *exchangeCall) error {
+	info, err := s.clients.AuthenticateClient(c.req.ClientID, c.req.ClientSecret)
+	if err != nil {
+		return &denial{domain.ReasonAuthnInvalidSecret, err.Error(), fmt.Errorf("client authentication failed: %w", err)}
+	}
+	c.clientInfo = info
+	return nil
+}
+
+// delegation_subject: 자식 주체 허용 여부
+func (s *ExchangeService) delegationSubject(c *exchangeCall) error {
+	if strings.TrimSpace(c.req.ChildSubject) == "" {
+		err := errors.New("child subject is required")
+		return &denial{domain.ReasonInvalidToken, "child subject is required", err}
+	}
+	if !c.clientInfo.IsSubjectAllowed(c.req.ChildSubject) {
+		err := fmt.Errorf("client %s is not authorized to request tokens for subject %s (%s)",
+			c.req.ClientID, c.req.ChildSubject, domain.ReasonNoActiveGrant)
+		return &denial{domain.ReasonNoActiveGrant, err.Error(), err}
+	}
+	return nil
+}
+
+// parent_token: 부모 토큰 무결성·암호학적 검증. 교환 시 부모 jti 를 소비(RecordReplay)하지 않고 유효성만 본다.
+func (s *ExchangeService) parentToken(c *exchangeCall) error {
+	verified, err := s.verifier.VerifyToken(c.req.ParentToken, token.VerifyOptions{RecordReplay: false}, c.auditCtx)
+	if err != nil {
+		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
+		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "parent token verification failed", err)}
+	}
+	c.parentClaims = verified.Claims
+	c.parentJTI = c.parentClaims.JWTID
+	c.budgetInvolved = c.parentClaims.Budget != nil || c.req.Budget != nil
+	return nil
+}
+
+// lineage_epoch: 부모 및 위임 조상(act 사슬) Security Epoch 실시간 대조 (SnapshotProvider 가 배선된 경우)
+func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
+	p := &c.parentClaims
+	snap, snapErr := s.snapshots.GetSubjectSnapshot(c.ctx, p.Subject)
+	if snapErr != nil || snap == nil {
+		details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
+		return &denial{domain.ReasonInternalError, details, domain.NewError(domain.ReasonInternalError, "exchange", details, snapErr)}
+	}
+	parentEpoch := domain.Epoch(p.Epoch)
+	if parentEpoch < 1 {
+		parentEpoch = 1
+	}
+	if parentEpoch != snap.CurrentEpoch {
+		details := fmt.Sprintf("parent %q epoch (%d) does not match current epoch (%d)", p.Subject, parentEpoch, snap.CurrentEpoch)
+		return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)}
+	}
+	for a := p.Actor; a != nil; a = a.Actor {
+		if a.Epoch < 1 || snap.SubjectEpochs == nil || snap.SubjectEpochs.Get(a.Subject) != a.Epoch {
+			details := fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", a.Subject, a.Epoch)
+			return &denial{domain.ReasonSubjectEpochRevoked, details, domain.NewError(domain.ReasonSubjectEpochRevoked, "exchange", details, nil)}
+		}
+	}
+	return nil
+}
+
+// downscope: 축소 위임(Downscoping) 불변식
+func (s *ExchangeService) downscope(c *exchangeCall) error {
+	if err := s.validator.ValidateDownscope(&c.parentClaims, c.req.ChildSubject, c.req.Scope, c.req.TTL, c.now); err != nil {
+		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
+		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "downscope validation failed", err)}
+	}
+	return nil
+}
+
+// budget_downscope: 예산 정적 검사 및 원장 필수 확인 (예산이 관여할 때만)
+func (s *ExchangeService) budgetDownscope(c *exchangeCall) error {
+	if err := ValidateBudgetDownscope(c.parentClaims.Budget, c.req.Budget); err != nil {
+		reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
+		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "budget downscope validation failed", err)}
+	}
+	if s.budgets == nil {
+		err := errors.New("budget ledger is not configured")
+		return &denial{domain.ReasonInternalError, err.Error(), domain.NewError(domain.ReasonInternalError, "exchange", "budget exchange requires a budget ledger", err)}
+	}
+	return nil
+}
+
+// token_issue: act 체인 구성과 자식 토큰 발급
+func (s *ExchangeService) tokenIssue(c *exchangeCall) error {
+	p := &c.parentClaims
+	childActor := &domain.ActorClaim{Subject: p.Subject, JWTID: p.JWTID, Epoch: p.Epoch, Actor: p.Actor}
+	c.childDepth = p.DelegationDepth + 1
+	c.childEpoch = c.req.ChildEpoch
+	if c.childEpoch == 0 {
+		c.childEpoch = 1
+	}
+	aud := c.req.Audience
+	if strings.TrimSpace(aud) == "" {
+		aud = p.Audience
+	}
+	res, err := s.issuer.IssueToken(token.IssueRequest{
+		ClientID:        c.req.ClientID,
+		ClientSecret:    c.req.ClientSecret,
+		Subject:         c.req.ChildSubject,
+		Scope:           c.req.Scope,
+		Audience:        aud,
+		TTL:             c.req.TTL,
+		Epoch:           c.childEpoch,
+		Actor:           childActor,
+		DelegationDepth: c.childDepth,
+		Budget:          c.req.Budget,
+	}, token.IssueOptions{}, c.auditCtx)
+	if err != nil {
+		return &denial{domain.ReasonInvalidToken, err.Error(), fmt.Errorf("failed to issue child token: %w", err)}
+	}
+	c.child = res
+	return nil
+}
+
+// budget_reserve: 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
+// 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
+func (s *ExchangeService) budgetReserve(c *exchangeCall) error {
+	if err := s.budgets.Reserve(c.parentClaims.JWTID, c.child.Claims.JWTID, *c.req.Budget, c.child.Claims.ExpiresAt); err != nil {
+		reason := domain.ReasonFromError(err, domain.ReasonInternalError)
+		return &denial{reason, err.Error(), domain.NewError(reason, "exchange", "budget reservation failed", err)}
+	}
+	return nil
+}
+
+// recordAuditDenied 는 거부 감사의 유일한 기록 지점이다. Stage 는 실패한 단계다.
+func (s *ExchangeService) recordAuditDenied(c *exchangeCall, stage domain.Stage, reason domain.Reason, details string) error {
 	if s.auditWriter == nil {
 		return nil
 	}
-	auditEv := audit.Event{
-		Timestamp: now,
-		TraceID:   traceID,
+	return s.auditWriter.Log(audit.Event{
+		Timestamp: c.now,
+		TraceID:   c.traceID,
 		Step:      "token.exchange",
-		Actor:     actor,
+		Stage:     string(stage),
+		Actor:     c.actor,
 		Action:    "token.exchange.deny",
 		Decision:  "deny",
 		Reason:    string(reason),
 		Success:   false,
 		Metadata: map[string]interface{}{
-			"client_id":  req.ClientID,
-			"child_sub":  req.ChildSubject,
-			"parent_jti": parentJTI,
-			"scope":      req.Scope,
+			"client_id":  c.req.ClientID,
+			"child_sub":  c.req.ChildSubject,
+			"parent_jti": c.parentJTI,
+			"scope":      c.req.Scope,
 			"reason":     string(reason),
 			"details":    details,
 		},
-	}
-	return s.auditWriter.Log(auditEv)
+	})
 }
