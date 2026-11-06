@@ -113,15 +113,8 @@ func (s *papService) createGrant(ctx context.Context, req CreateGrantRequest) (*
 		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: validation failed", err)
 	}
 
-	err := s.store.Update(func(st *state.GrantsState) error {
-		st.Grants = append(st.Grants, *grant)
-		return nil
-	})
-	if err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to store grant", err)
-	}
-
-	// 감사 이벤트 기록 (실패 시 방금 추가한 Grant 를 롤백하여 무증거 상태 변경 방지)
+	// 감사를 저장 앞에 기록한다 (ADR 0010: 늘림 쪽은 대상이 새 항목이라 저장 전 감사가 안전하다).
+	// 기록이 실패하면 저장하지 않으므로 되돌릴 것이 없고, 저장 전 프로세스가 죽어도 증거만 남는다.
 	if s.audit != nil {
 		auditEv := audit.Event{
 			Timestamp: now,
@@ -141,17 +134,17 @@ func (s *papService) createGrant(ctx context.Context, req CreateGrantRequest) (*
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			rbErr := s.store.Update(func(st *state.GrantsState) error {
-				for i := len(st.Grants) - 1; i >= 0; i-- {
-					if st.Grants[i].ID == grant.ID {
-						st.Grants = append(st.Grants[:i], st.Grants[i+1:]...)
-						break
-					}
-				}
-				return nil
-			})
-			return nil, auditFailedAfterCreate("grant", err, rbErr)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: failed to record grant audit log; grant not stored", err)
 		}
+	}
+
+	err := s.store.Update(func(st *state.GrantsState) error {
+		st.Grants = append(st.Grants, *grant)
+		return nil
+	})
+	if err != nil {
+		// 저장 실패: 호출자가 같은 grant_id 로 거부 기록을 남길 수 있도록 grant 를 함께 돌려준다.
+		return grant, domain.NewError(domain.ReasonInternalError, "pap: failed to store grant", err)
 	}
 
 	return grant, nil
@@ -306,11 +299,7 @@ func (s *papService) createApproval(ctx context.Context, req CreateApprovalReque
 		CreatedAt: now,
 		ExpiresAt: now.Add(ttl),
 	}
-	if err := state.CreateApproval(s.store, a, now); err != nil {
-		return nil, domain.NewError(domain.ReasonInternalError, "pap: failed to store approval", err)
-	}
-
-	// 감사는 잠금(Update)을 반환한 뒤에만 기록하며, 실패 시 방금 추가한 승인을 롤백한다.
+	// 감사를 저장 앞에 기록한다. 기록이 실패하면 저장하지 않는다 (ADR 0010).
 	if s.audit != nil {
 		ev := audit.Event{
 			Timestamp: now,
@@ -333,17 +322,11 @@ func (s *papService) createApproval(ctx context.Context, req CreateApprovalReque
 			},
 		}
 		if err := s.audit.Log(ev); err != nil {
-			rbErr := s.store.Update(func(st *state.GrantsState) error {
-				for i := len(st.Approvals) - 1; i >= 0; i-- {
-					if st.Approvals[i].ID == a.ID {
-						st.Approvals = append(st.Approvals[:i], st.Approvals[i+1:]...)
-						break
-					}
-				}
-				return nil
-			})
-			return nil, auditFailedAfterCreate("approval", err, rbErr)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: failed to record approval audit log; approval not stored", err)
 		}
+	}
+	if err := state.CreateApproval(s.store, a, now); err != nil {
+		return &a, domain.NewError(domain.ReasonInternalError, "pap: failed to store approval", err)
 	}
 	return &a, nil
 }
@@ -364,26 +347,20 @@ func (s *papService) ListApprovals(ctx context.Context, subject string) ([]domai
 	return out, nil
 }
 
-// auditFailedAfterCreate 는 늘리는 변경의 감사 실패를 오류로 만든다.
-// 되돌리기도 실패하면 두 오류를 함께 담고 항목이 남았을 수 있음을 알린다(ADR 0010).
-func auditFailedAfterCreate(kind string, auditErr, rollbackErr error) error {
-	if rollbackErr == nil {
-		return domain.NewError(domain.ReasonAuditLogFailed, "pap: audit logging failed", auditErr)
-	}
-	return domain.NewError(domain.ReasonAuditLogFailed,
-		fmt.Sprintf("pap: audit logging failed and rollback failed; the %s may remain", kind),
-		errors.Join(auditErr, rollbackErr))
-}
-
 // recordDenied 는 쓰기 명령의 실패를 <action> 거부 기록으로 남긴다(계획 019 D-01·D-03).
 // 사용자 입력 문자열과 오류 문구는 담지 않고 사유 코드만 담는다.
+// ids 는 [키, 값] 쌍이며 프로그램이 만든 ID(grant_id, approval_id)만 받는다: 늘림 쪽 저장 실패를 앞선 created 기록과 잇는다.
 // 이미 감사 실패인 오류는 다시 기록하지 않고, 기록이 실패하면 원래 거부 대신 AUDIT_LOG_FAILED 를 돌려준다.
-func (s *papService) recordDenied(step, action string, err error) error {
+func (s *papService) recordDenied(step, action string, err error, ids ...string) error {
 	if err == nil || s.audit == nil || domain.ReasonFromError(err, "") == domain.ReasonAuditLogFailed {
 		return err
 	}
 	now := s.clock.Now().UTC()
 	reason := domain.ReasonFromError(err, domain.ReasonInternalError)
+	meta := map[string]interface{}{"reason": string(reason)}
+	for i := 0; i+1 < len(ids); i += 2 {
+		meta[ids[i]] = ids[i+1]
+	}
 	if aerr := s.audit.Log(audit.Event{
 		Timestamp: now,
 		TraceID:   fmt.Sprintf("%s-deny-%d", strings.ReplaceAll(step, ".", "-"), now.UnixNano()),
@@ -393,7 +370,7 @@ func (s *papService) recordDenied(step, action string, err error) error {
 		Decision:  "deny",
 		Reason:    string(reason),
 		Success:   false,
-		Metadata:  map[string]interface{}{"reason": string(reason)},
+		Metadata:  meta,
 	}); aerr != nil {
 		return domain.NewError(domain.ReasonAuditLogFailed, "pap: failed to record denial audit log", aerr)
 	}
@@ -404,6 +381,9 @@ func (s *papService) recordDenied(step, action string, err error) error {
 func (s *papService) CreateGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
 	g, err := s.createGrant(ctx, req)
 	if err != nil {
+		if g != nil { // 저장 실패: 앞서 기록한 grant.created 와 이을 ID
+			return nil, s.recordDenied("pap.create_grant", "grant.create.deny", err, "grant_id", g.ID)
+		}
 		return nil, s.recordDenied("pap.create_grant", "grant.create.deny", err)
 	}
 	return g, nil
@@ -431,6 +411,9 @@ func (s *papService) BumpEpoch(ctx context.Context, subject string) (domain.Epoc
 func (s *papService) CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
 	a, err := s.createApproval(ctx, req)
 	if err != nil {
+		if a != nil { // 저장 실패: 앞서 기록한 approval.granted 와 이을 ID
+			return nil, s.recordDenied("pap.create_approval", "approval.create.deny", err, "approval_id", a.ID)
+		}
 		return nil, s.recordDenied("pap.create_approval", "approval.create.deny", err)
 	}
 	return a, nil

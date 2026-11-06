@@ -55,22 +55,6 @@ func (g *gateWriter) Log(audit.Event) error {
 }
 func (g *gateWriter) Close() error { return nil }
 
-// failNthUpdateStore 는 n 번째 Update 호출만 실패시킨다(1-base).
-type failNthUpdateStore struct {
-	state.Store
-	n, calls int
-}
-
-var errRollbackInjected = errors.New("rollback injected")
-
-func (f *failNthUpdateStore) Update(fn func(*state.GrantsState) error) error {
-	f.calls++
-	if f.calls == f.n {
-		return errRollbackInjected
-	}
-	return f.Store.Update(fn)
-}
-
 func mustGrant(t *testing.T, svc pap.Service, res string) *domain.Grant {
 	t.Helper()
 	g, err := svc.CreateGrant(context.Background(), pap.CreateGrantRequest{Subject: "w", Action: domain.ActionFileRead, Resource: res})
@@ -187,7 +171,7 @@ func TestAF_P6_RetryAfterAuditRecovery(t *testing.T) {
 	}
 }
 
-func TestAF_P7_CreateRollbackOnAuditFailure(t *testing.T) {
+func TestAF_P7_CreateAuditFailureStoresNothing(t *testing.T) {
 	r := newAFRig(t)
 	ctx := context.Background()
 	fs := pap.NewService(r.st, failingWriter{})
@@ -200,31 +184,5 @@ func TestAF_P7_CreateRollbackOnAuditFailure(t *testing.T) {
 	loaded, _ := r.st.Load()
 	if len(loaded.Grants) != 0 || len(loaded.Approvals) != 0 {
 		t.Fatalf("entries must be gone: %+v", loaded)
-	}
-}
-
-func TestAF_P8_RollbackErrorNotSwallowed(t *testing.T) {
-	ctx := context.Background()
-	for _, name := range []string{"grant", "approval"} {
-		t.Run(name, func(t *testing.T) {
-			r := newAFRig(t)
-			fst := &failNthUpdateStore{Store: r.st, n: 2} // 1: 저장, 2: 되돌리기
-			svc := pap.NewService(fst, failingWriter{})
-			var err error
-			if name == "grant" {
-				_, err = svc.CreateGrant(ctx, pap.CreateGrantRequest{Subject: "w", Action: domain.ActionFileRead, Resource: "x"})
-			} else {
-				_, err = svc.CreateApproval(ctx, pap.CreateApprovalRequest{Subject: "w", Action: domain.ActionFileWrite, Resource: "x", TokenJTI: "j"})
-			}
-			if domain.ReasonFromError(err, "") != domain.ReasonAuditLogFailed {
-				t.Fatalf("reason: %v", err)
-			}
-			if !errors.Is(err, errRollbackInjected) {
-				t.Errorf("rollback error missing from chain: %v", err)
-			}
-			if !strings.Contains(strings.ToLower(err.Error()), "may remain") {
-				t.Errorf("message must say the entry may remain: %v", err)
-			}
-		})
 	}
 }
