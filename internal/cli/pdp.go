@@ -89,9 +89,9 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 		return domain.ExitBadInput
 	}
 
-	action := domain.Action(act)
-	if !domain.IsValidAction(action) {
-		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read, file:write, net:fetch or exec:run)\n", act)
+	action, err := domain.ParseAction(act)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitBadInput
 	}
 
@@ -143,9 +143,9 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 		return domain.ExitBadInput
 	}
 
-	action := domain.Action(act)
-	if !domain.IsValidAction(action) {
-		fmt.Fprintf(r.errOut, "Error: invalid action '%s' (must be file:read, file:write, net:fetch or exec:run)\n", act)
+	action, err := domain.ParseAction(act)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitBadInput
 	}
 

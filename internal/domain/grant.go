@@ -63,6 +63,7 @@ var (
 	ErrEmptyGrantID   = errors.New("grant: id is required")
 	ErrEmptySubject   = errors.New("grant: subject is required")
 	ErrEmptyAction    = errors.New("grant: action is required")
+	ErrInvalidAction  = errors.New("grant: action must be file:read, file:write, net:fetch or exec:run")
 	ErrEmptyResource  = errors.New("grant: resource is required")
 	ErrInvalidStatus  = errors.New("grant: invalid status")
 	ErrRelativeEscape = errors.New("grant: resource path must not contain parent directory traversal (..)")
@@ -92,6 +93,9 @@ func (g *Grant) Validate() error {
 	}
 	if strings.TrimSpace(string(g.Action)) == "" {
 		return ErrEmptyAction
+	}
+	if !IsValidAction(g.Action) {
+		return ErrInvalidAction
 	}
 	if strings.TrimSpace(g.Resource) == "" {
 		return ErrEmptyResource

@@ -81,7 +81,7 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	)
 
 	fs.StringVar(&tokenFlag, "token", "", "서브에이전트에 주입할 축소 위임 Access Token (필수)")
-	fs.StringVar(&actionFlag, "action", "file:read", "수행할 작업 (file:read / file:write / read / write)")
+	fs.StringVar(&actionFlag, "action", "file:read", "수행할 작업 (file:read / file:write / net:fetch / exec:run / read / write)")
 	fs.StringVar(&fileFlag, "file", "", "작업 대상 파일 상대 경로 (필수)")
 	fs.StringVar(&dataFlag, "data", "", "쓰기 작업 시 기록할 내용")
 	fs.DurationVar(&timeoutFlag, "timeout", 10*time.Second, "자식 프로세스 실행 타임아웃")
@@ -107,17 +107,12 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitBadInput
 	}
 
-	cleanAction := strings.ToLower(strings.TrimSpace(actionFlag))
-	if cleanAction == "read" {
-		cleanAction = "file:read"
-	} else if cleanAction == "write" {
-		cleanAction = "file:write"
-	}
-
-	if cleanAction != "file:read" && cleanAction != "file:write" {
-		fmt.Fprintf(r.stderr, "Error: invalid -action: %s (must be read or write)\n", actionFlag)
+	parsedAction, err := domain.ParseAction(actionFlag)
+	if err != nil {
+		fmt.Fprintf(r.stderr, "Error: invalid -action: %v\n", err)
 		return domain.ExitBadInput
 	}
+	cleanAction := string(parsedAction)
 
 	traceID := strings.TrimSpace(traceIDFlag)
 	if traceID == "" {

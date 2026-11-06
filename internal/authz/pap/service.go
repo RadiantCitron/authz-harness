@@ -291,6 +291,9 @@ func (s *papService) createApproval(ctx context.Context, req CreateApprovalReque
 	if sub == "" || strings.TrimSpace(string(req.Action)) == "" || res == "" || jti == "" {
 		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: approval requires subject, action, resource, jti", nil)
 	}
+	if !domain.IsValidAction(req.Action) {
+		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: approval action must be file:read, file:write, net:fetch or exec:run", nil)
+	}
 
 	now := s.clock.Now().UTC()
 	a := domain.Approval{

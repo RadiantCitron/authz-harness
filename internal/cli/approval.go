@@ -57,7 +57,7 @@ func (r *ApprovalRunner) runGrant(ctx context.Context, args []string) domain.Exi
 	var sub, act, res, jti, argHash string
 	var ttl time.Duration
 	fs.StringVar(&sub, "subject", "", "승인 대상 주체")
-	fs.StringVar(&act, "action", "", "승인할 액션 (file:read, file:write)")
+	fs.StringVar(&act, "action", "", "승인할 액션 (file:read, file:write, net:fetch, exec:run, read, write)")
 	fs.StringVar(&res, "resource", "", "승인할 리소스")
 	fs.StringVar(&jti, "jti", "", "승인을 묶을 토큰 jti")
 	fs.StringVar(&argHash, "arg-hash", "", "선택: 인자 지문 (sha256:<64 hex>)")
@@ -65,8 +65,13 @@ func (r *ApprovalRunner) runGrant(ctx context.Context, args []string) domain.Exi
 	if err := fs.Parse(args); err != nil {
 		return domain.ExitBadInput
 	}
+	action, err := domain.ParseAction(act)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitBadInput
+	}
 	a, err := r.papSvc.CreateApproval(ctx, pap.CreateApprovalRequest{
-		Subject: sub, Action: domain.Action(act), Resource: res, TokenJTI: jti, ArgHash: argHash, TTL: ttl,
+		Subject: sub, Action: action, Resource: res, TokenJTI: jti, ArgHash: argHash, TTL: ttl,
 	})
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
