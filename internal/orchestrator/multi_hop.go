@@ -110,16 +110,9 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 	if s.cfg.BinaryPath != "" {
 		spawner, err := NewSubprocessSpawner(SpawnConfig{
 			BinaryPath: s.cfg.BinaryPath,
-			Args: []string{
-				"subagent", "worker",
-				"-workspace", s.cfg.WorkspaceDir,
-				"-state-file", s.cfg.StatePath,
-				"-pub-jwks-file", s.cfg.PubJWKSPath,
-				"-replay-file", s.cfg.ReplayPath,
-				"-audit-file", s.cfg.AuditPath,
-			},
-			Audit:  s.cfg.Audit,
-			Limits: s.cfg.Limits,
+			Args:       WorkerArgs(s.cfg.WorkspaceDir, s.cfg.StatePath, s.cfg.PubJWKSPath, s.cfg.ReplayPath, s.cfg.AuditPath, "", false),
+			Audit:      s.cfg.Audit,
+			Limits:     s.cfg.Limits,
 		})
 		if err != nil {
 			return domain.ExitInternalError, fmt.Errorf("failed to create worker spawner: %w", err)

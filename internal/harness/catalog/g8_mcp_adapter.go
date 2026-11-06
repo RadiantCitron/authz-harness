@@ -34,15 +34,8 @@ func newMCPSpawner(env *harness.SandboxEnvironment, stack *harnessStack) (orches
 	if env.BinaryPath != "" {
 		return orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 			BinaryPath: env.BinaryPath,
-			Args: []string{
-				"subagent", "worker",
-				"-workspace", env.WorkspaceDir,
-				"-state-file", env.StatePath,
-				"-pub-jwks-file", env.PubJWKSPath,
-				"-replay-file", env.ReplayPath,
-				"-audit-file", env.AuditPath,
-			},
-			Audit: stack.AuditWriter,
+			Args:       orchestrator.WorkerArgs(env.WorkspaceDir, env.StatePath, env.PubJWKSPath, env.ReplayPath, env.AuditPath, "", false),
+			Audit:      stack.AuditWriter,
 		})
 	}
 	return &inProcSpawnerBridge{stack: stack}, nil

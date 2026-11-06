@@ -147,14 +147,7 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	absWorkspaceFlag, _ := filepath.Abs(workspaceFlag)
 
 	// 3. Spawner 구성
-	childArgs := []string{
-		"subagent", "worker",
-		"-workspace", absWorkspaceFlag,
-		"-state-file", absStateFlag,
-		"-pub-jwks-file", absPubJWKSFlag,
-		"-replay-file", absReplayFlag,
-		"-audit-file", absAuditFlag,
-	}
+	childArgs := orchestrator.WorkerArgs(absWorkspaceFlag, absStateFlag, absPubJWKSFlag, absReplayFlag, absAuditFlag, "", false)
 
 	spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 		BinaryPath: binPath,

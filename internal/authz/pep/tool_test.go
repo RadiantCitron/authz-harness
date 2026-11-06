@@ -22,7 +22,7 @@ func diffAssembly(steps []pipeline.Step[Call], specs []domain.StageSpec) []strin
 		if st.ID != string(sp.ID) {
 			d = append(d, "id@"+string(sp.ID))
 		}
-		if st.Kind != kindOf[sp.Kind] {
+		if st.Kind != pipeline.Kind(sp.Kind) {
 			d = append(d, "kind@"+string(sp.ID))
 		}
 		if (st.Applies != nil) != sp.Conditional {
@@ -107,6 +107,19 @@ func TestUnregisteredActionHasNoTool(t *testing.T) {
 	for _, a := range []domain.Action{"net:post", "exec", ""} {
 		if _, ok := toolFor(a); ok {
 			t.Errorf("toolFor(%q) must be false", a)
+		}
+	}
+}
+
+// 계획 022 P1: 도메인 단계 성격과 엔진 성격의 문자열이 같아야 형변환이 성립한다.
+func TestStageKindMatchesPipelineKind(t *testing.T) {
+	pairs := map[domain.StageKind]pipeline.Kind{
+		domain.KindCheck: pipeline.Check, domain.KindDecide: pipeline.Decide, domain.KindConsume: pipeline.Consume,
+		domain.KindRecord: pipeline.Record, domain.KindExecute: pipeline.Execute, domain.KindSettle: pipeline.Settle,
+	}
+	for dk, pk := range pairs {
+		if pipeline.Kind(dk) != pk {
+			t.Errorf("%q != %q", dk, pk)
 		}
 	}
 }

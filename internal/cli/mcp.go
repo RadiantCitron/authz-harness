@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"authz-harness/internal/app"
@@ -145,7 +144,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 		absAuditFlag, _ := filepath.Abs(auditFlag)
 		absWorkspaceFlag, _ := filepath.Abs(workspaceFlag)
 
-		childArgs := mcpWorkerArgs(absWorkspaceFlag, absStateFlag, absPubJWKSFlag, absReplayFlag, absAuditFlag, netAllowFlag, logLevel == slog.LevelDebug)
+		childArgs := orchestrator.WorkerArgs(absWorkspaceFlag, absStateFlag, absPubJWKSFlag, absReplayFlag, absAuditFlag, netAllowFlag, logLevel == slog.LevelDebug)
 
 		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 			BinaryPath: binPath,
@@ -175,23 +174,4 @@ func (r *MCPRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "Usage: authz-harness mcp <command> [options]")
 	fmt.Fprintln(r.errOut, "Commands:")
 	fmt.Fprintln(r.errOut, "  serve    stdio 기반 MCP JSON-RPC 2.0 어댑터 서버 시작")
-}
-
-// mcpWorkerArgs 는 MCP 어댑터가 스폰하는 subagent worker 의 인자를 조립한다. -net-allow 는 값이 있을 때만, -verbose 는 verbose 일 때만 넘긴다.
-func mcpWorkerArgs(workspace, stateFile, pubJWKS, replay, auditFile, netAllow string, verbose bool) []string {
-	args := []string{
-		"subagent", "worker",
-		"-workspace", workspace,
-		"-state-file", stateFile,
-		"-pub-jwks-file", pubJWKS,
-		"-replay-file", replay,
-		"-audit-file", auditFile,
-	}
-	if strings.TrimSpace(netAllow) != "" {
-		args = append(args, "-net-allow", netAllow)
-	}
-	if verbose {
-		args = append(args, "-verbose")
-	}
-	return args
 }

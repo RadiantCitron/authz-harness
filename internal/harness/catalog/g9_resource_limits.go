@@ -261,16 +261,9 @@ func (s *e2e44Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 
 	sp, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 		BinaryPath: env.BinaryPath,
-		Args: []string{
-			"subagent", "worker",
-			"-workspace", env.WorkspaceDir,
-			"-state-file", env.StatePath,
-			"-pub-jwks-file", env.PubJWKSPath,
-			"-replay-file", env.ReplayPath,
-			"-audit-file", env.AuditPath,
-		},
-		Limits: orchestrator.DefaultLimits(),
-		Audit:  stack.AuditWriter,
+		Args:       orchestrator.WorkerArgs(env.WorkspaceDir, env.StatePath, env.PubJWKSPath, env.ReplayPath, env.AuditPath, "", false),
+		Limits:     orchestrator.DefaultLimits(),
+		Audit:      stack.AuditWriter,
 	})
 	if err != nil {
 		return domain.ExitInternalError, err

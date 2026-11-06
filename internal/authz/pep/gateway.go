@@ -142,18 +142,8 @@ type pipelineState struct {
 	refundWriteBytes int64
 }
 
-// kindOf 는 도메인 성격을 엔진 성격으로 바꾼다. pipeline 은 domain 을 모르므로 변환 표는 조립 쪽에 둔다.
-var kindOf = map[domain.StageKind]pipeline.Kind{
-	domain.KindCheck:   pipeline.Check,
-	domain.KindDecide:  pipeline.Decide,
-	domain.KindConsume: pipeline.Consume,
-	domain.KindRecord:  pipeline.Record,
-	domain.KindExecute: pipeline.Execute,
-	domain.KindSettle:  pipeline.Settle,
-}
-
 func step(id domain.Stage, kind domain.StageKind, applies func(*Call) bool, run func(context.Context, *Call) error) pipeline.Step[Call] {
-	s := pipeline.Step[Call]{ID: string(id), Kind: kindOf[kind], Run: run}
+	s := pipeline.Step[Call]{ID: string(id), Kind: pipeline.Kind(kind), Run: run}
 	if applies != nil {
 		s.Applies = func(c *Call) bool { return applies(c) }
 	}

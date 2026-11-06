@@ -10,6 +10,7 @@ import (
 
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
+	"authz-harness/internal/orchestrator"
 )
 
 type dummyMCPExecutor struct{}
@@ -54,12 +55,12 @@ func TestMCPRunner_InvalidCommand(t *testing.T) {
 
 // 로드맵 16 / 050 TC-050-04
 func TestMCPWorkerArgs_NetAllowPassthrough(t *testing.T) {
-	with := mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080", false)
+	with := orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080", false)
 	n := len(with)
 	if with[n-2] != "-net-allow" || with[n-1] != "127.0.0.1:18080" {
 		t.Fatalf("expected trailing -net-allow, got %v", with)
 	}
-	for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", "", false) {
+	for _, a := range orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", "", false) {
 		if a == "-net-allow" {
 			t.Fatal("-net-allow must be absent when flag is empty")
 		}
@@ -113,7 +114,7 @@ func TestMCPWorkerArgs_VerbosePassthrough(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := false
-			for _, a := range mcpWorkerArgs("/w", "/s", "/p", "/r", "/a", tc.netAllo, tc.verbose) {
+			for _, a := range orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", tc.netAllo, tc.verbose) {
 				if a == "-verbose" {
 					got = true
 				}

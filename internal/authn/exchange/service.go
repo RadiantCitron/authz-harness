@@ -131,18 +131,8 @@ type denial struct {
 func (d *denial) Error() string { return d.ret.Error() }
 func (d *denial) Unwrap() error { return d.ret }
 
-// kindOf 는 도메인 성격을 엔진 성격으로 바꾼다. pipeline 은 domain 을 모르므로 변환 표는 조립 쪽에 둔다.
-var kindOf = map[domain.StageKind]pipeline.Kind{
-	domain.KindCheck:   pipeline.Check,
-	domain.KindDecide:  pipeline.Decide,
-	domain.KindConsume: pipeline.Consume,
-	domain.KindRecord:  pipeline.Record,
-	domain.KindExecute: pipeline.Execute,
-	domain.KindSettle:  pipeline.Settle,
-}
-
 func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bool, run func(*exchangeCall) error) pipeline.Step[exchangeCall] {
-	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: kindOf[kind], Run: func(_ context.Context, c *exchangeCall) error { return run(c) }}
+	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: pipeline.Kind(kind), Run: func(_ context.Context, c *exchangeCall) error { return run(c) }}
 	if applies != nil {
 		s.Applies = applies
 	}

@@ -34,8 +34,8 @@ func TestAssembleMatchesExchangeStages(t *testing.T) {
 		if st.ID != string(sp.ID) {
 			t.Errorf("[%d] id %q != %q", i, st.ID, sp.ID)
 		}
-		if st.Kind != kindOf[sp.Kind] {
-			t.Errorf("[%d] kind %q != %q", i, st.Kind, kindOf[sp.Kind])
+		if st.Kind != pipeline.Kind(sp.Kind) {
+			t.Errorf("[%d] kind %q != %q", i, st.Kind, pipeline.Kind(sp.Kind))
 		}
 		if (st.Applies != nil) != sp.Conditional {
 			t.Errorf("[%d] conditional %v != %v", i, st.Applies != nil, sp.Conditional)

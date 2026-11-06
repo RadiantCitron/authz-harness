@@ -163,15 +163,8 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 	if env != nil && env.BinaryPath != "" && !req.InjectAuditFailure {
 		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 			BinaryPath: env.BinaryPath,
-			Args: []string{
-				"subagent", "worker",
-				"-workspace", env.WorkspaceDir,
-				"-state-file", env.StatePath,
-				"-pub-jwks-file", env.PubJWKSPath,
-				"-replay-file", env.ReplayPath,
-				"-audit-file", env.AuditPath,
-			},
-			Audit: stack.AuditWriter,
+			Args:       orchestrator.WorkerArgs(env.WorkspaceDir, env.StatePath, env.PubJWKSPath, env.ReplayPath, env.AuditPath, "", false),
+			Audit:      stack.AuditWriter,
 		})
 		if err != nil {
 			return domain.ExitInternalError, fmt.Errorf("create subprocess spawner: %w", err)
