@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -241,5 +242,23 @@ func TestRunCLI_TC_030_02_MultiHopScopeExceeded(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "ALL SCENARIOS PASSED") {
 		t.Errorf("expected 'ALL SCENARIOS PASSED', got:\n%s", out.String())
+	}
+}
+
+// 계획 021 S1 — L3: run 명령이 끝나면 러너가 만든 임시 바이너리 폴더가 남지 않는다.
+func TestRunCLI_Plan021_L3_NoTempBinariesLeft(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	var out, errOut bytes.Buffer
+	runner := NewRunRunner(&out, &errOut, t.TempDir())
+	if code := runner.Run(context.Background(), []string{"-scenario", "E2E-22"}); code != domain.ExitSuccess {
+		t.Fatalf("exit=%v stderr=%s", code, errOut.String())
+	}
+	m, err := filepath.Glob(filepath.Join(tmp, "authz-harness-bin-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 0 {
+		t.Fatalf("temp binary dirs left behind: %v", m)
 	}
 }
