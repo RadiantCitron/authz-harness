@@ -348,7 +348,7 @@ func (g *gateway) approval(_ context.Context, c *Call) error {
 }
 
 // budget: 예산 토큰의 호출 1회와 쓰기 바이트를 실행 전에 차감한다. 이후 단계가 실패하면 refund 가 보상한다.
-func (g *gateway) budget(_ context.Context, c *Call) error {
+func (g *gateway) budget(ctx context.Context, c *Call) error {
 	st := c.st
 	var n int64
 	if c.st.tool.BudgetPlan(c).ChargeWriteBytes {
@@ -359,6 +359,12 @@ func (g *gateway) budget(_ context.Context, c *Call) error {
 	}
 	st.consumed = true
 	st.refundWriteBytes = n
+	// 차감 사실을 감사에 남긴다. 실패한 단계 자신의 보상은 엔진이 부르지 않으므로 여기서 직접 환급한다.
+	if auditErr := g.logBudgetConsumed(st); auditErr != nil {
+		g.refund(ctx, c)
+		st.consumed = false
+		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("budget audit failure (fail-closed): %v", auditErr), auditErr)
+	}
 	return nil
 }
 
@@ -571,6 +577,26 @@ func (g *gateway) logApprovalConsumed(state *pipelineState) error {
 		Metadata: map[string]interface{}{
 			"approval_id": state.approvalID,
 		},
+	})
+}
+
+// logBudgetConsumed 는 예산 차감 사실을 budget.consumed 로 기록한다 (표지만, 차감량·원시 토큰은 기록하지 않는다).
+// Action 을 pep. 로 시작하게 쓰면 audit.NormalizeEvent 가 바꿔 버리므로 쓰지 않는다.
+func (g *gateway) logBudgetConsumed(state *pipelineState) error {
+	return g.cfg.AuditWriter.Log(audit.Event{
+		Timestamp: g.clock.Now().UTC(),
+		TraceID:   state.traceID,
+		Step:      "pep.budget_consume",
+		Stage:     string(domain.StageBudget),
+		Actor:     state.subject,
+		AgentID:   state.subject,
+		Action:    "budget.consumed",
+		Resource:  state.resource,
+		Decision:  "allow",
+		Reason:    string(domain.ReasonAuthorized),
+		TokenJTI:  state.tokenJTI,
+		ArgHash:   state.argHash,
+		Success:   true,
 	})
 }
 
