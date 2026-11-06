@@ -1,22 +1,11 @@
 package ui
 
 import (
-	"reflect"
 	"testing"
 
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 )
-
-func withBudgetConsumed(t *testing.T, o harness.AuditObservation, v bool) harness.AuditObservation {
-	t.Helper()
-	f := reflect.ValueOf(&o).Elem().FieldByName("BudgetConsumed")
-	if !f.IsValid() {
-		t.Fatal("AuditObservation.BudgetConsumed 필드가 없음")
-	}
-	f.SetBool(v)
-	return o
-}
 
 // 계획 015 2.3 / 3장 B2·B3: `예산 차감` 칸은 budget.consumed 기록이 근거다.
 func TestStageView_BudgetCellFollowsConsumedRecord(t *testing.T) {
@@ -34,7 +23,8 @@ func TestStageView_BudgetCellFollowsConsumedRecord(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			o := withBudgetConsumed(t, base, tc.consumed)
+			o := base
+			o.BudgetConsumed = tc.consumed
 			m := states(BuildStageView(obsResult(domain.ExitSuccess, domain.ReasonAuthorized, tc.end, o)))
 			if m[domain.StageBudget] != tc.budget || m[domain.StageSettle] != tc.settle {
 				t.Fatalf("budget=%s settle=%s, want %s/%s", m[domain.StageBudget], m[domain.StageSettle], tc.budget, tc.settle)

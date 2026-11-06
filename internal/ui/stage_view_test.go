@@ -61,16 +61,16 @@ func TestStageView_AllowWithAuditTamper(t *testing.T) {
 	}
 }
 
-// 정산까지 간 허용은 budget 통과, 종단이 execute 면 budget 은 근거가 없어 판단 불가.
+// 예산 차감 칸은 budget.consumed 기록이 근거다(계획 015): 기록 있으면 통과, 없으면 해당 없음.
 func TestStageView_BudgetEvidence(t *testing.T) {
 	settled := states(BuildStageView(obsResult(domain.ExitSuccess, domain.ReasonAuthorized, domain.StageSettle,
-		harness.AuditObservation{Action: "pep.allow", SchemaVersion: 4})))
+		harness.AuditObservation{Action: "pep.allow", SchemaVersion: 4, BudgetConsumed: true})))
 	if settled[domain.StageBudget] != CellPassed || settled[domain.StageSettle] != CellPassed {
 		t.Fatalf("unexpected: %v", settled)
 	}
 	plain := states(BuildStageView(obsResult(domain.ExitSuccess, domain.ReasonAuthorized, domain.StageExecute,
 		harness.AuditObservation{Action: "pep.allow", SchemaVersion: 4})))
-	if plain[domain.StageBudget] != CellUnknown {
+	if plain[domain.StageBudget] != CellNA {
 		t.Fatalf("unexpected: %v", plain)
 	}
 }

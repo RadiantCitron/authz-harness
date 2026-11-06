@@ -146,10 +146,10 @@ func beforeEnd(s, end domain.Stage, o harness.AuditObservation) (CellState, stri
 		}
 		return CellNA, "승인 소비 기록 없음"
 	case domain.StageBudget:
-		if end == domain.StageSettle {
-			return CellPassed, "정산 단계까지 갔으므로 예산 토큰"
+		if o.BudgetConsumed {
+			return CellPassed, "예산 차감 기록 있음"
 		}
-		return CellUnknown, "예산 토큰 여부를 알 수 있는 기록이 없음"
+		return CellNA, "예산 차감 기록 없음"
 	case domain.StageSettle:
 		if end == domain.StageSettle {
 			return CellPassed, ""

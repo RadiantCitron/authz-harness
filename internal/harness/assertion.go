@@ -340,6 +340,7 @@ type AuditObservation struct {
 	Action           string       // 매칭한 기록의 액션 (없으면 빈 값)
 	SchemaVersion    int          // 매칭한 기록의 스키마 버전
 	ApprovalConsumed bool         // 같은 요청의 approval.consumed 기록 유무
+	BudgetConsumed   bool         // 같은 요청의 budget.consumed 기록 유무
 	PEPFound         bool         // 같은 요청의 PEP 판정 기록 유무 (agent.* 매칭일 때만 조사)
 	PEPAction        string       // 같은 요청의 PEP 기록 액션
 	PEPStage         domain.Stage // 같은 요청의 PEP 기록 단계 (없으면 NoStageRecord)
@@ -358,6 +359,9 @@ func observeAudit(events []audit.Event, m *audit.Event) AuditObservation {
 		}
 		if ev.Action == "approval.consumed" {
 			o.ApprovalConsumed = true
+		}
+		if ev.Action == "budget.consumed" {
+			o.BudgetConsumed = true
 		}
 		if !o.PEPFound && strings.HasPrefix(m.Action, "agent.") && (ev.Action == "pep.allow" || ev.Action == "pep.deny") {
 			o.PEPFound, o.PEPAction, o.PEPStage, o.PEPSchema = true, ev.Action, stageOf(ev), ev.SchemaVersion

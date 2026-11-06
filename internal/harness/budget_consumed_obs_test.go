@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"reflect"
 	"testing"
 
 	"authz-harness/internal/audit"
@@ -9,16 +8,6 @@ import (
 
 // 계획 015 B9(관측 층): 같은 TraceID 의 budget.consumed 유무를 AuditObservation 이 읽고,
 // budget.consumed 가 있어도 매칭한 기록(마지막 pep.*)은 바뀌지 않는다.
-// 필드가 없으면 실패한다(S3 에서 직접 필드 접근으로 바꿔도 된다).
-func budgetConsumedOf(t *testing.T, o AuditObservation) bool {
-	t.Helper()
-	f := reflect.ValueOf(o).FieldByName("BudgetConsumed")
-	if !f.IsValid() {
-		t.Fatal("AuditObservation.BudgetConsumed 필드가 없음")
-	}
-	return f.Bool()
-}
-
 func TestObserveAudit_BudgetConsumed(t *testing.T) {
 	allow := audit.Event{TraceID: "t1", Action: "pep.allow", SchemaVersion: 4}
 	consumed := audit.Event{TraceID: "t1", Action: "budget.consumed", SchemaVersion: 4}
@@ -40,7 +29,7 @@ func TestObserveAudit_BudgetConsumed(t *testing.T) {
 			if o.Action != "pep.allow" {
 				t.Fatalf("매칭 기록이 바뀜: %q", o.Action)
 			}
-			if got := budgetConsumedOf(t, o); got != tc.want {
+			if got := o.BudgetConsumed; got != tc.want {
 				t.Fatalf("BudgetConsumed = %v, want %v", got, tc.want)
 			}
 		})
