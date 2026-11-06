@@ -12,6 +12,7 @@ import (
 
 	"authz-harness/internal/app"
 	"authz-harness/internal/audit"
+	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pap"
 	"authz-harness/internal/domain"
@@ -72,7 +73,7 @@ func newHopEnv(t *testing.T) *hopEnv {
 	}
 }
 
-func (e *hopEnv) run(t *testing.T, cfg MultiHopConfig, leadScope, workerScope string) (domain.ExitCode, error) {
+func (e *hopEnv) run(t *testing.T, cfg MultiHopConfig, svc exchange.Service, leadScope, workerScope string) (domain.ExitCode, error) {
 	t.Helper()
 	spawner, err := NewMultiHopSpawner(cfg)
 	if err != nil {
@@ -83,8 +84,7 @@ func (e *hopEnv) run(t *testing.T, cfg MultiHopConfig, leadScope, workerScope st
 		LeadSubject: "lead-01", LeadScope: leadScope,
 		WorkerSubject: "worker-01", WorkerScope: workerScope,
 		TargetFile: "hop.txt", Action: domain.ActionFileRead,
-		TokenIssuer: e.stack.TokenIssuer, TokenVerifier: e.stack.TokenVerifier,
-		ClientReg: e.stack.ClientReg, Clock: domain.RealClock{},
+		Exchange: svc,
 	})
 }
 
@@ -114,7 +114,7 @@ func TestMultiHop_LineageEpochEnforced(t *testing.T) {
 	if _, err := e.stack.PAP.BumpEpoch(context.Background(), "orchestrator-root"); err != nil {
 		t.Fatalf("BumpEpoch: %v", err)
 	}
-	exit, err := e.run(t, e.cfg, "file:read file:write", "file:read")
+	exit, err := e.run(t, e.cfg, e.stack.ExchangeService, "file:read file:write", "file:read")
 	if err == nil {
 		t.Fatalf("stale-epoch root token must not delegate (exit=%d)", exit)
 	}
@@ -139,16 +139,16 @@ func TestMultiHop_LineageEpochEnforced(t *testing.T) {
 func TestMultiHop_ExchangeFailureExitCode(t *testing.T) {
 	t.Run("스코프 초과 위임은 12", func(t *testing.T) {
 		e := newHopEnv(t)
-		exit, err := e.run(t, e.cfg, "file:read", "file:write")
+		exit, err := e.run(t, e.cfg, e.stack.ExchangeService, "file:read", "file:write")
 		if err == nil || exit != domain.ExitAuthzDenied {
 			t.Fatalf("exit=%d err=%v, want %d with error", exit, err, domain.ExitAuthzDenied)
 		}
 	})
 	t.Run("교환 감사 기록 실패는 15", func(t *testing.T) {
 		e := newHopEnv(t)
-		cfg := e.cfg
-		cfg.Audit = failingAudit{}
-		exit, err := e.run(t, cfg, "file:read", "file:write")
+		// 거부 감사를 쓰지 못하는 교환 서비스(같은 발급기·검증기, 감사기만 실패)를 주입한다.
+		failing := exchange.NewExchangeService(e.stack.TokenIssuer, e.stack.TokenVerifier, e.stack.ClientReg, nil, failingAudit{}, domain.RealClock{})
+		exit, err := e.run(t, e.cfg, failing, "file:read", "file:write")
 		if err == nil {
 			t.Fatal("audit failure must fail closed")
 		}

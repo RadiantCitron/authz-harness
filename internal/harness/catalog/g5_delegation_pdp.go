@@ -82,14 +82,7 @@ func (s *e2e19Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 
-	exchSvc := exchange.NewExchangeService(
-		stack.TokenIssuer,
-		stack.TokenVerifier,
-		stack.ClientReg,
-		exchange.NewDownscopeValidator(),
-		stack.AuditWriter,
-		env.MockClock,
-	)
+	exchSvc := stack.ExchangeService
 
 	// 부모 토큰(read)으로 자식에게 file:write 위임 시도
 	req := exchange.ExchangeRequest{
@@ -167,14 +160,7 @@ func (s *e2e20Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 
-	exchSvc := exchange.NewExchangeService(
-		stack.TokenIssuer,
-		stack.TokenVerifier,
-		stack.ClientReg,
-		exchange.NewDownscopeValidator(),
-		stack.AuditWriter,
-		env.MockClock,
-	)
+	exchSvc := stack.ExchangeService
 
 	// 부모 토큰(5분 잔여)으로 자식에게 10분 TTL 위임 시도
 	req := exchange.ExchangeRequest{
@@ -249,6 +235,7 @@ func (s *e2e21Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 		DelegationDepth: 3,
 		Actor: &domain.ActorClaim{
 			Subject: "lead-deep-prev",
+			Epoch:   1, // 정식 교환의 조상 고리는 항상 Epoch 를 갖는다. 없으면 lineage_epoch 가 깊이 검사보다 먼저 거부한다
 		},
 	}
 	auditCtx := domain.AuditContext{
@@ -270,14 +257,7 @@ func (s *e2e21Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 
-	exchSvc := exchange.NewExchangeService(
-		stack.TokenIssuer,
-		stack.TokenVerifier,
-		stack.ClientReg,
-		exchange.NewDownscopeValidator(),
-		stack.AuditWriter,
-		env.MockClock,
-	)
+	exchSvc := stack.ExchangeService
 
 	req := exchange.ExchangeRequest{
 		ClientID:     "client-subagent",
@@ -607,10 +587,7 @@ func (s *e2e31Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		WorkerScope:   "file:read",
 		TargetFile:    "multihop_ok.txt",
 		Action:        domain.ActionFileRead,
-		TokenIssuer:   stack.TokenIssuer,
-		TokenVerifier: stack.TokenVerifier,
-		ClientReg:     stack.ClientReg,
-		Clock:         env.MockClock,
+		Exchange:      stack.ExchangeService,
 	})
 }
 
@@ -696,9 +673,6 @@ func (s *e2e32Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		TargetFile:    "output.txt",
 		Action:        domain.ActionFileWrite,
 		Data:          []byte("should be blocked"),
-		TokenIssuer:   stack.TokenIssuer,
-		TokenVerifier: stack.TokenVerifier,
-		ClientReg:     stack.ClientReg,
-		Clock:         env.MockClock,
+		Exchange:      stack.ExchangeService,
 	})
 }

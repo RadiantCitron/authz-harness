@@ -115,10 +115,7 @@ func TestMultiHop_InProc(t *testing.T) {
 				WorkerScope:   "file:read",
 				TargetFile:    "hop.txt",
 				Action:        domain.ActionFileRead,
-				TokenIssuer:   stack.TokenIssuer,
-				TokenVerifier: stack.TokenVerifier,
-				ClientReg:     stack.ClientReg,
-				Clock:         domain.RealClock{},
+				Exchange:      stack.ExchangeService,
 			})
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)

@@ -7,7 +7,6 @@ import (
 
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/exchange"
-	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pep"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
@@ -37,10 +36,9 @@ type MultiHopDelegationRequest struct {
 	TargetFile    string        // 최종 워커가 접근할 파일 상대경로
 	Action        domain.Action // 최종 워커 수행 액션 (file:read 또는 file:write)
 	Data          []byte        // 쓰기 시 기록 데이터
-	TokenIssuer   token.TokenIssuer
-	TokenVerifier token.TokenVerifier
-	ClientReg     token.ClientRegistry
-	Clock         domain.Clock
+	// Exchange 는 합성 루트(app.BuildStack)가 조립한 토큰 교환 서비스다.
+	// 예산 원장·PIP 스냅샷(lineage_epoch) 같은 옵션이 모두 주입된 정식 조립을 그대로 쓴다.
+	Exchange exchange.Service
 }
 
 // MultiHopSpawner 는 2-Hop 프로세스 연쇄 스폰 및 위임을 실행하는 오케스트레이터다.
@@ -64,17 +62,12 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 		return domain.ExitBadInput, fmt.Errorf("trace_id is required")
 	}
 
-	// 1. Root -> Lead 1차 토큰 교환 (Depth 1)
-	downscopeValidator := exchange.NewDownscopeValidator()
-	exchSvc := exchange.NewExchangeService(
-		req.TokenIssuer,
-		req.TokenVerifier,
-		req.ClientReg,
-		downscopeValidator,
-		s.cfg.Audit,
-		req.Clock,
-	)
+	if req.Exchange == nil {
+		return domain.ExitInternalError, fmt.Errorf("multi-hop: exchange service is required")
+	}
+	exchSvc := req.Exchange
 
+	// 1. Root -> Lead 1차 토큰 교환 (Depth 1)
 	leadExchangeRes, err := exchSvc.Exchange(ctx, exchange.ExchangeRequest{
 		ClientID:     "client-orchestrator",
 		ClientSecret: "orchestrator-secret-key-01",
@@ -89,8 +82,8 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 		Reason:  "token.exchange.hop1",
 	})
 	if err != nil {
-		// 1차 교환 거부
-		return domain.ExitAuthzDenied, err
+		// 1차 교환 거부 (사유를 따른 종료 코드: 감사 실패 15, 일반 거부 12)
+		return domain.ExitCodeFromError(err, domain.ExitAuthzDenied), err
 	}
 
 	// 2. Lead -> Worker 2차 토큰 교환 (Depth 2)
@@ -110,7 +103,7 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 	})
 	if err != nil {
 		// 2차 교환 거부 (E2E-32: 중간 관리자의 스코프 초과 위임 차단)
-		return domain.ExitAuthzDenied, err
+		return domain.ExitCodeFromError(err, domain.ExitAuthzDenied), err
 	}
 
 	// 3. Leaf Worker 서브프로세스 스폰 (Depth 2 토큰 주입)
