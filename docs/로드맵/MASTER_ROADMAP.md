@@ -29,7 +29,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ## 3) 목표 (Goals)
 1. **단일 리포지토리·로컬 완결형 권한 하네스 구축**: 외부 네트워크나 서드파티 IdP 없이 Go 표준 환경과 최소한의 로컬 구성만으로 즉시 빌드·실행·검증 가능한 CLI 기반 권한 하네스를 완성한다.
-2. **이중 관문(Gate 1 AuthN → Gate 2 AuthZ) 및 PAP/PIP/PDP/PEP 분리 구현**: 워크로드 인증과 토큰 무결성을 검증하는 Gate 1과, Grant/Epoch 상태를 조회(PIP)하여 결정(PDP)하고 파일 I/O 직전에 집행(PEP)하는 Gate 2를 단방향 상태 머신으로 확립한다.
+2. **이중 단계(`authn` → `authz`) 및 PAP/PIP/PDP/PEP 분리 구현**: 워크로드 인증과 토큰 무결성을 검증하는 `authn` 단계와, Grant/Epoch 상태를 조회(PIP)하여 결정(PDP)하고 파일 I/O 직전에 집행(PEP)하는 `authz` 단계를 단방향 상태 머신으로 확립한다.
 3. **오케스트레이터→서브에이전트 축소 위임(Downscoping) 증명**: 오케스트레이터가 보유한 권한 내에서만 서브에이전트용 축소 토큰을 교환·발급받아 OS 서브프로세스로 실행시키는 위임 체인을 구현한다.
 4. **권한 생명주기 실시간 검증 (Grant → Allow → Revoke → Deny)**: 권한 부여 전 거부, 부여 후 허용, 회수(Revoke) 또는 주체 Epoch 갱신 직후 재요청 시 즉시 거부가 실제로 작동함을 관찰 가능한 결과와 감사 로그로 입증한다.
 5. **안전한 파일 도메인 격리(Workspace Jail)**: 서브에이전트의 능력을 지정된 Workspace 루트 내부의 파일 읽기(`file:read`)와 쓰기(`file:write`)로 엄격히 제한하고, `../`, 절대 경로, Prefix 착시, 심볼릭 링크를 이용한 경로 탈출 시도를 차단한다.
@@ -66,7 +66,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | **PAP (Policy Administration Point)** | Grant의 생성(`grant create`), 회수(`grant revoke`), 주체 Epoch 증가를 관리하는 정책 관리점. |
 | **PIP (Policy Information Point)** | PDP가 결정을 내리기 직전 실시간 활성 Grant 상태, 현재 Subject Epoch, 공개키 상태, 일회성 `jti` 사용 여부를 조회해 공급하는 정책 정보점. |
 | **PDP (Policy Decision Point)** | 검증된 토큰 클레임과 PIP 실시간 상태를 대조하여 부작용(파일 I/O 등) 없이 순수하게 `allow/deny + reason`만 계산하는 정책 결정점. |
-| **PEP (Policy Enforcement Point)** | 실제 파일 I/O 직전에 위치하여 Gate 1(AuthN) 및 Gate 2(PDP) 결정을 강제하고 Workspace Jail 경로 검증을 통과했을 때만 파일 읽기/쓰기를 집행하는 관문. |
+| **PEP (Policy Enforcement Point)** | 실제 파일 I/O 직전에 위치하여 `authn`(AuthN) 및 `authz`(PDP) 단계 결정을 강제하고 Workspace Jail 경로 검증을 통과했을 때만 파일 읽기/쓰기를 집행하는 관문. |
 | **Orchestrator (팀장)** | 시나리오를 통제하고 중앙 서버에 축소 위임 토큰 교환을 요청한 뒤 서브에이전트 OS 서브프로세스를 생성(Spawn)하고 종료 코드를 수거하는 부모 조정자 프로세스. |
 | **Subagent (서브에이전트)** | 오케스트레이터에 의해 생성된 독립 OS 자식 프로세스. `stdin` 프레임으로 전달받은 토큰을 제시하고 PEP를 통해서만 파일 작업을 수행한다. |
 | **Workspace Jail** | 파일 접근이 허용되는 로컬 최상위 디렉토리(`./workspace`). 모든 경로는 정규화 및 심볼릭 링크 해석 후 이 디렉토리 내부로만 제한된다. |
@@ -124,8 +124,8 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 |                 |                 |   |                     v                     |
 |  +--------------v--------------+  |   |  +-------------------------------------+  |
 |  | PDP (Pure Decision Engine)  |<-+---+--+   PEP (Policy Enforcement Point)    |  |
-|  | - Gate 1: Verify JWT+kid    |  |   |  |  - Calls Gate 1 (AuthN) + Gate 2    |  |
-|  | - Gate 2: Match Scope+PIP   |  |   |  |  - Enforces Workspace Jail (Path)   |  |
+|  | - authn : Verify JWT+kid    |  |   |  |  - Calls authn + authz stages       |  |
+|  | - authz : Match Scope+PIP   |  |   |  |  - Enforces Workspace Jail (Path)   |  |
 |  | - Output: Allow/Deny+Reason |  |   |  +------------------+------------------+  |
 |  +-----------------------------+  |   |                     | (6) Confined I/O    |
 +-----------------------------------+   +=====================|=====================+
@@ -156,7 +156,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **Layer 0 (Pure Primitives & Domain Ports)**: `internal/domain` (순수 도메인 엔티티, `Clock` 가상/실제 시계 인터페이스 `TC-130-01`, `AuditContext`/`TraceID`, `*domain.Error` 및 `ExitCode` 상수, `Budget`(Phase 12), Phase 17 `SubjectSnapshot`/`SnapshotProvider`/`AuditWriter` 포트)
 
 ## 9) 핵심 원칙 (Core Architectural Principles)
-1. **이중 관문(Dual-Gate: AuthN before AuthZ) 및 기본 거부(Fail-Closed)**: 신원 및 암호학적 무결성(Gate 1)이 검증되기 전에는 인가 정책(Gate 2)을 평가하지 않으며, 감사 기록 실패를 포함한 모든 경계 오류 시 즉시 거부하고 중단한다.
+1. **이중 단계(Dual-Stage: AuthN before AuthZ) 및 기본 거부(Fail-Closed)**: 신원 및 암호학적 무결성(`authn` 단계)이 검증되기 전에는 인가 정책(`authz` 단계)을 평가하지 않으며, 감사 기록 실패를 포함한 모든 경계 오류 시 즉시 거부하고 중단한다.
 2. **최소 권한 및 단조 축소 위임 원칙 (Least Privilege & Monotonic Downscoping)**: 위임 시 권한·수명·예산은 오직 단조 감소($S_{child} \subseteq S_{parent}$, $exp_{child} \le exp_{parent}$, $B_{child} \le B_{parent\_remaining}$)해야 하며, 팀장이 자기보다 큰 권한을 자식에게 부여하는 것은 원천 차단된다.
 3. **PAP·PIP·PDP·PEP 4각 분리 ([NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf))**: 관리(PAP), 실시간 상태 조회(PIP), 순수 결정(PDP), 실제 파일 I/O 집행(PEP)은 각각의 패키지 경계를 넘지 않는다.
 4. **중앙 정책 권원과 조정자의 분리 (Authority vs. Coordinator)**: 팀장(Orchestrator)은 권한 상점의 주인이 아니라 작업을 분배하고 토큰 교환을 요청하는 조정자일 뿐이며, Zone A의 서명 키에 절대 직접 접근할 수 없다.
@@ -173,15 +173,15 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ### 최종 허용 불변식 (Master Allow Invariant — Phase 0~17 통합 9대 조건)
 요청이 최종 허용(`ALLOW`, `EXIT_SUCCESS = 0`)되어 실제 도구 I/O가 집행되려면 다음 9가지 조건이 동시에 참(True)이어야 한다:
-1. **토큰 무결성 및 수명 유효 (Gate 1)**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
-2. **주체 바인딩 및 비재사용 (Gate 1 & Pre-Commit)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(Gate 1은 읽기 확인만 하고, PDP allow 직후 `StageReplay`에서 소비한다. `DecisionAsk(18)`·deny에서는 재시도를 위해 `jti`를 소진하지 않음).
-3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (Gate 2 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]`와 **일치**해야 하며 고리 Epoch가 1 미만이면 거부함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
-4. **Scope 포함 (Gate 2 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
-5. **실시간 활성 Grant 존재 (Gate 2)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
+1. **토큰 무결성 및 수명 유효 (`authn` 단계)**: `typ == "at+jwt"`, 허용된 `alg`, 활성 또는 `verify-only` 상태인 `kid` 서명 일치, $iat \le now < exp$, 올바른 `iss` 및 `aud`.
+2. **주체 바인딩 및 비재사용 (`authn` & `replay` 단계)**: 토큰의 `sub`가 실행 주체와 일치하며, 일회성 토큰인 경우 `jti`가 Replay 원장에 소비되지 않은 상태(`authn` 단계는 읽기 확인만 하고, `authz`·`boundary` 등 모든 검사를 통과한 뒤 `replay` 단계에서 소비한다. `DecisionAsk(18)`·deny에서는 재시도를 위해 `jti`를 소진하지 않음).
+3. **본인 및 다단계 위임(`act`) 조상 계보 전원의 Security Epoch 일치 (`authz` 단계 — Phase 01 & 13)**: 토큰의 `epoch`가 해당 주체의 현재 `CurrentEpoch`와 일치할 뿐 아니라, `act` 위임 체인의 모든 상위 조상(`ActorClaim`)에 기록된 `Epoch`가 각 조상의 현재 `SubjectEpochs[ancestor]`와 **일치**해야 하며 고리 Epoch가 1 미만이면 거부함(상위 에이전트 Epoch 갱신 시 하위 위임 트리 전체 즉시 차단).
+4. **Scope 포함 (`authz` 단계 — Phase 01 & 16)**: 토큰의 `scope` 클레임이 요청된 `(action, resource)`(2단 또는 3단 스코프)를 포함.
+5. **실시간 활성 Grant 존재 (`authz` 단계)**: PIP에서 조회한 중앙 상태 저장소에 `(sub, action, resource)`에 대한 `active`(Revoke되지 않은) Grant가 존재.
 6. **예산(Budget) 잔량 충분 (PEP `StageBudget`·읽기 직후 — Phase 12)**: 토큰에 `Budget`이 설정된 경우 Zone B 예산 원장(`budget_ledger.json`)의 잔여 호출 횟수·읽기/쓰기 바이트가 충분하고 PEP의 원자적 차감(`Consume`: 쓰기는 사전 차감, 읽기는 `ReadFile` 직후 사후 차감)을 통과함. PDP·PIP는 예산을 판정하지 않음.
-7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (Gate 2 & Pre-Commit — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고(PDP가 `Decision.ApprovalID`로 지목) PEP `StageApproval`의 ID 기반 원자적 1회 소비(삭제)를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
-8. **도구별 실행 경계(Boundary) 검증 통과 (Gate 2c — Phase 03 & 16)**: `file:*`는 Workspace Jail 내부 경로(`ResolvePath`), `net:fetch`는 루프백 리터럴 및 허용 포트(`netguard`), `exec:run`은 허용 바이너리 ID 및 인자 정규식(`execguard`) 검증을 통과함.
-9. **사전 커밋 감사(Pre-Commit Audit) 기록 성공 (Stage 4)**: I/O 실행 직전 `audit.jsonl`에 사전 커밋 이벤트 기록이 성공함(실패 시 차감된 예산을 즉시 `Refund`하고 I/O 진입 없이 `ExitAuditFailure = 15`로 중단).
+7. **고위험 작업 사람 승인(`RequiresApproval`) 충족 및 5요소 바인딩 일치 (`authz` & `approval` 단계 — Phase 15)**: 매칭된 Grant가 `RequiresApproval == true`인 경우, `(sub, action, resource, token_jti)` 4요소와 (`ArgHash != ""` 지정 시) 5번째 실행 인자 해시(`sha256(req.Data)`)까지 일치하는 미소비·미만료 승인이 존재하고(PDP가 `Decision.ApprovalID`로 지목) PEP `approval` 단계의 ID 기반 원자적 1회 소비(삭제)를 통과함(미충족 시 `DecisionAsk`, `ExitApprovalRequired = 18`).
+8. **도구별 실행 경계(Boundary) 검증 통과 (`boundary` 단계 — Phase 03 & 16)**: `file:*`는 Workspace Jail 내부 경로(`ResolvePath`), `net:fetch`는 루프백 리터럴 및 허용 포트(`netguard`), `exec:run`은 허용 바이너리 ID 및 인자 정규식(`execguard`) 검증을 통과함.
+9. **사전 커밋 감사(Pre-Commit Audit) 기록 성공 (`precommit_audit` 단계)**: I/O 실행 직전 `audit.jsonl`에 사전 커밋 이벤트 기록이 성공함(실패 시 차감된 예산을 즉시 `Refund`하고 I/O 진입 없이 `ExitAuditFailure = 15`로 중단).
 
 ## 11) 토큰 / OAuth 2.1 범위 (채택 부분집합과 의도적 생략)
 ### 채택하는 OAuth 2.1 및 표준 프로파일 핵심 요소
@@ -215,14 +215,14 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | 종료 코드 상수명 | 코드 번호 | 의미 및 발생 관문 | 대표 사유 코드 (`Reason`) |
 | :--- | :---: | :--- | :--- |
 | **`EXIT_SUCCESS`** | `0` | 인가 허용 및 파일 I/O 정상 완료 | `AUTHORIZED` |
-| **`EXIT_TOKEN_INVALID`** | `11` | **Gate 1 (AuthN & Token)** 검증 실패 | `TOKEN_MISSING`, `TOKEN_INVALID_SIGNATURE`, `TOKEN_EXPIRED`, `TOKEN_KEY_RETIRED`, `TOKEN_REPLAY_DETECTED` 등 |
-| **`EXIT_AUTHZ_DENIED`** | `12` | **Gate 2 (PDP & Delegation)** 인가/위임 거부 | `NO_ACTIVE_GRANT`, `GRANT_REVOKED`, `SUBJECT_EPOCH_REVOKED`, `TOKEN_INSUFFICIENT_SCOPE`, `DELEGATION_SCOPE_ESCALATION` 등 |
-| **`EXIT_PATH_VIOLATION`** | `13` | **Gate 2c (PEP & Jail)** 경로 격리 위반 | `PATH_TRAVERSAL_DETECTED`, `PATH_OUTSIDE_WORKSPACE`, `SYMLINK_ESCAPE_DETECTED` |
-| **`EXIT_BAD_INPUT`** | `14` | **Stage 0** 입력/컨텍스트 누락 오류 | `MISSING_TRACE_CONTEXT`, `UNSUPPORTED_ACTION`, `MALFORMED_CLI_ARGS` |
-| **`EXIT_AUDIT_FAILURE`** | `15` | **Stage 4/5** 감사 기록 실패 또는 무결성 파손 | `AUDIT_WRITE_FAILED`, `AUDIT_INTEGRITY_BROKEN`, `AUDIT_TRUNCATION_DETECTED` |
-| **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 및 격리 불가 | `INTERNAL_RUNTIME_ERROR`, `STATE_LOCK_TIMEOUT`, `CONFINEMENT_UNAVAILABLE` |
-| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 부모 스포너가 강제한 자원·수명 한계 초과 (원인 불명 종료는 `16` + `SUBPROCESS_ABNORMAL_EXIT`) | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT` |
-| **`EXIT_APPROVAL_REQUIRED`** | `18` | **Phase 15** Gate 2 사람 승인 필요(`ask`) 및 승인 불일치/만료 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED`, `APPROVAL_MISMATCH` |
+| **`EXIT_TOKEN_INVALID`** | `11` | **`authn` 단계 (AuthN & Token)** 검증 실패 | `INVALID_TOKEN`, `TOKEN_INVALID_SIGNATURE`, `TOKEN_EXPIRED`, `TOKEN_KEY_RETIRED`, `TOKEN_REPLAY_DETECTED` 등 |
+| **`EXIT_AUTHZ_DENIED`** | `12` | **`authz` 단계 (PDP & Delegation)** 인가/위임 거부 | `NO_ACTIVE_GRANT`, `GRANT_REVOKED`, `SUBJECT_EPOCH_REVOKED`, `TOKEN_INSUFFICIENT_SCOPE`, `DELEGATION_SCOPE_EXCEEDED` 등 |
+| **`EXIT_PATH_VIOLATION`** | `13` | **`boundary` 단계 (PEP & Jail)** 경로 격리 위반 | `PATH_VIOLATION`, `PATH_TRAVERSAL`, `SYMLINK_ESCAPE`, `INVALID_PATH` |
+| **`EXIT_BAD_INPUT`** | `14` | **`input` 단계** 입력/컨텍스트 누락 오류 | `MISSING_TRACE_CONTEXT`, `INVALID_ARGUMENTS` |
+| **`EXIT_AUDIT_FAILURE`** | `15` | **`precommit_audit` 단계 등** 감사 기록 실패 또는 무결성 파손 | `AUDIT_LOG_FAILED`, `AUDIT_INTEGRITY_BROKEN`, `AUDIT_TRUNCATION_DETECTED` |
+| **`EXIT_INTERNAL_ERROR`** | `16` | 예기치 않은 런타임/시스템 내부 오류 및 격리 불가 | `INTERNAL_ERROR`, `SUBPROCESS_ABNORMAL_EXIT`, `CONFINEMENT_UNAVAILABLE` |
+| **`EXIT_RESOURCE_LIMIT`** | `17` | **Phase 10** 부모 스포너가 강제한 자원·수명 한계 초과 (원인 불명 종료는 종료 코드 16) | `RESOURCE_TIMEOUT`, `RESOURCE_OUTPUT_LIMIT` |
+| **`EXIT_APPROVAL_REQUIRED`** | `18` | **Phase 15** `authz` 단계 사람 승인 필요(`ask`) 및 승인 불일치/만료 | `APPROVAL_REQUIRED`, `APPROVAL_EXPIRED`, `APPROVAL_MISMATCH` |
 
 ## 14) 파일 접근 모델 (Workspace Jail, Read/Write, 경로 규칙)
 * **허용 작업**: Workspace Root(`./workspace`) 내부 파일에 대한 `file:read` 및 `file:write`만 허용하며, 삭제·실행·권한 변경·네트워크 접근은 배제한다.
@@ -241,7 +241,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 | 구분 | 감사 로그 (`./audit.jsonl`) | 운영 로그 (`stderr` - `log/slog`) | CLI 사용자 출력 (`stdout` - `internal/ui`) |
 | :--- | :--- | :--- | :--- |
 | **핵심 목적** | 보안 통제 및 인가 결정의 **불변 증거 증명** | 시스템 내부 동작 **디버깅 및 런타임 진단** | **초보자도 한눈에 이해하는 관문 진행 상태 및 검증 리포트** |
-| **핵심 기능** | 해시 체인 무결성 검증(`audit verify`), `trace_id` 상관관계 | 로그 레벨 필터링, 민감 토큰 자동 마스킹 | **6단계 관문 파이프라인 뷰**, 부정 테스트 역설 해설 박스, **`audit timeline` 시계열 스토리텔링 뷰** |
+| **핵심 기능** | 해시 체인 무결성 검증(`audit verify`), `trace_id` 상관관계 | 로그 레벨 필터링, 민감 토큰 자동 마스킹 | **단계 파이프라인 뷰**, 부정 테스트 역설 해설 박스, **`audit timeline` 시계열 스토리텔링 뷰** |
 
 ## 17) 실패·부정 시나리오 및 30대 전 구간 E2E 카탈로그
 기본 로드맵의 17개 실패 요소를 엔터프라이즈 인증(AuthN), 키 수명주기, RFC 8693 위임, 재사용(Replay) 방어, 심볼릭 링크 탈출, 감사 해시 체인 검증까지 포괄하는 **7개 그룹 30개 표준 E2E 시나리오(E2E-01 ~ E2E-30)**로 통합한다.
@@ -307,10 +307,10 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: Client Registry, JWK Key Ring, Token Service & Verifier, Replay Ledger, `keys` 및 `token` CLI 명령, L1/L2(`FuzzTokenParser`) 테스트.
 * **의존성 / 금지 결합**: Phase 0, 1 의존. 하위 워커가 Zone A 개인키 파일에 접근하거나 로그에 원시 JWT를 남기는 것 금지.
 * **리스크**: 시간 경계값($now == exp$) 처리 불일치 방지를 위해 주입된 `Clock` 인터페이스만 사용해야 함.
-* **데모 한 줄**: `"팀장의 초과 위임 시도는 발급 단계에서 차단되고, 정상 발급된 토큰도 서명 변조·만료·키 폐기·재사용 시 Gate 1에서 정확한 사유로 차단된다."`
+* **데모 한 줄**: `"팀장의 초과 위임 시도는 발급 단계에서 차단되고, 정상 발급된 토큰도 서명 변조·만료·키 폐기·재사용 시 `authn` 단계에서 정확한 사유로 차단된다."`
 
 ### Phase 3: PEP 집행 게이트웨이 및 Workspace File Jail 구현
-* **목적**: Gate 1(AuthN)과 Gate 2(PDP)를 통과한 요청에 한해 경로 정규화 및 심볼릭 링크 검증을 수행하고 안전하게 파일 읽기/쓰기를 집행하는 PEP와 Jail을 구축한다.
+* **목적**: `authn`(AuthN)과 `authz`(PDP) 단계를 통과한 요청에 한해 경로 정규화 및 심볼릭 링크 검증을 수행하고 안전하게 파일 읽기/쓰기를 집행하는 PEP와 Jail을 구축한다.
 * **진입 조건**: Phase 2 완료.
 * **포함 능력 매핑**: `PEP+file jail` (Layer 2C: `internal/jail`, Layer 3: `internal/authz/pep`)
 * **완료 조건 (관찰 가능한 행동)**:
@@ -341,7 +341,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **포함 능력 매핑**: `scenario harness` (Layer 5: `internal/harness`, `internal/ui` 고도화)
 * **완료 조건 (관찰 가능한 행동)**:
   1. `authz-harness run --scenario all` 실행 시 30개 긍정·부정 시나리오가 격리된 상태로 실행되고 전 항목 `PASS` 요약 표와 함께 종료 코드 `0`을 반환한다.
-  2. `--output-format explain` 및 `audit timeline` 실행 시 초보자도 이해할 수 있는 6단계 관문 통과/차단 상태도와 한국어 원리 해설이 출력된다.
+  2. `--output-format explain` 및 `audit timeline` 실행 시 초보자도 이해할 수 있는 단계 통과/차단 상태도와 한국어 원리 해설이 출력된다.
   3. L4 블랙박스 CLI 계약 및 골든 파일 테스트가 100% 통과한다.
 * **주요 산출물**: 30대 시나리오 카탈로그 러너, Quad-Assertion 검증 엔진, 초보자용 Explain/Timeline 포매터, L4/L5 테스트 스위트.
 * **의존성 / 금지 결합**: Phase 0 ~ 4 의존. 시나리오 간 잔여 상태 오염 방치 금지.
@@ -353,7 +353,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **진입 조건**: Phase 5 완료.
 * **포함 능력 매핑**: `문서/포트폴리오 포장`
 * **완료 조건 (관찰 가능한 행동)**:
-  1. `README.md`에 1분 퀵스타트, 3-Zone 토폴로지, 6계층 DAG, 6단계 관문 상태 머신, 30대 시나리오 요약표, 샘플 출력 화면이 완비된다.
+  1. `README.md`에 1분 퀵스타트, 3-Zone 토폴로지, 6계층 DAG, 단계 파이프라인 상태 머신, 30대 시나리오 요약표, 샘플 출력 화면이 완비된다.
   2. 클린 환경에서 `go test -race ./...`와 `authz-harness run --scenario all`이 1분 이내에 무결하게 통과한다.
 * **주요 산출물**: 최종 `README.md`, 면접 데모 치트시트, 전 계층 테스트 검증 완료 리포지토리.
 * **의존성 / 리스크**: Phase 5 의존. 구현된 동작과 문서 설명 간의 수치/옵션명 불일치 제로(0)화.
@@ -412,7 +412,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 * **주요 산출물**: [15-pdp-승인-결정-ask](15-pdp-승인-결정-ask/README.md), `internal/authz/state/approval.go`, `approval grant/list` CLI, `G14` 시나리오(`E2E-67`~`73`).
 
 ### Phase 16: 도구 종류 확장(`net:fetch`, `exec:run`) 및 Egress/실행 가드 (`G15`: `E2E-74`~`E2E-79`) — [기능 동결선]
-* **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고(`net:fetch` URL 정규화는 Gate 0, allow-list 대조는 Gate 2c, 실행은 Stage 5), OS 격리를 포트 단위로 열어(`055` `Policy.AllowConnectPorts`) 79대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
+* **목적**: 루프백 전용 `net:fetch`(`internal/netguard`: DNS 리바인딩·userinfo·리다이렉트·비루프백 차단)와 allow-list ID 전용 `exec:run`(`internal/execguard`: 셸 메타문자·위험 플래그 차단) 가짜 도구를 기존 PEP 단일 입출구에 통합하고(`net:fetch` URL 정규화는 `input` 단계, allow-list 대조는 `boundary` 단계, 실행은 `execute` 단계), OS 격리를 포트 단위로 열어(`055` `Policy.AllowConnectPorts`) 79대 E2E 시나리오를 완주한 뒤 **일체의 기능 추가를 동결(Feature Freeze)**한다.
 * **주요 산출물**: [16-도구-종류-확장-및-egress-통제](16-도구-종류-확장-및-egress-통제/README.md), `internal/netguard`, `internal/execguard`, `055` 격리 포트 단위 허용, `G15` 시나리오(`E2E-74`~`79`). 가드 자체의 상한 초과는 `TOOL_LIMIT_EXCEEDED`(12), 부모 상한 초과는 `17`.
 
 ### Phase 17: [포스트 로드맵 1] 도메인 순수성 및 전이적 의존성 역전(DIP) 완결 [완료]
@@ -431,7 +431,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 5. **표준 에러 및 종료 코드 매핑**: 문자열 에러 비교를 금지하고 도메인 상수(`Reason`, `ErrorClass`, `ExitCode`)로만 판정한다.
 
 ## 21) 위협 모델 요약 (Threat Model Summary) 및 대응 원칙
-1. **토큰 위조·변조 및 알고리즘 혼동 ([RFC 8725](https://www.rfc-editor.org/info/rfc8725/))**: `typ: at+jwt` 강제, 허용 알고리즘 화이트리스트(`alg: none` 거부), `kid` 기반 서명 검증으로 Gate 1에서 즉시 차단.
+1. **토큰 위조·변조 및 알고리즘 혼동 ([RFC 8725](https://www.rfc-editor.org/info/rfc8725/))**: `typ: at+jwt` 강제, 허용 알고리즘 화이트리스트(`alg: none` 거부), `kid` 기반 서명 검증으로 `authn` 단계에서 즉시 차단.
 2. **권한 확대 위임 ([RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693/))**: 팀장의 직접 서명 불가(Zone A 격리), 중앙 토큰 교환기에서 $S_{child} \subseteq S_{parent}$, $exp_{child} \le exp_{parent}$, `depth <= max_depth` 불변식 강제.
 3. **회수된 토큰 및 폐기된 서명 키 재사용**: PIP 실시간 Grant 상태 조회, Subject Epoch 버전 대조, 폐기된 `kid`(`retired`) 즉시 거부로 만료 전 토큰이라도 즉시 차단.
 4. **주체 도용 및 토큰 재사용(Replay)**: 실행 에이전트 ID와 `sub` 바인딩 대조 및 일회성 토큰 `jti` 소비 원장(Anti-Replay Ledger)으로 차단.
@@ -441,9 +441,9 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ## 22) 포트폴리오 스토리라인 (면접/문서에서 설명할 순서)
 1. **문제 정의 (Why)**: "에이전트 지능보다 기업 도입에서 더 치명적인 문제는 하위 워커에 대한 과도한 권한 위임과 권한 회수 미반영, 그리고 사후 추적 불가입니다. 저는 지능 대신 **통제와 실패 증명**에 집중한 하네스를 설계했습니다."
-2. **3-Zone 격리와 이중 관문 아키텍처 (What)**: "외부 클라우드 없이도 로컬에서 완벽한 신뢰 경계를 만들기 위해 상태를 3-Zone(개인키 Zone A / 검증·PIP Zone B / 실행 Jail 및 감사 Zone C)으로 분리하고, Gate 1(AuthN/서명/키 수명주기)과 Gate 2([NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf) PAP/PIP/PDP/PEP) 이중 관문을 세웠습니다."
+2. **3-Zone 격리와 이중 관문 아키텍처 (What)**: "외부 클라우드 없이도 로컬에서 완벽한 신뢰 경계를 만들기 위해 상태를 3-Zone(개인키 Zone A / 검증·PIP Zone B / 실행 Jail 및 감사 Zone C)으로 분리하고, `authn` 단계(AuthN/서명/키 수명주기)와 `authz` 단계([NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf) PAP/PIP/PDP/PEP) 이중 관문을 세웠습니다."
 3. **RFC 8693 축소 위임과 OS 프로세스 격리 (How)**: "팀장은 권한의 주인이 아니라 조정자입니다. 자식 워커를 별도 OS 서브프로세스로 띄울 때 [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) 기반 축소 위임 토큰을 `stdin` 프레임으로 전달하며, Revoke나 Epoch 갱신 시 만료 전 토큰이라도 즉시 차단됩니다."
-4. **초보자 친화적 관측성과 해시 체인 감사 (Evidence)**: "운영 로그(`stderr`), 해시 체인 감사 증거(`audit.jsonl`), 초보자용 6단계 관문 상태도 및 시계열 스토리텔러(`stdout`)를 3채널로 분리해 누구나 왜 막혔는지 즉시 이해할 수 있습니다."
+4. **초보자 친화적 관측성과 해시 체인 감사 (Evidence)**: "운영 로그(`stderr`), 해시 체인 감사 증거(`audit.jsonl`), 초보자용 단계 파이프라인 상태도 및 시계열 스토리텔러(`stdout`)를 3채널로 분리해 누구나 왜 막혔는지 즉시 이해할 수 있습니다."
 5. **5계층 테스트와 30대 E2E 하네스 (Proof)**: "단위·퍼징·`-race` 동시성 테스트부터 `run --scenario all` 30개 E2E 공격 시나리오까지, 기대한 실패가 정확한 종료 코드와 감사 사유로 실패해야만 PASS를 주는 검증 체계를 완성했습니다."
 
 ## 23) 열린 결정 사항 (Open Decisions) — 권고 기본값 및 명세 확정 지점
@@ -468,7 +468,7 @@ OAuth 2.1 기반 워크로드 인증(AuthN)·토큰 무결성·축소 위임([RF
 
 ## 26) 마일스톤 체크리스트 (사람용 / 누락 검사용 최종 요약)
 - [x] **아키텍처 경계 & 3-Zone 격리**: Zone A(개인키/시크릿), Zone B(공개키/Grant/Epoch/Replay), Zone C(Workspace Jail/Audit JSONL) 물리·논리 분리 및 6계층 비순환 의존성(DAG) 확립 완료.
-- [x] **엔터프라이즈 AuthN + AuthZ 통합**: 워크로드 클라이언트 인증(Gate 1), [RFC 9068](https://www.rfc-editor.org/info/rfc9068/) `typ: at+jwt`, [RFC 7517](https://www.rfc-editor.org/info/rfc7517/) `kid` 키 회전·폐기, [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) `act` 클레임 축소 위임, [NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf) PAP/PIP/PDP/PEP 4각 분리 반영 완료.
+- [x] **엔터프라이즈 AuthN + AuthZ 통합**: 워크로드 클라이언트 인증(`authn` 단계), [RFC 9068](https://www.rfc-editor.org/info/rfc9068/) `typ: at+jwt`, [RFC 7517](https://www.rfc-editor.org/info/rfc7517/) `kid` 키 회전·폐기, [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) `act` 클레임 축소 위임, [NIST SP 800-162](https://nvlpubs.nist.gov/nistpubs/specialpublications/nist.sp.800-162.pdf) PAP/PIP/PDP/PEP 4각 분리 반영 완료.
 - [x] **OS 서브프로세스 & 파일 Jail**: 클린 환경변수 + `stdin` 프레임 기반 자식 프로세스 실행, 표준 종료 코드(`0`, `11`~`16`), 상대 경로/절대 경로/심볼릭 링크 탈출 방어 완료.
-- [x] **삼분 관측성 & 초보자 친화적 UX**: `audit.jsonl`(해시 체인) ≠ `stderr`(`slog`) ≠ `stdout`(6단계 시각적 관문 파이프라인 뷰, 부정 테스트 해설 박스, `audit timeline` 시계열 스토리텔러) 설계 완료.
+- [x] **삼분 관측성 & 초보자 친화적 UX**: `audit.jsonl`(해시 체인) ≠ `stderr`(`slog`) ≠ `stdout`(단계 파이프라인 뷰, 부정 테스트 해설 박스, `audit timeline` 시계열 스토리텔러) 설계 완료.
 - [x] **전수 CLI 스위치 & 5계층(L1~L5) 30대 E2E 하네스**: 8대 명령 그룹, 결함 주입 플래그(`--tamper-*`, `--inject-*`), L1(Unit)~L2(Fuzz)~L3(Race/Clock)~L4(CLI Contract)~L5(30개 E2E 시나리오) 및 Phase 0~6 인계 계약 정의 완료.

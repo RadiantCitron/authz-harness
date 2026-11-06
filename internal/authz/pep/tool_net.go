@@ -32,7 +32,7 @@ func (netFetchTool) CheckBoundary(c *Call) error {
 		return domain.NewError(domain.ReasonInternalError, "net guard is not configured (fail-closed)", nil)
 	}
 	if err := c.cfg.NetGuard.Check(c.st.resource); err != nil {
-		return domain.NewError(domain.ReasonFromError(err, domain.ReasonEgressDenied), fmt.Sprintf("Gate 2c egress denied: %v", err), err)
+		return domain.NewError(domain.ReasonFromError(err, domain.ReasonEgressDenied), fmt.Sprintf("boundary stage egress denied: %v", err), err)
 	}
 	return nil
 }

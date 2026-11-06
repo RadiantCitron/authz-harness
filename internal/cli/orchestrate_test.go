@@ -242,7 +242,7 @@ func TestOrchestrateRunner_TC09_RevokedBeforeSpawn(t *testing.T) {
 		"-trace-id", "tr-orch-toctou-09",
 	})
 
-	// TOCTOU 방어 검증: 자식이 Gate 2에서 Grant 회수 감지 -> Exit Code 12 거부
+	// TOCTOU 방어 검증: 자식이 authz 단계에서 Grant 회수 감지 -> Exit Code 12 거부
 	if exitCode != domain.ExitAuthzDenied {
 		t.Fatalf("expected ExitAuthzDenied(12), got: %d (stdout: %s, stderr: %s)", exitCode, rig.out.String(), rig.errOut.String())
 	}

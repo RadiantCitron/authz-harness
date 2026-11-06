@@ -143,7 +143,7 @@ func TestFinalize_BlockAuditFailureReports15(t *testing.T) { // TC-020-05
 func TestFinalize_CompletionAuditFailureUnchanged(t *testing.T) { // TC-020-06
 	v, p, j, _ := obsStubs(false)
 	rec := &recObserver{}
-	// Stage 4 사전 감사(1회)만 성공, 완료 감사부터 실패
+	// precommit_audit 단계 사전 감사(1회)만 성공, 완료 감사부터 실패
 	gw, _ := pep.NewGateway(pep.Config{Verifier: v, PDP: p, Jail: j, AuditWriter: &nthFailWriter{okCount: 1}, Observer: rec})
 	r, _ := gw.Execute(context.Background(), pep.Request{Token: "t", Action: domain.ActionFileWrite, Resource: "a.txt", Data: []byte("abc")})
 	if !r.Allowed || r.ExitCode != domain.ExitSuccess || j.callsWrite != 1 {

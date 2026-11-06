@@ -30,7 +30,7 @@ func NewSummaryFormatter(out io.Writer) *SummaryFormatter {
 	return &SummaryFormatter{out: out}
 }
 
-// ExplainFormatter 는 초보자용 6단계 관문 상태도 및 역설 해설 포매터다.
+// ExplainFormatter 는 초보자용 단계 파이프라인 상태도 및 역설 해설 포매터다.
 type ExplainFormatter struct {
 	out io.Writer
 }

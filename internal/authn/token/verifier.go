@@ -57,7 +57,7 @@ type TokenVerifier interface {
 	ConsumeReplay(claims domain.TokenClaims, auditCtx domain.AuditContext) error
 }
 
-// Verifier 는 RFC 8725 BCP 및 Gate 1 검증을 수행하는 구현체다.
+// Verifier 는 RFC 8725 BCP 및 authn 단계 검증을 수행하는 구현체다.
 type Verifier struct {
 	keyMgr       keys.KeyManager
 	replayLedger ReplayLedger
@@ -66,7 +66,7 @@ type Verifier struct {
 	expectedIss  string
 }
 
-// NewVerifier 는 Gate 1 Verifier 를 생성한다.
+// NewVerifier 는 authn 단계 Verifier 를 생성한다.
 func NewVerifier(keyMgr keys.KeyManager, replayLedger ReplayLedger, auditWriter audit.Writer, clock domain.Clock) *Verifier {
 	if clock == nil {
 		clock = domain.RealClock{}
@@ -110,7 +110,7 @@ func (v *Verifier) InspectToken(tokenStr string) (*JWTHeader, *domain.TokenClaim
 	return &header, &claims, nil
 }
 
-// VerifyToken 은 9단계 엄격한 Gate 1 검증 파이프라인을 실행한다.
+// VerifyToken 은 9단계 엄격한 authn 단계 검증 파이프라인을 실행한다.
 func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx domain.AuditContext) (*domain.VerifiedClaims, error) {
 	effectiveClock := v.clock
 	if opts.ClockOffset != 0 {

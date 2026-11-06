@@ -383,7 +383,7 @@ func TestSubagentWorker_TC05_AuthzDenied_ActionMismatch(t *testing.T) {
 func TestSubagentWorker_TC06_PathTraversal(t *testing.T) {
 	f := setupSubagentFixture(t)
 	sub := "worker-01"
-	// Safe grant to pass Gate 2 (PDP), while using symlink escape to trigger Gate 2c (ExitPathViolation)
+	// Safe grant to pass authz 단계 (PDP), while using symlink escape to trigger boundary 단계 (ExitPathViolation)
 	safeRes := "symlink_escape.txt"
 	grantPolicy(t, f, sub, domain.ActionFileRead, safeRes)
 	tok := issueTestToken(t, f, sub, "file:read:"+safeRes)

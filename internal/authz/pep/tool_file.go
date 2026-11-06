@@ -11,7 +11,7 @@ import (
 func resolveInJail(c *Call, forWrite bool) error {
 	safePath, jailErr := c.cfg.Jail.ResolvePath(c.st.resource, forWrite)
 	if jailErr != nil {
-		return domain.NewError(jail.ReasonFromError(jailErr), fmt.Sprintf("Gate 2c jail path containment violated: %v", jailErr), jailErr)
+		return domain.NewError(jail.ReasonFromError(jailErr), fmt.Sprintf("boundary stage jail path containment violated: %v", jailErr), jailErr)
 	}
 	c.st.safePath = safePath
 	return nil

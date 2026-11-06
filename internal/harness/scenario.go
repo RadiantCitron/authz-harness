@@ -8,8 +8,8 @@ import (
 
 // ScenarioMetadata 는 시나리오의 정적 설명 및 카탈로그 정보이다.
 type ScenarioMetadata struct {
-	ID                  string            `json:"id"`                             // "E2E-01" ~ "E2E-30"
-	Group               string            `json:"group"`                          // "G1" ~ "G7"
+	ID                  string            `json:"id"`                             // "E2E-01" ~ "E2E-79"
+	Group               string            `json:"group"`                          // "G1" ~ "G15"
 	Name                string            `json:"name"`                           // 시나리오 명칭
 	Description         string            `json:"description"`                    // 시나리오 설명
 	AttackClass         string            `json:"attack_class"`                   // 정상 또는 공격 유형

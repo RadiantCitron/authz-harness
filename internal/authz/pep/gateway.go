@@ -34,7 +34,7 @@ type Request struct {
 	ExpectedSubject    string        // 선택적 주체 기대값 검증
 	ClockOffset        time.Duration // 선택적 가상 시계 오프셋 (테스트 및 시간 시뮬레이션)
 	TraceID            string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
-	RequireTraceID     bool          // true 인 경우 TraceID 누락 시 Gate 0 에서 즉각 차단 (E2E-28 검증용)
+	RequireTraceID     bool          // true 인 경우 TraceID 누락 시 input 단계에서 즉각 차단 (E2E-28 검증용)
 }
 
 // Result 는 PEP 관문 집행 결과 및 단계별 판정 세부 정보다.
@@ -57,7 +57,7 @@ type Result struct {
 
 // Gateway 는 파일 I/O 요청에 대한 인가 집행 관문 인터페이스다.
 type Gateway interface {
-	// Execute 는 5단계 관문(AuthN -> PDP -> Jail -> Audit -> I/O)을 거쳐 파일 작업을 집행한다.
+	// Execute 는 파이프라인 단계(input -> authn -> authz -> boundary -> replay -> approval -> budget -> precommit_audit -> execute -> settle)을 거쳐 파일 작업을 집행한다.
 	Execute(ctx context.Context, req Request) (*Result, error)
 }
 
@@ -68,17 +68,17 @@ type ApprovalConsumer interface {
 
 // Config 는 Gateway 생성에 필요한 하위 컴포넌트 의존성 주입 구조체다.
 type Config struct {
-	Verifier         token.TokenVerifier // Layer 2A: Gate 1 Bearer 토큰 검증기
-	PDP              pdp.Service         // Layer 2B: Gate 2 순수 인가 결정 엔진
-	Jail             jail.Jail           // Layer 2C: Gate 2c 격리 파일 경계
+	Verifier         token.TokenVerifier // Layer 2A: authn 단계 Bearer 토큰 검증기
+	PDP              pdp.Service         // Layer 2B: authz 단계 순수 인가 결정 엔진
+	Jail             jail.Jail           // Layer 2C: boundary 단계 격리 파일 경계
 	AuditWriter      audit.Writer        // Layer 1: 감사 로그 기록기
 	Clock            domain.Clock        // 결정론적 가상 시계 주입
 	Observer         observe.Observer    // 관측성 포트 주입 (미주입 시 NoopObserver, 항상 WrapSafe 적용)
 	StageObserver    func(domain.Stage)  // 선택: 단계 통과 직후 호출되는 관찰자(단위 시험 전용, BuildStack 은 배선하지 않음)
 	ApprovalConsumer ApprovalConsumer    // 선택: 승인 소비기. 승인으로 허용된 요청인데 없으면 Fail-Closed(16)
 	BudgetLedger     budget.Ledger       // 선택: 예산 토큰(Budget != nil) 집행용 원장. 없으면 예산 토큰은 Fail-Closed 거부
-	NetGuard         *netguard.Guard     // 선택: net:fetch 가드. nil 이면 net:fetch 는 Gate 2c 에서 Fail-Closed(16)
-	ExecRunner       *execguard.Runner   // 선택: exec:run 실행기. nil 이면 exec:run 은 Gate 2c 에서 Fail-Closed(16)
+	NetGuard         *netguard.Guard     // 선택: net:fetch 가드. nil 이면 net:fetch 는 boundary 단계에서 Fail-Closed(16)
+	ExecRunner       *execguard.Runner   // 선택: exec:run 실행기. nil 이면 exec:run 은 boundary 단계에서 Fail-Closed(16)
 }
 
 type gateway struct {
@@ -270,7 +270,7 @@ func (g *gateway) authn(_ context.Context, c *Call) error {
 	}, auditCtx)
 	if verifyErr != nil {
 		reason := extractReasonFromTokenError(verifyErr)
-		return domain.NewError(reason, fmt.Sprintf("Gate 1 authentication failed: %v", verifyErr), verifyErr)
+		return domain.NewError(reason, fmt.Sprintf("authn stage authentication failed: %v", verifyErr), verifyErr)
 	}
 	st.claims = vc
 	st.subject = vc.Claims.Subject
@@ -422,7 +422,7 @@ func (g *gateway) finalize(ctx context.Context, state *pipelineState, tr pipelin
 		exitCode := domain.ExitCodeFromError(runErr, domain.ExitCodeForReason(reason))
 		failedStage := domain.Stage(tr.Failed)
 
-		// 단일 출구 차단 감사 기록 (Stage4 감사 실패 시 중복 기록 시도 방지).
+		// 단일 출구 차단 감사 기록 (precommit_audit 단계 감사 실패 시 중복 기록 시도 방지).
 		// 감사 없이 거부를 끝내지 않는다: 기록 실패 시 AUDIT_LOG_FAILED(15)로 마감하되 거부 결론은 유지한다.
 		details := runErr.Error()
 		if failedStage != domain.StagePrecommitAudit {

@@ -17,7 +17,7 @@ func (execRunTool) CheckBoundary(c *Call) error {
 		return domain.NewError(domain.ReasonInternalError, "exec runner is not configured (fail-closed)", nil)
 	}
 	if err := execguard.Validate(c.st.resource, string(c.req.Data)); err != nil {
-		return domain.NewError(domain.ReasonFromError(err, domain.ReasonExecNotAllowed), fmt.Sprintf("Gate 2c exec rejected: %v", err), err)
+		return domain.NewError(domain.ReasonFromError(err, domain.ReasonExecNotAllowed), fmt.Sprintf("boundary stage exec rejected: %v", err), err)
 	}
 	return nil
 }

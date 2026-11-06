@@ -93,7 +93,7 @@ func TestSkippedNotCompensatedAndNoHook(t *testing.T) { // TC-020-06, 11
 	h := &hook{}
 	e, _ := pipeline.New([]pipeline.Step[st]{rec("1", pipeline.Check, false, &log), skip, rec("3", pipeline.Check, true, &log)}, h)
 	tr := e.Run(context.Background(), &st{})
-	if !reflect.DeepEqual(tr.Skipped, []string{"s"}) || !reflect.DeepEqual(log, []string{"run:1", "run:3", "comp:1"}) {
+	if !reflect.DeepEqual(log, []string{"run:1", "run:3", "comp:1"}) {
 		t.Errorf("trace=%+v log=%v", tr, log)
 	}
 	for _, ev := range h.events {

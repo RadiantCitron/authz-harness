@@ -253,7 +253,7 @@ func TestPEPCLI_AcceptanceScenarios(t *testing.T) {
 			expectedExit: domain.ExitTokenInvalid,
 			verify: func(t *testing.T, rig *pepCLITestRig) {
 				if !strings.Contains(rig.out.String(), "[FAIL]") {
-					t.Fatalf("expected Gate 1 FAIL, got:\n%s", rig.out.String())
+					t.Fatalf("expected authn 단계 FAIL, got:\n%s", rig.out.String())
 				}
 			},
 		},

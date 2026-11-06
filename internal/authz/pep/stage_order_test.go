@@ -186,17 +186,17 @@ func TestStageOrder_FailurePathsKeepInvariant(t *testing.T) {
 		wantStage domain.Stage
 		wantPass  []domain.Stage
 	}{
-		{"Gate0 빈 대상", pep.Request{Token: "x", Action: domain.ActionFileRead, Resource: ""},
+		{"input 단계 빈 대상", pep.Request{Token: "x", Action: domain.ActionFileRead, Resource: ""},
 			domain.StageInput, nil},
-		{"Gate1 잘못된 토큰", pep.Request{Token: "invalid.jwt.token", Action: domain.ActionFileRead, Resource: "docs/a.txt"},
+		{"authn 단계 잘못된 토큰", pep.Request{Token: "invalid.jwt.token", Action: domain.ActionFileRead, Resource: "docs/a.txt"},
 			domain.StageAuthn, []domain.Stage{domain.StageInput}},
-		{"Gate2 권한 없음", writeReq(noGrantTok, "docs/nogrant.txt", []byte("x")),
+		{"authz 단계 권한 없음", writeReq(noGrantTok, "docs/nogrant.txt", []byte("x")),
 			domain.StageAuthz, []domain.Stage{domain.StageInput, domain.StageAuthn}},
-		{"Gate2c 심볼릭 링크 탈출", writeReq(jailTok, "link/x.txt", []byte("x")),
+		{"boundary 단계 심볼릭 링크 탈출", writeReq(jailTok, "link/x.txt", []byte("x")),
 			domain.StageBoundary, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz}},
 		{"Budget 쓰기 바이트 초과", writeReq(budgetTok.TokenString, "docs/out.txt", []byte("too-long")),
 			domain.StageBudget, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz, domain.StageBoundary, domain.StageReplay}},
-		{"Stage4 사전 감사 실패", pep.Request{Token: auditTok, Action: domain.ActionFileWrite, Resource: "docs/out.txt",
+		{"precommit_audit 단계 사전 감사 실패", pep.Request{Token: auditTok, Action: domain.ActionFileWrite, Resource: "docs/out.txt",
 			Data: []byte("x"), InjectAuditFailure: true},
 			domain.StagePrecommitAudit, []domain.Stage{domain.StageInput, domain.StageAuthn, domain.StageAuthz, domain.StageBoundary, domain.StageReplay}},
 	}

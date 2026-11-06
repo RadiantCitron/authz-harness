@@ -53,10 +53,9 @@ type Hook[S any] interface {
 
 // Trace 는 한 번의 실행 기록이다.
 type Trace struct {
-	Passed  []string
-	Skipped []string
-	Failed  string
-	Err     error
+	Passed []string
+	Failed string
+	Err    error
 }
 
 // Engine 은 검증된 단계 목록이다. 한 번 만들어 재사용하며 요청별 값은 s 로만 전달한다.
@@ -102,7 +101,6 @@ func (e *Engine[S]) Run(ctx context.Context, s *S) Trace {
 	var done []Step[S]
 	for _, st := range e.steps {
 		if st.Applies != nil && !st.Applies(s) {
-			tr.Skipped = append(tr.Skipped, st.ID)
 			continue
 		}
 		if e.hook != nil {

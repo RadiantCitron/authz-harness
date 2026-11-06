@@ -102,7 +102,7 @@ func TestToolBudgetPlans(t *testing.T) {
 	}
 }
 
-// TC-030-04: 등록되지 않은 행동은 표에서 찾지 못한다 (Gate 0 가 INVALID_ARGUMENTS 로 거부).
+// TC-030-04: 등록되지 않은 행동은 표에서 찾지 못한다 (input 단계가 INVALID_ARGUMENTS 로 거부).
 func TestUnregisteredActionHasNoTool(t *testing.T) {
 	for _, a := range []domain.Action{"net:post", "exec", ""} {
 		if _, ok := toolFor(a); ok {

@@ -44,7 +44,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		return resp, resp.ExitCode
 	}
 
-	// PEP Gateway 요청 조립 (RequireTraceID: true로 위임하여 Gate 0에서 동일하게 차단)
+	// PEP Gateway 요청 조립 (RequireTraceID: true로 위임하여 input 단계에서 동일하게 차단)
 	pepReq := pep.Request{
 		Token:          req.Token,
 		Action:         domain.Action(req.Action),
@@ -55,7 +55,7 @@ func (w *SubagentWorker) Execute(ctx context.Context, req SubagentRequest) (Suba
 		ClockOffset:    time.Duration(req.ClockOffsetSeconds) * time.Second,
 	}
 
-	// PEP 5단계 관문 집행
+	// PEP 파이프라인 집행
 	pepRes, err := w.gateway.Execute(ctx, pepReq)
 	if err != nil {
 		resp.ExitCode = int(domain.ExitInternalError)

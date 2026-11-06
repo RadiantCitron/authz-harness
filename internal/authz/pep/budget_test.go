@@ -235,7 +235,7 @@ func TestBudget_NilBudgetTokenKeepsReplay(t *testing.T) { // TC-040-07
 	}
 }
 
-// 읽기 사후 차감 실패 시 감사 순서: Stage 4 사전 감사(allow) 뒤에 거부 감사(deny)가 따라붙는다.
+// 읽기 사후 차감 실패 시 감사 순서: precommit_audit 단계 사전 감사(allow) 뒤에 거부 감사(deny)가 따라붙는다.
 func TestBudget_ReadDenyAuditOrder(t *testing.T) {
 	h := setupTestHarness(t)
 	grantAll(t, h)

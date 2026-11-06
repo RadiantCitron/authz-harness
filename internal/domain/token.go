@@ -104,7 +104,7 @@ func (c *TokenClaims) Validate() error {
 	return nil
 }
 
-// VerifiedClaims 는 Gate 1 암호학적 서명 및 클레임 검증을 통과한 신뢰 토큰 정보다.
+// VerifiedClaims 는 authn 단계 암호학적 서명 및 클레임 검증을 통과한 신뢰 토큰 정보다.
 type VerifiedClaims struct {
 	Claims    TokenClaims `json:"claims"`
 	KeyID     string      `json:"kid"`

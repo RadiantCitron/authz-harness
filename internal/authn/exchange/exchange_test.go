@@ -131,7 +131,7 @@ func TestExchange_Success_SingleDelegation(t *testing.T) {
 		t.Errorf("expected actor jti %s, got %s", parentRes.Claims.JWTID, res.Claims.Actor.JWTID)
 	}
 
-	// 자식 토큰 Gate 1 검증
+	// 자식 토큰 authn 단계 검증
 	verified, err := verifier.VerifyToken(res.TokenString, token.VerifyOptions{}, domain.AuditContext{})
 	if err != nil {
 		t.Fatalf("child token verify failed: %v", err)

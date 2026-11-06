@@ -116,7 +116,7 @@ func TestTOCTOUWindow(t *testing.T) {
 			}
 		})
 
-		// Window B: Gate 1 통과 직후
+		// Window B: authn 단계 통과 직후
 		t.Run("Window B/"+in.name, func(t *testing.T) {
 			h := setupTestHarness(t)
 			var gid string
@@ -140,7 +140,7 @@ func TestTOCTOUWindow(t *testing.T) {
 		})
 	}
 
-	// Window C: Gate 2 통과 직후 — 진행 중 호출은 완료, 다음 호출은 거부
+	// Window C: authz 단계 통과 직후 — 진행 중 호출은 완료, 다음 호출은 거부
 	t.Run("Window C/Grant 회수", func(t *testing.T) {
 		h := setupTestHarness(t)
 		var gid string
@@ -185,7 +185,7 @@ func TestTOCTOUWindow(t *testing.T) {
 		if r2.ExitCode != domain.ExitAuthzDenied || r2.Reason != domain.ReasonGrantRevoked {
 			t.Fatalf("2차 = %d/%s", r2.ExitCode, r2.Reason)
 		}
-		// 실패 단계(Gate 2)는 기록 없음
+		// 실패 단계(authz 단계)는 기록 없음
 		if !reflect.DeepEqual(stages, []domain.Stage{domain.StageInput, domain.StageAuthn}) {
 			t.Errorf("failed-call stages = %v", stages)
 		}

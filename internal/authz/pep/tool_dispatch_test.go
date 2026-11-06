@@ -248,7 +248,7 @@ func TestToolExec_BudgetPreDeduct(t *testing.T) {
 	wantDeny(t, r, domain.ExitAuthzDenied, domain.ReasonBudgetExhausted, domain.StageBudget)
 	for _, s := range stages {
 		if s == domain.StageExecute {
-			t.Fatal("Stage 5 must not be reached")
+			t.Fatal("execute 단계 must not be reached")
 		}
 	}
 }

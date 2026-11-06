@@ -233,7 +233,7 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitTokenInvalid
 	}
 
-	// Gate 1 통과 파이프라인 시각화
+	// authn 단계 통과 파이프라인 시각화
 	fmt.Fprintf(r.out, "PASS: [GATE_1_VERIFIED] RFC 9068 Access Token 무결성 검증 통과\n")
 	fmt.Fprintf(r.out, "  [✓] 1. JWT 포맷 및 헤더 구조 (typ: at+jwt, alg: %s)\n", verified.Algorithm)
 	fmt.Fprintf(r.out, "  [✓] 2. 암호학적 디지털 서명 검증 (kid: %s, Ed25519)\n", verified.KeyID)
@@ -354,6 +354,6 @@ func (r *TokenRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "\nCommands:")
 	fmt.Fprintln(r.errOut, "  issue    RFC 9068 Bearer Access Token 발급")
 	fmt.Fprintln(r.errOut, "  inspect  서명 검증 없이 토큰 헤더 및 페이로드 덤프")
-	fmt.Fprintln(r.errOut, "  verify   Gate 1 암호학적 무결성 및 클레임 검증")
+	fmt.Fprintln(r.errOut, "  verify   authn 단계 암호학적 무결성 및 클레임 검증")
 	fmt.Fprintln(r.errOut, "  exchange RFC 8693 Token Exchange 축소 위임 토큰 발급")
 }

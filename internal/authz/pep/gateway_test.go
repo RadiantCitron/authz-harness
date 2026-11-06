@@ -243,7 +243,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-PEP-03: Gate 1 거부 - 변조된 서명 토큰", func(t *testing.T) {
+	t.Run("TC-PEP-03: authn 단계 거부 - 변조된 서명 토큰", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "eve"
 		resPath := "confidential.txt"
@@ -281,7 +281,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 			t.Errorf("expected ExitTokenInvalid(11), got %d", result.ExitCode)
 		}
 		if result.Stage != domain.StageAuthn {
-			t.Errorf("expected StageGate1AuthN, got %s", result.Stage)
+			t.Errorf("expected authn, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonTokenInvalidSignature {
 			t.Errorf("expected ReasonTokenInvalidSignature, got %s", result.Reason)
@@ -289,11 +289,11 @@ func Test10AcceptanceScenarios(t *testing.T) {
 
 		// 파일 부작용 0바이트 확인
 		if _, err := os.Stat(filepath.Join(h.workspaceDir, resPath)); !os.IsNotExist(err) {
-			t.Errorf("file should not exist on disk on Gate 1 denial")
+			t.Errorf("file should not exist on disk on authn 단계 denial")
 		}
 	})
 
-	t.Run("TC-PEP-04: Gate 1 거부 - 만료된 토큰", func(t *testing.T) {
+	t.Run("TC-PEP-04: authn 단계 거부 - 만료된 토큰", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		resPath := "expired.txt"
@@ -322,7 +322,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-PEP-05: Gate 1 거부 - 이미 소비된 jti Replay 재사용 토큰", func(t *testing.T) {
+	t.Run("TC-PEP-05: authn 단계 거부 - 이미 소비된 jti Replay 재사용 토큰", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		resPath := "file.txt"
@@ -343,7 +343,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 			t.Fatalf("first request failed: %v", err)
 		}
 
-		// 2회차 Replay 시도 -> Gate 1 차단
+		// 2회차 Replay 시도 -> authn 단계 차단
 		req2 := pep.Request{
 			Token:    tok,
 			Action:   domain.ActionFileWrite,
@@ -363,7 +363,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-PEP-06: Gate 2 거부 - Grant 미보유 리소스 접근", func(t *testing.T) {
+	t.Run("TC-PEP-06: authz 단계 거부 - Grant 미보유 리소스 접근", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		unauthorizedRes := "confidential.txt"
@@ -389,14 +389,14 @@ func Test10AcceptanceScenarios(t *testing.T) {
 			t.Errorf("expected ExitAuthzDenied(12), got %d", result.ExitCode)
 		}
 		if result.Stage != domain.StageAuthz {
-			t.Errorf("expected StageGate2AuthZ, got %s", result.Stage)
+			t.Errorf("expected authz, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonNoActiveGrant {
 			t.Errorf("expected ReasonNoActiveGrant, got %s", result.Reason)
 		}
 	})
 
-	t.Run("TC-PEP-07: Gate 2 거부 - 회수된(Revoked) Grant의 토큰 접근", func(t *testing.T) {
+	t.Run("TC-PEP-07: authz 단계 거부 - 회수된(Revoked) Grant의 토큰 접근", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		resPath := "revoked.txt"
@@ -428,7 +428,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-PEP-08: Gate 2 거부 - Security Epoch 증가 후 구 Epoch 토큰 접근", func(t *testing.T) {
+	t.Run("TC-PEP-08: authz 단계 거부 - Security Epoch 증가 후 구 Epoch 토큰 접근", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		resPath := "epoch_test.txt"
@@ -462,7 +462,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-PEP-09: Gate 2c 거부 - 상위 탈출 경로 순회 시도", func(t *testing.T) {
+	t.Run("TC-PEP-09: boundary 단계 거부 - 상위 탈출 경로 순회 시도", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "attacker"
 		// PDP용 인가 경로 (경로 순회 검증을 통과하는 형태)
@@ -501,14 +501,14 @@ func Test10AcceptanceScenarios(t *testing.T) {
 			t.Errorf("expected ExitPathViolation(13), got %d", result.ExitCode)
 		}
 		if result.Stage != domain.StageBoundary {
-			t.Errorf("expected StageGate2cJail, got %s", result.Stage)
+			t.Errorf("expected boundary, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonSymlinkEscape && result.Reason != domain.ReasonPathTraversal {
 			t.Errorf("expected ReasonSymlinkEscape or ReasonPathTraversal, got %s", result.Reason)
 		}
 	})
 
-	t.Run("TC-PEP-10: Stage 4 거부 - Fail-Closed 감사 실패 결함 주입 (Zero Side-Effects)", func(t *testing.T) {
+	t.Run("TC-PEP-10: precommit_audit 단계 거부 - Fail-Closed 감사 실패 결함 주입 (Zero Side-Effects)", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"
 		targetFile := "audit_fail_test.txt"
@@ -536,7 +536,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 			t.Errorf("expected ExitAuditFailure(15), got %d", result.ExitCode)
 		}
 		if result.Stage != domain.StagePrecommitAudit {
-			t.Errorf("expected Stage4Audit, got %s", result.Stage)
+			t.Errorf("expected precommit_audit, got %s", result.Stage)
 		}
 		if result.Reason != domain.ReasonAuditLogFailed {
 			t.Errorf("expected ReasonAuditLogFailed, got %s", result.Reason)
@@ -550,7 +550,7 @@ func Test10AcceptanceScenarios(t *testing.T) {
 	})
 }
 
-func TestGate0InputValidation(t *testing.T) {
+func TestInputStageValidation(t *testing.T) {
 	ctx := context.Background()
 	h := setupTestHarness(t)
 
@@ -579,7 +579,7 @@ func TestGate0InputValidation(t *testing.T) {
 				t.Errorf("expected ExitBadInput(14), got %d", res.ExitCode)
 			}
 			if res.Stage != domain.StageInput {
-				t.Errorf("expected StageGate0Input, got %s", res.Stage)
+				t.Errorf("expected input, got %s", res.Stage)
 			}
 			if res.Reason != domain.ReasonInvalidArguments {
 				t.Errorf("expected ReasonInvalidArguments, got %s", res.Reason)
@@ -680,7 +680,7 @@ func TestTC_010_08_StructuredErrorReason_Extraction(t *testing.T) {
 	h := setupTestHarness(t)
 	ctx := context.Background()
 
-	// 만료된 토큰으로 실행 (Gate 1 만료 에러 발생)
+	// 만료된 토큰으로 실행 (authn 단계 만료 에러 발생)
 	res, err := h.tokenIssuer.IssueToken(token.IssueRequest{
 		ClientID:     "client-orchestrator",
 		ClientSecret: "orchestrator-secret-key-01",
@@ -1013,7 +1013,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-060-05-2: Gate 1 AuthN 실패 시 PDP/Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
+	t.Run("TC-060-05-2: authn 단계 AuthN 실패 시 PDP/Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
 		verifier := &stubVerifier{
 			errToReturn: domain.NewError(domain.ReasonTokenInvalidSignature, "bad sig", token.ErrInvalidSignature),
 		}
@@ -1046,7 +1046,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 			t.Fatal("expected denied on authn error, got allowed")
 		}
 		if res.Stage != domain.StageAuthn {
-			t.Errorf("expected StageGate1AuthN, got %s", res.Stage)
+			t.Errorf("expected authn, got %s", res.Stage)
 		}
 		if pdpStub.calls != 0 {
 			t.Errorf("expected 0 calls to PDP on authn failure, got %d", pdpStub.calls)
@@ -1056,7 +1056,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 		}
 	})
 
-	t.Run("TC-060-05-3: Gate 2 PDP Deny 시 Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
+	t.Run("TC-060-05-3: authz 단계 PDP Deny 시 Jail 단락(Short-Circuit) 배선 검증", func(t *testing.T) {
 		verifier := &stubVerifier{
 			claimsToReturn: &domain.VerifiedClaims{
 				Claims: domain.TokenClaims{
@@ -1101,7 +1101,7 @@ func TestTrackB_WiringPipeline_Isolated(t *testing.T) {
 			t.Fatal("expected denied on pdp deny, got allowed")
 		}
 		if res.Stage != domain.StageAuthz {
-			t.Errorf("expected StageGate2AuthZ, got %s", res.Stage)
+			t.Errorf("expected authz, got %s", res.Stage)
 		}
 		if jailStub.callsRead != 0 || jailStub.callsWrite != 0 {
 			t.Errorf("expected 0 calls to Jail on pdp deny, got read=%d write=%d", jailStub.callsRead, jailStub.callsWrite)

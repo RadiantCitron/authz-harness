@@ -70,7 +70,7 @@ func setupTestRig(t *testing.T) *testRig {
 	}
 }
 
-// 시나리오 1: 정상 토큰 발급 및 Gate 1 통과
+// 시나리오 1: 정상 토큰 발급 및 authn 단계 통과
 func TestScenario1_ValidTokenPass(t *testing.T) {
 	rig := setupTestRig(t)
 

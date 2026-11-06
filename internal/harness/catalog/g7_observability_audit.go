@@ -144,7 +144,7 @@ func (s *e2e29Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		return domain.ExitInternalError, err
 	}
 
-	// InjectAuditFailure: true 결함 주입으로 Stage 4 Audit 쓰기 실패 시뮬레이션
+	// InjectAuditFailure: true 결함 주입으로 precommit_audit 단계 Audit 쓰기 실패 시뮬레이션
 	res, err := stack.PEP.Execute(ctx, pep.Request{
 		Token:              s.token,
 		Action:             domain.ActionFileWrite,
