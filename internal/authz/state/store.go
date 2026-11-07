@@ -35,9 +35,6 @@ type Store interface {
 	// Load 는 상태 파일을 읽어 스냅샷을 반환한다. 파일이 없으면 초기화된 빈 상태를 반환한다.
 	Load() (*GrantsState, error)
 
-	// Save 는 상태를 배타적 락 하에서 임시 파일에 기록한 후 원자적으로 교체(Atomic Rename)한다.
-	Save(state *GrantsState) error
-
 	// Update 는 배타적 락을 획득한 상태에서 상태를 읽고, 변경 함수를 실행한 후 원자적으로 저장한다.
 	Update(fn func(state *GrantsState) error) error
 }
@@ -96,16 +93,6 @@ func (s *FileStore) Load() (*GrantsState, error) {
 	}
 	ensureStateFields(state)
 	return state, nil
-}
-
-// Save 는 배타적 락(LOCK_EX) 하에서 상태를 임시 파일에 기록한 후 atomic rename으로 교체한다.
-func (s *FileStore) Save(state *GrantsState) error {
-	if state == nil {
-		return errors.New("state: state cannot be nil")
-	}
-
-	s.normalizeState(state)
-	return s.store.Write(state)
 }
 
 // Update 는 배타적 락(LOCK_EX) 하에서 최신 상태를 읽고, fn을 적용한 후 원자적으로 디스크에 저장한다.

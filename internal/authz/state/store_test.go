@@ -228,9 +228,6 @@ func TestFileStore_InvalidPaths(t *testing.T) {
 	}
 
 	store, _ := NewFileStore(filepath.Join(t.TempDir(), "test.json"))
-	if err := store.Save(nil); err == nil {
-		t.Fatal("nil state 저장은 에러를 반환해야 합니다")
-	}
 	if err := store.Update(nil); err == nil {
 		t.Fatal("nil update fn은 에러를 반환해야 합니다")
 	}

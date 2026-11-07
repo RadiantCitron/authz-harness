@@ -277,7 +277,7 @@ func (m *mockFailingSaveStore) LoadPublic() (*domain.JWKS, error) {
 	return m.pub, nil // pubErr == nil 이지만 pub은 nil (초기 부트스트랩 트리거)
 }
 
-func (m *mockFailingSaveStore) Save(priv *ZoneAPrivateState) error {
+func (m *mockFailingSaveStore) Update(fn func(*ZoneAPrivateState) error) error {
 	return errors.New("simulated disk full / write error")
 }
 

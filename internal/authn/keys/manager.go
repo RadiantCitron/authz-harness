@@ -77,38 +77,50 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 			return m, nil
 		}
 
-		// 최초 활성 키 자동 부트스트랩
+		// 최초 활성 키 자동 부트스트랩 (단일 락 Update 안에서 안전하게 생성)
 		now := m.clock.Now()
-		kid := fmt.Sprintf("key-%s-01", now.Format("20060102150405"))
-		entry, err := GenerateEd25519Entry(kid, now)
+		var bootstrappedKID, bootstrappedAlg string
+		var bootstrappedStatus domain.KeyStatus
+
+		err := m.store.Update(func(state *ZoneAPrivateState) error {
+			// 동시성 경합으로 다른 프로세스나 고루틴이 이미 초기화한 경우 중복 생성 방지
+			if len(state.Keys) > 0 {
+				return nil
+			}
+
+			kid := fmt.Sprintf("key-%s-01", now.Format("20060102150405"))
+			entry, err := GenerateEd25519Entry(kid, now)
+			if err != nil {
+				return fmt.Errorf("failed to generate initial key: %w", err)
+			}
+
+			state.Version = 1
+			state.UpdatedAt = now
+			state.ActiveKID = kid
+			state.Keys = []ZoneAPrivateKeyEntry{*entry}
+
+			bootstrappedKID = kid
+			bootstrappedAlg = entry.Algorithm
+			bootstrappedStatus = entry.Status
+			return nil
+		})
 		if err != nil {
-			return nil, fmt.Errorf("keys manager: failed to generate initial key: %w", err)
-		}
-
-		newState := &ZoneAPrivateState{
-			Version:   1,
-			UpdatedAt: now,
-			ActiveKID: kid,
-			Keys:      []ZoneAPrivateKeyEntry{*entry},
-		}
-
-		if err := m.store.Save(newState); err != nil {
 			return nil, fmt.Errorf("keys manager: failed to save initial state: %w", err)
 		}
 
-		if m.auditWriter != nil {
+		if bootstrappedKID != "" && m.auditWriter != nil {
 			if err := m.auditWriter.Log(audit.Event{
 				Timestamp: now.UTC(),
-				TraceID:   fmt.Sprintf("init-%s", kid),
+				TraceID:   fmt.Sprintf("init-%s", bootstrappedKID),
 				Step:      "keys.init",
 				Actor:     "system",
 				Action:    "key.created",
 				Decision:  "allow",
 				Success:   true,
 				Metadata: map[string]interface{}{
-					"kid":    kid,
-					"alg":    entry.Algorithm,
-					"status": entry.Status,
+					"kid":    bootstrappedKID,
+					"alg":    bootstrappedAlg,
+					"status": bootstrappedStatus,
 				},
 			}); err != nil {
 				return nil, domain.NewError(domain.ReasonAuditLogFailed, "keys manager: initial key stored but audit logging failed", err)
@@ -229,38 +241,40 @@ func (m *Manager) RotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 }
 
 func (m *Manager) rotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
-	privState, err := m.store.LoadPrivate()
-	if err != nil {
-		return nil, fmt.Errorf("keys manager: failed to load private state: %w", err)
-	}
-	if privState == nil {
-		return nil, errors.New("keys manager: private state not found")
-	}
-
 	now := m.clock.Now()
-	newKID := fmt.Sprintf("key-%s-%02d", now.Format("20060102150405"), len(privState.Keys)+1)
-	newEntry, err := GenerateEd25519Entry(newKID, now)
-	if err != nil {
-		return nil, fmt.Errorf("keys manager: failed to generate new key: %w", err)
-	}
-
+	var newEntry *ZoneAPrivateKeyEntry
 	var oldActiveKID string
-	// 기존 active 키를 verify-only로 변경
-	for i := range privState.Keys {
-		if privState.Keys[i].Status == domain.KeyStatusActive {
-			privState.Keys[i].Status = domain.KeyStatusVerifyOnly
-			privState.Keys[i].RotatedAt = &now
-			oldActiveKID = privState.Keys[i].KID
+
+	err := m.store.Update(func(privState *ZoneAPrivateState) error {
+		if privState == nil || len(privState.Keys) == 0 {
+			return errors.New("keys manager: private state not found")
 		}
-	}
 
-	privState.Keys = append(privState.Keys, *newEntry)
-	privState.ActiveKID = newKID
-	privState.UpdatedAt = now
-	privState.Version++
+		newKID := fmt.Sprintf("key-%s-%02d", now.Format("20060102150405"), len(privState.Keys)+1)
+		entry, err := GenerateEd25519Entry(newKID, now)
+		if err != nil {
+			return fmt.Errorf("failed to generate new key: %w", err)
+		}
 
-	if err := m.store.Save(privState); err != nil {
-		return nil, fmt.Errorf("keys manager: failed to save rotated keys: %w", err)
+		// 기존 active 키를 verify-only로 변경
+		for i := range privState.Keys {
+			if privState.Keys[i].Status == domain.KeyStatusActive {
+				privState.Keys[i].Status = domain.KeyStatusVerifyOnly
+				privState.Keys[i].RotatedAt = &now
+				oldActiveKID = privState.Keys[i].KID
+			}
+		}
+
+		privState.Keys = append(privState.Keys, *entry)
+		privState.ActiveKID = newKID
+		privState.UpdatedAt = now
+		privState.Version++
+
+		newEntry = entry
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("keys manager: failed to rotate keys: %w", err)
 	}
 
 	if m.auditWriter != nil {
@@ -275,7 +289,7 @@ func (m *Manager) rotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 			Reason:    auditCtx.Reason,
 			Metadata: map[string]interface{}{
 				"old_active_kid": oldActiveKID,
-				"new_active_kid": newKID,
+				"new_active_kid": newEntry.KID,
 				"alg":            newEntry.Algorithm,
 			},
 		}); err != nil {
@@ -333,44 +347,44 @@ func (m *Manager) revokeKey(kid string, auditCtx domain.AuditContext) error {
 		return domain.NewError(domain.ReasonInvalidArguments, errEmptyKID.Error(), errEmptyKID)
 	}
 
-	privState, err := m.store.LoadPrivate()
-	if err != nil {
-		return fmt.Errorf("keys manager: failed to load private state: %w", err)
-	}
-	if privState == nil {
-		return errors.New("keys manager: private state not found")
-	}
-
-	found := false
 	now := m.clock.Now()
-
-	for i := range privState.Keys {
-		if privState.Keys[i].KID == kid {
-			found = true
-			if privState.Keys[i].Status == domain.KeyStatusRetired {
-				// 이미 폐기된 키: 입구(RevokeKey)가 멱등 성공으로 기록한다.
-				return errAlreadyRetired
-			}
-
-			privState.Keys[i].Status = domain.KeyStatusRetired
-			privState.Keys[i].RetiredAt = &now
-
-			// 만약 현재 active 키가 revoke 된 경우 active_kid 해제
-			if privState.ActiveKID == kid {
-				privState.ActiveKID = ""
-			}
-			break
+	err := m.store.Update(func(privState *ZoneAPrivateState) error {
+		if privState == nil || len(privState.Keys) == 0 {
+			return errors.New("keys manager: private state not found")
 		}
-	}
 
-	if !found {
-		return domain.NewError(domain.ReasonInvalidArguments, ErrKeyNotFound.Error(), ErrKeyNotFound)
-	}
+		found := false
+		for i := range privState.Keys {
+			if privState.Keys[i].KID == kid {
+				found = true
+				if privState.Keys[i].Status == domain.KeyStatusRetired {
+					// 이미 폐기된 키: 입구(RevokeKey)가 멱등 성공으로 기록한다.
+					return errAlreadyRetired
+				}
 
-	privState.UpdatedAt = now
-	privState.Version++
+				privState.Keys[i].Status = domain.KeyStatusRetired
+				privState.Keys[i].RetiredAt = &now
 
-	if err := m.store.Save(privState); err != nil {
+				// 만약 현재 active 키가 revoke 된 경우 active_kid 해제
+				if privState.ActiveKID == kid {
+					privState.ActiveKID = ""
+				}
+				break
+			}
+		}
+
+		if !found {
+			return domain.NewError(domain.ReasonInvalidArguments, ErrKeyNotFound.Error(), ErrKeyNotFound)
+		}
+
+		privState.UpdatedAt = now
+		privState.Version++
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errAlreadyRetired) || domain.ReasonFromError(err, "") == domain.ReasonInvalidArguments {
+			return err
+		}
 		return fmt.Errorf("keys manager: failed to save revoked state: %w", err)
 	}
 

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -47,17 +46,15 @@ type ZoneAPrivateState struct {
 type Store interface {
 	LoadPrivate() (*ZoneAPrivateState, error)
 	LoadPublic() (*domain.JWKS, error)
-	Save(priv *ZoneAPrivateState) error
+	Update(fn func(priv *ZoneAPrivateState) error) error
 }
 
-// FileStore 는 storage.AtomicFileStore 및 WithFileLock 기반의 Zone A/B 원자적 동기화 파일 저장소다.
+// FileStore 는 storage.AtomicFileStore 기반의 Zone A/B 원자적 동기화 파일 저장소다.
 type FileStore struct {
 	privPath  string
 	pubPath   string
-	lockPath  string
 	privStore *storage.AtomicFileStore[ZoneAPrivateState]
 	pubStore  *storage.AtomicFileStore[domain.JWKS]
-	mu        sync.Mutex
 }
 
 // NewFileStore 는 지정된 Zone A 및 Zone B 경로를 관리하는 FileStore 인스턴스를 생성한다.
@@ -90,6 +87,9 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 			privPath,
 			storage.WithPerm[ZoneAPrivateState](0600),
 			storage.WithLockPath[ZoneAPrivateState](lockPath),
+			storage.WithDefault(func() *ZoneAPrivateState {
+				return &ZoneAPrivateState{}
+			}),
 		)
 	}
 
@@ -97,12 +97,14 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 		pubPath,
 		storage.WithPerm[domain.JWKS](0644),
 		storage.WithLockPath[domain.JWKS](lockPath),
+		storage.WithDefault(func() *domain.JWKS {
+			return &domain.JWKS{}
+		}),
 	)
 
 	return &FileStore{
 		privPath:  privPath,
 		pubPath:   pubPath,
-		lockPath:  lockPath,
 		privStore: privStore,
 		pubStore:  pubStore,
 	}, nil
@@ -155,65 +157,50 @@ func (s *ZoneAPrivateState) ToJWKS() *domain.JWKS {
 	}
 }
 
-// withLock 은 파일 락(flock)을 배타적으로 획득하고 콜백을 실행한다.
-func (fs *FileStore) withLock(fn func() error) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	return storage.WithFileLock(fs.lockPath, 2 /* LOCK_EX */, fn)
-}
-
 // LoadPrivate 은 Zone A 서명 키 파일을 로드한다. 파일이 없으면 nil을 반환한다.
 func (fs *FileStore) LoadPrivate() (*ZoneAPrivateState, error) {
 	if fs.privStore == nil {
 		return nil, nil
 	}
 
-	var state *ZoneAPrivateState
-	err := fs.withLock(func() error {
-		loaded, err := fs.privStore.ReadUnlocked()
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				state = nil
-				return nil
-			}
-			return fmt.Errorf("keys store: read private error: %w", err)
+	state, err := fs.privStore.Read()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
 		}
-		state = loaded
-		return nil
-	})
-	return state, err
+		return nil, fmt.Errorf("keys store: read private error: %w", err)
+	}
+	return state, nil
 }
 
 // LoadPublic 은 Zone B 공개 검증 키(JWKS) 파일을 로드한다.
 func (fs *FileStore) LoadPublic() (*domain.JWKS, error) {
-	var jwks *domain.JWKS
-	err := fs.withLock(func() error {
-		loaded, err := fs.pubStore.ReadUnlocked()
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				jwks = nil
-				return nil
-			}
-			return fmt.Errorf("keys store: read public error: %w", err)
+	jwks, err := fs.pubStore.Read()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
 		}
-		jwks = loaded
-		return nil
-	})
-	return jwks, err
+		return nil, fmt.Errorf("keys store: read public error: %w", err)
+	}
+	return jwks, nil
 }
 
-// Save 는 Zone A와 Zone B를 배타적 락 하에서 임시 파일 작성 및 Atomic Rename으로 동시 저장한다.
-func (fs *FileStore) Save(priv *ZoneAPrivateState) error {
-	return fs.withLock(func() error {
-		// 1. Zone A 원자적 저장 (0600)
-		if fs.privStore != nil {
-			if err := fs.privStore.WriteUnlocked(priv); err != nil {
-				return fmt.Errorf("keys store: write private error: %w", err)
-			}
+// Update 는 배타적 락(LOCK_EX) 하에서 Zone A 비밀키 상태를 읽고 fn으로 변이한 후,
+// Zone A 파일(0600)과 Zone B 공개 JWKS 파일(0644)을 동일 배타 락 구간 내에서 원자적으로 동시 갱신한다.
+func (fs *FileStore) Update(fn func(priv *ZoneAPrivateState) error) error {
+	if fs.privStore == nil {
+		return errors.New("keys store: cannot update in verify-only mode (privStore is nil)")
+	}
+	if fn == nil {
+		return errors.New("keys store: update function must not be nil")
+	}
+
+	return fs.privStore.Update(func(priv *ZoneAPrivateState) error {
+		if err := fn(priv); err != nil {
+			return err
 		}
 
-		// 2. Zone B 원자적 저장 (0644, Zero Leakage)
+		// Zone A 가 갱신된 동일 배타 락 구간 내에서 Zone B 공개 JWKS 를 원자적으로 동기화 (0644, Zero Leakage)
 		pubJWKS := priv.ToJWKS()
 		if err := fs.pubStore.WriteUnlocked(pubJWKS); err != nil {
 			return fmt.Errorf("keys store: write public error: %w", err)

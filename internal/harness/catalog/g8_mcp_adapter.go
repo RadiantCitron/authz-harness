@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"authz-harness/internal/authn/token"
+	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 	"authz-harness/internal/mcp"
@@ -406,19 +407,18 @@ func (s *e2e36Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 	}
 	defer stack.Close()
 
-	st, err := stack.StateStore.Load()
-	if err != nil {
-		return err
-	}
-	st.Grants = append(st.Grants, domain.Grant{
-		ID:        "grant-mcp-escape",
-		Subject:   "worker-01",
-		Action:    domain.ActionFileWrite,
-		Resource:  "../../etc/passwd",
-		Status:    domain.GrantStatusActive,
-		CreatedAt: env.MockClock.Now(),
+	err = stack.StateStore.Update(func(st *state.GrantsState) error {
+		st.Grants = append(st.Grants, domain.Grant{
+			ID:        "grant-mcp-escape",
+			Subject:   "worker-01",
+			Action:    domain.ActionFileWrite,
+			Resource:  "../../etc/passwd",
+			Status:    domain.GrantStatusActive,
+			CreatedAt: env.MockClock.Now(),
+		})
+		return nil
 	})
-	if err := stack.StateStore.Save(st); err != nil {
+	if err != nil {
 		return err
 	}
 

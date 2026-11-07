@@ -9,6 +9,7 @@ import (
 
 	"authz-harness/internal/authn/token"
 	"authz-harness/internal/authz/pep"
+	"authz-harness/internal/authz/state"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/harness"
 )
@@ -64,19 +65,18 @@ func (s *e2e25Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 	// PDP 가 해당 경로에 대해 Grant 부재로 거부하지 않도록 와일드카드 또는 상대 경로 허용 세팅이 필요한지 점검
 	// 여기서는 worker-01 에게 와일드카드 또는 기본 Grant 를 부여하되, PEP 가 PDP 통과 후 Jail 에서 차단하도록 설계
 	// stateStore 에 직접 Grant 추가 (상위 탈출 경로)
-	st, err := stack.StateStore.Load()
-	if err != nil {
-		return err
-	}
-	st.Grants = append(st.Grants, domain.Grant{
-		ID:        "grant-e2e-25",
-		Subject:   "worker-01",
-		Action:    domain.ActionFileWrite,
-		Resource:  "../../etc/passwd",
-		Status:    domain.GrantStatusActive,
-		CreatedAt: env.MockClock.Now(),
+	err = stack.StateStore.Update(func(st *state.GrantsState) error {
+		st.Grants = append(st.Grants, domain.Grant{
+			ID:        "grant-e2e-25",
+			Subject:   "worker-01",
+			Action:    domain.ActionFileWrite,
+			Resource:  "../../etc/passwd",
+			Status:    domain.GrantStatusActive,
+			CreatedAt: env.MockClock.Now(),
+		})
+		return nil
 	})
-	if err := stack.StateStore.Save(st); err != nil {
+	if err != nil {
 		return err
 	}
 
@@ -143,19 +143,18 @@ func (s *e2e26Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 		return err
 	}
 	evilPath := env.WorkspaceDir + "-evil/secret.txt"
-	st, err := stack.StateStore.Load()
-	if err != nil {
-		return err
-	}
-	st.Grants = append(st.Grants, domain.Grant{
-		ID:        "grant-e2e-26",
-		Subject:   "worker-01",
-		Action:    domain.ActionFileWrite,
-		Resource:  evilPath,
-		Status:    domain.GrantStatusActive,
-		CreatedAt: env.MockClock.Now(),
+	err = stack.StateStore.Update(func(st *state.GrantsState) error {
+		st.Grants = append(st.Grants, domain.Grant{
+			ID:        "grant-e2e-26",
+			Subject:   "worker-01",
+			Action:    domain.ActionFileWrite,
+			Resource:  evilPath,
+			Status:    domain.GrantStatusActive,
+			CreatedAt: env.MockClock.Now(),
+		})
+		return nil
 	})
-	if err := stack.StateStore.Save(st); err != nil {
+	if err != nil {
 		return err
 	}
 
