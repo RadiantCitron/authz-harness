@@ -171,10 +171,9 @@ type Writer = domain.AuditWriter
 // JSONLWriter 는 파일에 JSON Lines 형식으로 이벤트를 기록하는 구현체다.
 // syscall.Flock 및 SHA-256 해시 체인을 통해 다중 프로세스/스레드 간 원자적이고 위변조 불가능한 기록을 보장한다.
 type JSONLWriter struct {
-	mu       sync.Mutex
-	path     string
-	file     *os.File
-	lastHash string
+	mu   sync.Mutex
+	path string
+	file *os.File
 }
 
 // NewJSONLWriter 는 주어진 경로에 감사 로그 파일을 열거나 생성한다.
@@ -317,8 +316,6 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 				prevHash = ch
 			}
 		}
-	} else if w.lastHash != "" {
-		prevHash = w.lastHash
 	}
 
 	event.PrevHash = prevHash
@@ -349,7 +346,6 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to sync audit file: %v", err), err)
 	}
 
-	w.lastHash = event.CurrHash
 	return nil
 }
 

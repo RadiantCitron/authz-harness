@@ -104,7 +104,6 @@ func NewExchangeService(
 
 // exchangeCall 은 파이프라인이 단계마다 채워 가는 한 번의 교환 상태다. 필드마다 채우는 단계를 밝힌다.
 type exchangeCall struct {
-	ctx      context.Context
 	req      ExchangeRequest
 	auditCtx domain.AuditContext
 	now      time.Time // Exchange
@@ -131,8 +130,8 @@ type denial struct {
 func (d *denial) Error() string { return d.ret.Error() }
 func (d *denial) Unwrap() error { return d.ret }
 
-func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bool, run func(*exchangeCall) error) pipeline.Step[exchangeCall] {
-	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: pipeline.Kind(kind), Run: func(_ context.Context, c *exchangeCall) error { return run(c) }}
+func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bool, run func(context.Context, *exchangeCall) error) pipeline.Step[exchangeCall] {
+	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: pipeline.Kind(kind), Run: run}
 	if applies != nil {
 		s.Applies = applies
 	}
@@ -171,7 +170,7 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 		if actor == "" {
 			actor = req.ClientID
 		}
-		c := &exchangeCall{ctx: ctx, req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
+		c := &exchangeCall{req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
 		res, err = s.finalize(c, s.engine.Run(ctx, c))
 	}
 	return res, err
@@ -229,7 +228,7 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 }
 
 // client_auth: 클라이언트 인증
-func (s *ExchangeService) clientAuth(c *exchangeCall) error {
+func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error {
 	info, err := s.clients.AuthenticateClient(c.req.ClientID, c.req.ClientSecret)
 	if err != nil {
 		return &denial{domain.ReasonAuthnInvalidSecret, err.Error(), fmt.Errorf("client authentication failed: %w", err)}
@@ -239,7 +238,7 @@ func (s *ExchangeService) clientAuth(c *exchangeCall) error {
 }
 
 // delegation_subject: 자식 주체 허용 여부
-func (s *ExchangeService) delegationSubject(c *exchangeCall) error {
+func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall) error {
 	if strings.TrimSpace(c.req.ChildSubject) == "" {
 		err := errors.New("child subject is required")
 		return &denial{domain.ReasonInvalidToken, "child subject is required", err}
@@ -253,7 +252,7 @@ func (s *ExchangeService) delegationSubject(c *exchangeCall) error {
 }
 
 // parent_token: 부모 토큰 무결성·암호학적 검증. 교환 시 부모 jti 를 소비(RecordReplay)하지 않고 유효성만 본다.
-func (s *ExchangeService) parentToken(c *exchangeCall) error {
+func (s *ExchangeService) parentToken(ctx context.Context, c *exchangeCall) error {
 	verified, err := s.verifier.VerifyToken(c.req.ParentToken, token.VerifyOptions{RecordReplay: false}, c.auditCtx)
 	if err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
@@ -266,9 +265,9 @@ func (s *ExchangeService) parentToken(c *exchangeCall) error {
 }
 
 // lineage_epoch: 부모 및 위임 조상(act 사슬) Security Epoch 실시간 대조 (SnapshotProvider 가 배선된 경우)
-func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
+func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
-	snap, snapErr := s.snapshots.GetSubjectSnapshot(c.ctx, p.Subject)
+	snap, snapErr := s.snapshots.GetSubjectSnapshot(ctx, p.Subject)
 	if snapErr != nil || snap == nil {
 		details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
 		return &denial{domain.ReasonInternalError, details, domain.NewError(domain.ReasonInternalError, details, snapErr)}
@@ -291,7 +290,7 @@ func (s *ExchangeService) lineageEpoch(c *exchangeCall) error {
 }
 
 // downscope: 축소 위임(Downscoping) 불변식
-func (s *ExchangeService) downscope(c *exchangeCall) error {
+func (s *ExchangeService) downscope(ctx context.Context, c *exchangeCall) error {
 	if err := s.validator.ValidateDownscope(&c.parentClaims, c.req.ChildSubject, c.req.Scope, c.req.TTL, c.now); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
 		return &denial{reason, err.Error(), domain.NewError(reason, "downscope validation failed", err)}
@@ -300,7 +299,7 @@ func (s *ExchangeService) downscope(c *exchangeCall) error {
 }
 
 // budget_downscope: 예산 정적 검사 및 원장 필수 확인 (예산이 관여할 때만)
-func (s *ExchangeService) budgetDownscope(c *exchangeCall) error {
+func (s *ExchangeService) budgetDownscope(ctx context.Context, c *exchangeCall) error {
 	if err := ValidateBudgetDownscope(c.parentClaims.Budget, c.req.Budget); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
 		return &denial{reason, err.Error(), domain.NewError(reason, "budget downscope validation failed", err)}
@@ -313,7 +312,7 @@ func (s *ExchangeService) budgetDownscope(c *exchangeCall) error {
 }
 
 // token_issue: act 체인 구성과 자식 토큰 발급
-func (s *ExchangeService) tokenIssue(c *exchangeCall) error {
+func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
 	childActor := &domain.ActorClaim{Subject: p.Subject, JWTID: p.JWTID, Epoch: p.Epoch, Actor: p.Actor}
 	c.childDepth = p.DelegationDepth + 1
@@ -347,7 +346,7 @@ func (s *ExchangeService) tokenIssue(c *exchangeCall) error {
 
 // budget_reserve: 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
 // 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
-func (s *ExchangeService) budgetReserve(c *exchangeCall) error {
+func (s *ExchangeService) budgetReserve(ctx context.Context, c *exchangeCall) error {
 	if err := s.budgets.Reserve(c.parentClaims.JWTID, c.child.Claims.JWTID, *c.req.Budget, c.child.Claims.ExpiresAt); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonInternalError)
 		return &denial{reason, err.Error(), domain.NewError(reason, "budget reservation failed", err)}
