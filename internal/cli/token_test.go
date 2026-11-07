@@ -106,8 +106,8 @@ func TestCLI_TokenIssueAndVerify(t *testing.T) {
 		t.Fatalf("verify expected exit 0, got %d, err: %s", exitCode, errOut.String())
 	}
 
-	if !strings.Contains(out.String(), "PASS: [GATE_1_VERIFIED]") {
-		t.Fatalf("expected GATE_1_VERIFIED, got: %s", out.String())
+	if !strings.Contains(out.String(), "PASS: [TOKEN_VERIFIED]") {
+		t.Fatalf("expected TOKEN_VERIFIED, got: %s", out.String())
 	}
 
 	out.Reset()

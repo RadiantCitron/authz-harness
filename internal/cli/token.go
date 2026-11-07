@@ -228,13 +228,13 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 	verified, err := r.stack.TokenVerifier.VerifyToken(*tokenStr, opts, auditCtx)
 	if err != nil {
 		reason := extractReason(err)
-		fmt.Fprintf(r.out, "FAIL: [GATE_1_BLOCKED] %s\n", reason)
+		fmt.Fprintf(r.out, "FAIL: [TOKEN_VERIFY_BLOCKED] %s\n", reason)
 		fmt.Fprintf(r.errOut, "Detail: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitTokenInvalid)
 	}
 
 	// authn 단계 통과 파이프라인 시각화
-	fmt.Fprintf(r.out, "PASS: [GATE_1_VERIFIED] RFC 9068 Access Token 무결성 검증 통과\n")
+	fmt.Fprintf(r.out, "PASS: [TOKEN_VERIFIED] RFC 9068 Access Token 무결성 검증 통과\n")
 	fmt.Fprintf(r.out, "  [✓] 1. JWT 포맷 및 헤더 구조 (typ: at+jwt, alg: %s)\n", verified.Algorithm)
 	fmt.Fprintf(r.out, "  [✓] 2. 암호학적 디지털 서명 검증 (kid: %s, Ed25519)\n", verified.KeyID)
 	fmt.Fprintf(r.out, "  [✓] 3. Zone B JWKS 키 활성 상태 확인\n")

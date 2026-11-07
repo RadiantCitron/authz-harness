@@ -141,21 +141,8 @@ func NormalizeEvent(ev *Event) {
 	}
 
 	// 3. Action 표준화:
-	// PEP 관문 최종 허용/거부 이벤트의 Action이 "pep.file:read" 형태일 경우,
-	// Step에 세부 단계를 보존하고 Action은 "pep.allow"(성공 시) 또는 "pep.deny"(실패 시)로 표준화.
-	// 토큰 교환 거부 시 "token.exchange.deny"로 표준화.
-	if strings.HasPrefix(ev.Action, "pep.") && ev.Action != "pep.allow" && ev.Action != "pep.deny" {
-		if ev.Step == "" {
-			ev.Step = ev.Action
-		}
-		if ev.Success {
-			ev.Action = "pep.allow"
-		} else {
-			ev.Action = "pep.deny"
-		}
-	} else if ev.Action == "authn.exchange_denied" {
-		ev.Action = "token.exchange.deny"
-	}
+	// PEP 관문은 사전에 정의된 표준 도메인 액션(pep.allow, pep.deny, budget.consumed 등)을 직접 발행한다.
+	// 이전의 레거시 "pep.*" 강제 치환 및 "authn.exchange_denied" 매핑은 사문화되어 제거되었다.
 
 	// TokenJTI 승격
 	if ev.TokenJTI == "" && ev.Metadata != nil {

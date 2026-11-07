@@ -296,7 +296,7 @@ func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx dom
 	}
 
 	// 검증 성공 감사 이벤트 기록
-	if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, true, domain.ReasonAuthorized, "gate 1 verified successfully"); aerr != nil {
+	if aerr := v.logAudit(now, auditCtx, claims.JWTID, header.KeyID, true, domain.ReasonAuthorized, "token verified successfully"); aerr != nil {
 		return nil, auditFailure(aerr)
 	}
 
@@ -322,7 +322,7 @@ func (v *Verifier) logAudit(now time.Time, ctx domain.AuditContext, jti, kid str
 	}
 
 	meta := map[string]interface{}{
-		"gate":      "gate-1-token",
+		"stage":     string(domain.StageAuthn),
 		"token_kid": kid,
 		"reason":    string(reason),
 		"message":   msg,
