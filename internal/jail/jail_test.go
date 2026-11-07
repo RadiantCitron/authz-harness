@@ -264,3 +264,40 @@ func TestWorkspaceJail_ZeroSideEffectsOnDeny(t *testing.T) {
 		t.Fatalf("Side effect occurred: %s was created", targetOutside)
 	}
 }
+
+func TestWorkspaceJail_AtomicWrite_Overwrite(t *testing.T) {
+	wsDir, _ := setupTestWorkspace(t)
+	j, err := jail.New(wsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := "atomic_target.txt"
+	v1 := []byte("version 1 data")
+	if err := j.WriteFile(target, v1); err != nil {
+		t.Fatalf("first write failed: %v", err)
+	}
+
+	got, err := j.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read v1 failed: %v", err)
+	}
+	if !bytes.Equal(got, v1) {
+		t.Errorf("got %q, want %q", got, v1)
+	}
+
+	// 덮어쓰기 검증 (AtomicWriteFile 정상 교체)
+	v2 := []byte("version 2 updated data")
+	if err := j.WriteFile(target, v2); err != nil {
+		t.Fatalf("second write failed: %v", err)
+	}
+
+	got2, err := j.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read v2 failed: %v", err)
+	}
+	if !bytes.Equal(got2, v2) {
+		t.Errorf("got %q, want %q", got2, v2)
+	}
+}
+

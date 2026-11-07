@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"authz-harness/internal/storage"
 )
 
 // Jail 은 지정된 Workspace Root 디렉터리 내에 한정된 안전한 파일 접근 경계를 강제하는 인터페이스다.
@@ -216,35 +218,8 @@ func (j *workspaceJail) WriteFile(rawPath string, data []byte) error {
 		return fmt.Errorf("%w: failed to create directories: %w", ErrPathViolation, err)
 	}
 
-	// 안전한 임시 파일 원자적 교체 쓰기
-	tmpFile, err := os.CreateTemp(parentDir, ".tmp-jail-*")
-	if err != nil {
-		// 원자적 파일 생성 실패 시 일반 안전 파일 쓰기 fallback
-		return os.WriteFile(resolvedPath, data, 0644)
-	}
-	tmpName := tmpFile.Name()
-	defer func() {
-		_ = os.Remove(tmpName)
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("%w: failed to write data: %w", ErrPathViolation, err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("%w: failed to sync data: %w", ErrPathViolation, err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("%w: failed to close tmp file: %w", ErrPathViolation, err)
-	}
-
-	if err := os.Chmod(tmpName, 0644); err != nil {
-		return fmt.Errorf("%w: failed to chmod tmp file: %w", ErrPathViolation, err)
-	}
-
-	if err := os.Rename(tmpName, resolvedPath); err != nil {
-		return fmt.Errorf("%w: failed to atomic rename file: %w", ErrPathViolation, err)
+	if err := storage.AtomicWriteFile(resolvedPath, data, 0644); err != nil {
+		return fmt.Errorf("%w: failed to write file: %w", ErrPathViolation, err)
 	}
 
 	return nil
