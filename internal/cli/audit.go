@@ -82,38 +82,9 @@ func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.Exi
 		return domain.ExitBadInput
 	}
 
-	allEvents, code := r.loadTraceEvents()
+	targetTraceID, matchedEvents, code := r.resolveTraceEvents(traceID, latest)
 	if code != domain.ExitSuccess {
 		return code
-	}
-
-	targetTraceID := strings.TrimSpace(traceID)
-	if latest || targetTraceID == "" {
-		// 가장 최근 이벤트의 TraceID 탐색
-		for i := len(allEvents) - 1; i >= 0; i-- {
-			if allEvents[i].TraceID != "" {
-				targetTraceID = allEvents[i].TraceID
-				break
-			}
-		}
-	}
-
-	if targetTraceID == "" {
-		fmt.Fprintf(r.errOut, "Error: --trace-id is required or no valid trace found\n")
-		return domain.ExitBadInput
-	}
-
-	// targetTraceID 에 해당하는 이벤트 필터링
-	var matchedEvents []audit.Event
-	for _, ev := range allEvents {
-		if ev.TraceID == targetTraceID {
-			matchedEvents = append(matchedEvents, ev)
-		}
-	}
-
-	if len(matchedEvents) == 0 {
-		fmt.Fprintf(r.errOut, "Error: no audit events found for trace ID '%s'\n", targetTraceID)
-		return domain.ExitBadInput
 	}
 
 	// 해시 체인 무결성 판정
@@ -124,6 +95,43 @@ func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.Exi
 	formatter.RenderTimeline(targetTraceID, chainValid, matchedEvents)
 
 	return domain.ExitSuccess
+}
+
+// resolveTraceEvents 는 감사 로그에서 targetTraceID(생략 또는 latest 시 최신 trace)에 해당하는 이벤트를 필터링한다.
+func (r *AuditRunner) resolveTraceEvents(traceID string, latest bool) (string, []audit.Event, domain.ExitCode) {
+	allEvents, code := r.loadTraceEvents()
+	if code != domain.ExitSuccess {
+		return "", nil, code
+	}
+
+	target := strings.TrimSpace(traceID)
+	if latest || target == "" {
+		for i := len(allEvents) - 1; i >= 0; i-- {
+			if allEvents[i].TraceID != "" {
+				target = allEvents[i].TraceID
+				break
+			}
+		}
+	}
+
+	if target == "" {
+		fmt.Fprintf(r.errOut, "Error: --trace-id is required or no valid trace found\n")
+		return "", nil, domain.ExitBadInput
+	}
+
+	var matched []audit.Event
+	for _, ev := range allEvents {
+		if ev.TraceID == target {
+			matched = append(matched, ev)
+		}
+	}
+
+	if len(matched) == 0 {
+		fmt.Fprintf(r.errOut, "Error: no audit events found for trace ID '%s'\n", target)
+		return "", nil, domain.ExitBadInput
+	}
+
+	return target, matched, domain.ExitSuccess
 }
 
 // loadTraceEvents 는 감사 파일을 읽어 파싱 가능한 줄만 모은다 (깨진 JSON 줄은 건너뛴다: 무결성 판정은 audit verify 의 몫).
@@ -196,33 +204,11 @@ func (r *AuditRunner) runTree(args []string) domain.ExitCode {
 		return domain.ExitBadInput
 	}
 
-	all, code := r.loadTraceEvents()
+	target, matched, code := r.resolveTraceEvents(traceID, false)
 	if code != domain.ExitSuccess {
 		return code
 	}
-	target := strings.TrimSpace(traceID)
-	if target == "" {
-		for i := len(all) - 1; i >= 0; i-- {
-			if all[i].TraceID != "" {
-				target = all[i].TraceID
-				break
-			}
-		}
-	}
-	if target == "" {
-		fmt.Fprintf(r.errOut, "Error: --trace-id is required or no valid trace found\n")
-		return domain.ExitBadInput
-	}
-	var matched []audit.Event
-	for _, ev := range all {
-		if ev.TraceID == target {
-			matched = append(matched, ev)
-		}
-	}
-	if len(matched) == 0 {
-		fmt.Fprintf(r.errOut, "Error: no audit events found for trace ID '%s'\n", target)
-		return domain.ExitBadInput
-	}
+
 	ui.NewTreeFormatter(r.out).Render(target, ui.BuildDelegationTree(matched))
 	return domain.ExitSuccess
 }
