@@ -440,24 +440,45 @@ func TestArchitectureGuardrails(t *testing.T) {
 		}
 	})
 
-	// TC-170-02: CLI 단일 합성 루트 일원화 및 subagent.go 의 authz/state import 0건
-	t.Run("TC-170-02: CLI 직접 조립 호출 0건 및 subagent.go 의 state import 0건", func(t *testing.T) {
-		cliDir := filepath.Join(root, "internal", "cli")
+	// TC-170-02: internal 비-합성 패키지 및 CLI의 직접 조립 금지, subagent.go 의 authz/state import 0건
+	t.Run("TC-170-02: internal 직접 조립 호출 0건 및 subagent.go 의 state import 0건", func(t *testing.T) {
+		internalDir := filepath.Join(root, "internal")
 		fset := token.NewFileSet()
-		pkgs, err := parser.ParseDir(fset, cliDir, func(fi fs.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, 0)
-		if err != nil {
-			t.Fatalf("failed to parse cli dir: %v", err)
-		}
 		files := map[string]*ast.File{}
-		for _, pkg := range pkgs {
-			for fname, f := range pkg.Files {
-				files[filepath.Base(fname)] = f
+		err := filepath.WalkDir(internalDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			// 합성 루트(internal/app)는 합법적인 유일 조립 위치이므로 제외
+			if strings.HasPrefix(rel, filepath.Join("internal", "app")+string(filepath.Separator)) {
+				return nil
+			}
+			f, perr := parser.ParseFile(fset, path, nil, 0)
+			if perr != nil {
+				return perr
+			}
+			files[rel] = f
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("failed to scan internal dir: %v", err)
+		}
+		var foundSubagent bool
+		for rel := range files {
+			if filepath.Base(rel) == "subagent.go" && strings.Contains(rel, filepath.Join("internal", "cli")) {
+				foundSubagent = true
+				break
 			}
 		}
-		if _, ok := files["subagent.go"]; !ok {
-			t.Fatal("cli/subagent.go not found")
+		if !foundSubagent {
+			t.Fatal("cli/subagent.go not found in scan")
 		}
 		for _, v := range findDirectConstructionViolations(files) {
 			t.Errorf("TC-170-02 violation: %s", v)

@@ -17,11 +17,6 @@ import (
 	"authz-harness/internal/pipeline"
 )
 
-// NormalizeAction 은 사용자 입력 문자열을 표준 액션으로 바꾼다(domain.ParseAction 에 위임, read/write 별칭 허용).
-func NormalizeAction(act string) (domain.Action, error) {
-	return domain.ParseAction(act)
-}
-
 // Request 는 PEP에 파일 작업 집행을 요청하는 매개변수 명세다.
 type Request struct {
 	Token              string        // Bearer Access Token (RFC 9068)
@@ -225,7 +220,7 @@ func (g *gateway) input(_ context.Context, c *Call) error {
 	if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
 		return domain.NewError(domain.ReasonMissingTraceContext, "trace_id is required but missing", nil)
 	}
-	normAction, actErr := NormalizeAction(string(req.Action))
+	normAction, actErr := domain.ParseAction(string(req.Action))
 	var tool Tool
 	if actErr == nil {
 		var found bool
