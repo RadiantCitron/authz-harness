@@ -68,8 +68,8 @@ func (r *PDPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	}
 }
 
-func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCode {
-	fs := flag.NewFlagSet("pdp decide", flag.ContinueOnError)
+func (r *PDPRunner) parsePDPRequest(cmdName string, args []string) (*pdp.Request, domain.ExitCode) {
+	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
 	var sub, act, res, scope string
@@ -81,30 +81,37 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
 
 	if err := fs.Parse(args); err != nil {
-		return domain.ExitBadInput
+		return nil, domain.ExitBadInput
 	}
 
 	if strings.TrimSpace(sub) == "" || strings.TrimSpace(act) == "" || strings.TrimSpace(res) == "" {
 		fmt.Fprintf(r.errOut, "Error: --sub, --action, --resource are all required\n")
-		return domain.ExitBadInput
+		return nil, domain.ExitBadInput
 	}
 
 	action, err := domain.ParseAction(act)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		return domain.ExitBadInput
+		return nil, domain.ExitBadInput
 	}
 
-	req := pdp.Request{
+	return &pdp.Request{
 		Subject:      sub,
 		Action:       action,
 		Resource:     res,
 		Epoch:        domain.Epoch(epoch),
 		TokenScope:   scope,
 		RequireScope: scope != "",
+	}, domain.ExitSuccess
+}
+
+func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCode {
+	req, code := r.parsePDPRequest("pdp decide", args)
+	if code != domain.ExitSuccess {
+		return code
 	}
 
-	decision, err := r.pdpSvc.Decide(ctx, req)
+	decision, err := r.pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
 		return domain.ExitInternalError
@@ -123,39 +130,9 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 }
 
 func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCode {
-	fs := flag.NewFlagSet("pdp explain", flag.ContinueOnError)
-	fs.SetOutput(r.errOut)
-
-	var sub, act, res, scope string
-	var epoch int64
-	fs.StringVar(&sub, "sub", "", "인가 대상 주체 (Subject)")
-	fs.StringVar(&act, "action", "", "요청 액션 (file:read, file:write, net:fetch, exec:run)")
-	fs.StringVar(&res, "resource", "", "요청 대상 리소스 경로")
-	fs.StringVar(&scope, "scope", "", "제시된 토큰 스코프 (선택)")
-	fs.Int64Var(&epoch, "epoch", 1, "제시된 Security Epoch (기본값: 1)")
-
-	if err := fs.Parse(args); err != nil {
-		return domain.ExitBadInput
-	}
-
-	if strings.TrimSpace(sub) == "" || strings.TrimSpace(act) == "" || strings.TrimSpace(res) == "" {
-		fmt.Fprintf(r.errOut, "Error: --sub, --action, --resource are all required\n")
-		return domain.ExitBadInput
-	}
-
-	action, err := domain.ParseAction(act)
-	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		return domain.ExitBadInput
-	}
-
-	req := pdp.Request{
-		Subject:      sub,
-		Action:       action,
-		Resource:     res,
-		Epoch:        domain.Epoch(epoch),
-		TokenScope:   scope,
-		RequireScope: scope != "",
+	req, code := r.parsePDPRequest("pdp explain", args)
+	if code != domain.ExitSuccess {
+		return code
 	}
 
 	// PIP로부터 현재 스냅샷 조회 (설명 뷰를 위한 상세 상태)
@@ -166,7 +143,7 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	}
 
 	// 결정 수행 (감사 로그 자동 기록)
-	decision, err := r.pdpSvc.Decide(ctx, req)
+	decision, err := r.pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
 		return domain.ExitInternalError
