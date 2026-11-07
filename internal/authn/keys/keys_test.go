@@ -1,6 +1,7 @@
 package keys
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -263,3 +264,72 @@ func TestTC_010_06_KeysManager_SingleDomainClock(t *testing.T) {
 		t.Fatalf("expected CreatedAt %v, got %v", expectedTime, newKey.CreatedAt)
 	}
 }
+
+type mockFailingSaveStore struct {
+	pub *domain.JWKS
+}
+
+func (m *mockFailingSaveStore) LoadPrivate() (*ZoneAPrivateState, error) {
+	return nil, nil // private 상태 없음 -> 초기 부트스트랩 대상
+}
+
+func (m *mockFailingSaveStore) LoadPublic() (*domain.JWKS, error) {
+	return m.pub, nil // pubErr == nil 이지만 pub은 nil (초기 부트스트랩 트리거)
+}
+
+func (m *mockFailingSaveStore) Save(priv *ZoneAPrivateState) error {
+	return errors.New("simulated disk full / write error")
+}
+
+// AP2-04: NewManager 초기 상태 영속화 실패 시 pubErr == nil 과 무관하게 Fail-Closed 보장
+func TestNewManager_InitialStateSaveFailure_FailsClosed(t *testing.T) {
+	// 1. mockStore: pubErr == nil 인 상황에서 Save 실패 시 fail-open(return m, nil) 방지 검증
+	mockStore := &mockFailingSaveStore{}
+	mgr, err := NewManager(mockStore, nil)
+	if err == nil {
+		t.Fatal("expected NewManager to fail when Save fails, but got nil error (fail-open bug)")
+	}
+	if mgr != nil {
+		t.Fatal("expected nil manager on Save failure, got non-nil")
+	}
+	if !strings.Contains(err.Error(), "failed to save initial state") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	// 2. FileStore: 디렉터리 권한 제한으로 Save 실패 시 fail-closed 검증
+	tmpDir := t.TempDir()
+	privDir := filepath.Join(tmpDir, "private")
+	pubDir := filepath.Join(tmpDir, "public")
+	privPath := filepath.Join(privDir, "keys.json")
+	pubPath := filepath.Join(pubDir, "jwks.json")
+
+	store, err := NewFileStore(privPath, pubPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 락 파일을 미리 생성해두어 LoadPrivate(lock 획득)은 통과하고, Save(임시파일 생성) 시점에 실패하도록 설정
+	lockPath := privPath + ".lock"
+	if err := os.WriteFile(lockPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(privDir, 0555); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chmod(privDir, 0755)
+	}()
+
+	mgr2, err := NewManager(store, nil)
+	if err == nil {
+		t.Fatal("expected NewManager to fail on read-only directory, got nil")
+	}
+	if mgr2 != nil {
+		t.Fatal("expected nil manager on read-only directory failure, got non-nil")
+	}
+	if !strings.Contains(err.Error(), "failed to save initial state") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
+

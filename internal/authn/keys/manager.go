@@ -93,9 +93,6 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 		}
 
 		if err := m.store.Save(newState); err != nil {
-			if pubErr == nil {
-				return m, nil
-			}
 			return nil, fmt.Errorf("keys manager: failed to save initial state: %w", err)
 		}
 
