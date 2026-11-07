@@ -83,79 +83,86 @@ func (r *PEPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	}
 }
 
-func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode {
-	fs := flag.NewFlagSet("pep read", flag.ContinueOnError)
-	fs.SetOutput(r.errOut)
+type pepCommonFlags struct {
+	tokenStr           string
+	expectedAud        string
+	expectedSub        string
+	clockOffsetStr     string
+	injectAuditFailure bool
+	outputFormat       string
+	traceID            string
+}
 
-	var (
-		tokenStr           string
-		expectedAud        string
-		expectedSub        string
-		clockOffsetStr     string
-		injectAuditFailure bool
-		outputFormat       string
-		traceID            string
-	)
+func (r *PEPRunner) parseCommonPEPFlags(fs *flag.FlagSet, c *pepCommonFlags) {
+	fs.StringVar(&c.tokenStr, "token", "", "RFC 9068 Bearer Access Token (required)")
+	fs.StringVar(&c.expectedAud, "expected-aud", "authz-harness", "Expected token audience")
+	fs.StringVar(&c.expectedSub, "expected-sub", "", "Expected token subject (optional)")
+	fs.StringVar(&c.clockOffsetStr, "clock-offset", "", "Clock offset duration (e.g. 10m)")
+	fs.BoolVar(&c.injectAuditFailure, "inject-audit-failure", false, "Simulate fail-closed audit write failure")
+	fs.StringVar(&c.outputFormat, "output-format", "text", "Output format: text or json")
+	fs.StringVar(&c.traceID, "trace-id", "", "Explicit transaction trace ID")
+}
 
-	fs.StringVar(&tokenStr, "token", "", "RFC 9068 Bearer Access Token (required)")
-	fs.StringVar(&expectedAud, "expected-aud", "authz-harness", "Expected token audience")
-	fs.StringVar(&expectedSub, "expected-sub", "", "Expected token subject (optional)")
-	fs.StringVar(&clockOffsetStr, "clock-offset", "", "Clock offset duration (e.g. 10m)")
-	fs.BoolVar(&injectAuditFailure, "inject-audit-failure", false, "Simulate fail-closed audit write failure")
-	fs.StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
-	fs.StringVar(&traceID, "trace-id", "", "Explicit transaction trace ID")
-
-	// flag.FlagSet 은 non-flag 인자(resource)를 만나면 파싱을 중단하므로,
-	// args 에서 플래그와 resource 경로를 분리하거나 맨 뒤/앞의 resource를 식별한다.
-	resource, flagArgs := splitPEPResourceAndFlags(args)
-
-	if err := fs.Parse(flagArgs); err != nil {
-		return domain.ExitBadInput
-	}
-
-	if strings.TrimSpace(resource) == "" && fs.NArg() > 0 {
-		resource = fs.Arg(0)
-	}
-
+func (r *PEPRunner) executePEPAction(ctx context.Context, action domain.Action, actionName string, c pepCommonFlags, resource string, data []byte) domain.ExitCode {
 	if strings.TrimSpace(resource) == "" {
-		fmt.Fprintf(r.errOut, "Error: missing resource path for read\n")
+		fmt.Fprintf(r.errOut, "Error: missing resource path for %s\n", actionName)
 		return domain.ExitBadInput
 	}
 
-	if strings.TrimSpace(tokenStr) == "" {
+	if strings.TrimSpace(c.tokenStr) == "" {
 		fmt.Fprintf(r.errOut, "Error: missing required --token flag\n")
 		return domain.ExitBadInput
 	}
 
-	clockOffset, err := parseNonNegativeClockOffset(clockOffsetStr)
+	clockOffset, err := parseNonNegativeClockOffset(c.clockOffsetStr)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitBadInput
 	}
 
+	traceID := c.traceID
 	if traceID == "" {
-		traceID = fmt.Sprintf("pep-read-%d", time.Now().UnixNano())
+		traceID = fmt.Sprintf("pep-%s-%d", actionName, time.Now().UnixNano())
 	}
 
 	req := pep.Request{
-		Token:              tokenStr,
-		Action:             domain.ActionFileRead,
+		Token:              c.tokenStr,
+		Action:             action,
 		Resource:           resource,
-		InjectAuditFailure: injectAuditFailure,
-		ExpectedAudience:   expectedAud,
-		ExpectedSubject:    expectedSub,
+		Data:               data,
+		InjectAuditFailure: c.injectAuditFailure,
+		ExpectedAudience:   c.expectedAud,
+		ExpectedSubject:    c.expectedSub,
 		ClockOffset:        clockOffset,
 		TraceID:            traceID,
 	}
 
 	res, err := r.stack.PEP.Execute(ctx, req)
 	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: internal error executing pep read: %v\n", err)
+		fmt.Fprintf(r.errOut, "Error: internal error executing pep %s: %v\n", actionName, err)
 		return domain.ExitInternalError
 	}
 
-	r.renderResult(req, res, outputFormat)
+	r.renderResult(req, res, c.outputFormat)
 	return res.ExitCode
+}
+
+func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode {
+	fs := flag.NewFlagSet("pep read", flag.ContinueOnError)
+	fs.SetOutput(r.errOut)
+
+	var c pepCommonFlags
+	r.parseCommonPEPFlags(fs, &c)
+
+	resource, flagArgs := splitPEPResourceAndFlags(args)
+	if err := fs.Parse(flagArgs); err != nil {
+		return domain.ExitBadInput
+	}
+	if strings.TrimSpace(resource) == "" && fs.NArg() > 0 {
+		resource = fs.Arg(0)
+	}
+
+	return r.executePEPAction(ctx, domain.ActionFileRead, "read", c, resource, nil)
 }
 
 func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode {
@@ -163,45 +170,20 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 	fs.SetOutput(r.errOut)
 
 	var (
-		tokenStr           string
-		dataStr            string
-		dataFile           string
-		expectedAud        string
-		expectedSub        string
-		clockOffsetStr     string
-		injectAuditFailure bool
-		outputFormat       string
-		traceID            string
+		c        pepCommonFlags
+		dataStr  string
+		dataFile string
 	)
-
-	fs.StringVar(&tokenStr, "token", "", "RFC 9068 Bearer Access Token (required)")
+	r.parseCommonPEPFlags(fs, &c)
 	fs.StringVar(&dataStr, "data", "", "Text content to write")
 	fs.StringVar(&dataFile, "data-file", "", "File path containing content to write")
-	fs.StringVar(&expectedAud, "expected-aud", "authz-harness", "Expected token audience")
-	fs.StringVar(&expectedSub, "expected-sub", "", "Expected token subject (optional)")
-	fs.StringVar(&clockOffsetStr, "clock-offset", "", "Clock offset duration (e.g. 10m)")
-	fs.BoolVar(&injectAuditFailure, "inject-audit-failure", false, "Simulate fail-closed audit write failure")
-	fs.StringVar(&outputFormat, "output-format", "text", "Output format: text or json")
-	fs.StringVar(&traceID, "trace-id", "", "Explicit transaction trace ID")
 
 	resource, flagArgs := splitPEPResourceAndFlags(args)
-
 	if err := fs.Parse(flagArgs); err != nil {
 		return domain.ExitBadInput
 	}
-
 	if strings.TrimSpace(resource) == "" && fs.NArg() > 0 {
 		resource = fs.Arg(0)
-	}
-
-	if strings.TrimSpace(resource) == "" {
-		fmt.Fprintf(r.errOut, "Error: missing resource path for write\n")
-		return domain.ExitBadInput
-	}
-
-	if strings.TrimSpace(tokenStr) == "" {
-		fmt.Fprintf(r.errOut, "Error: missing required --token flag\n")
-		return domain.ExitBadInput
 	}
 
 	var writeBytes []byte
@@ -216,36 +198,7 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 		writeBytes = []byte(dataStr)
 	}
 
-	clockOffset, err := parseNonNegativeClockOffset(clockOffsetStr)
-	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: %v\n", err)
-		return domain.ExitBadInput
-	}
-
-	if traceID == "" {
-		traceID = fmt.Sprintf("pep-write-%d", time.Now().UnixNano())
-	}
-
-	req := pep.Request{
-		Token:              tokenStr,
-		Action:             domain.ActionFileWrite,
-		Resource:           resource,
-		Data:               writeBytes,
-		InjectAuditFailure: injectAuditFailure,
-		ExpectedAudience:   expectedAud,
-		ExpectedSubject:    expectedSub,
-		ClockOffset:        clockOffset,
-		TraceID:            traceID,
-	}
-
-	res, err := r.stack.PEP.Execute(ctx, req)
-	if err != nil {
-		fmt.Fprintf(r.errOut, "Error: internal error executing pep write: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	r.renderResult(req, res, outputFormat)
-	return res.ExitCode
+	return r.executePEPAction(ctx, domain.ActionFileWrite, "write", c, resource, writeBytes)
 }
 
 func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string) {
