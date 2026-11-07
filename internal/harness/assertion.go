@@ -177,25 +177,12 @@ func (e *DefaultEvaluator) Evaluate(env *SandboxEnvironment, actualExitCode doma
 				if exp.Audit.ExpectedAction != "" && ev.Action != exp.Audit.ExpectedAction {
 					continue
 				}
-				evDecision := ev.Decision
-				if evDecision == "" {
-					if !ev.Success {
-						evDecision = "deny"
-					} else if ev.Success && ev.Decision == "" && ev.Reason == string(domain.ReasonAuthorized) {
-						evDecision = "allow"
-					}
-				}
-				evReason := ev.Reason
-				if evReason == "" && ev.Metadata != nil {
-					if r, ok := ev.Metadata["reason"].(string); ok {
-						evReason = r
-					}
-				}
+				audit.NormalizeEvent(&ev)
 
 				// Decision 또는 Reason 이 기록된 이벤트
-				if evDecision != "" || evReason != "" {
-					matchedDecision = evDecision
-					matchedReason = domain.Reason(evReason)
+				if ev.Decision != "" || ev.Reason != "" {
+					matchedDecision = ev.Decision
+					matchedReason = domain.Reason(ev.Reason)
 					matchedStage = stageOf(ev)
 					matchedEv = ev
 					found = true
