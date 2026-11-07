@@ -335,3 +335,60 @@ func TestTokenRunner_Exchange_LineageEpochEnforced(t *testing.T) {
 		t.Fatalf("expected audit event with stage=lineage_epoch and reason=SUBJECT_EPOCH_REVOKED, not found in audit.jsonl:\n%s", string(auditBytes))
 	}
 }
+
+func TestTokenRunner_NegativeClockOffset_Rejected(t *testing.T) {
+	runner, out, errOut, _, _ := setupCLITestRig(t)
+
+	// 1. 정상 토큰 발급
+	issueArgs := []string{
+		"issue",
+		"--client-id", "client-orchestrator",
+		"--client-secret", "orchestrator-secret-key-01",
+		"--sub", "orchestrator-main",
+		"--scope", "file:read:docs/plan.txt",
+		"--aud", "authz-service",
+		"--ttl", "1h",
+	}
+	if code := runner.Run(context.Background(), issueArgs); code != domain.ExitSuccess {
+		t.Fatalf("issue failed: %d, err: %s", code, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	tok := lines[len(lines)-1]
+	out.Reset()
+	errOut.Reset()
+
+	// 2. token verify --clock-offset -10m (음수 오프셋 거부) -> ExitBadInput (14)
+	verifyArgs := []string{
+		"verify",
+		"--token", tok,
+		"--clock-offset", "-10m",
+	}
+	if code := runner.Run(context.Background(), verifyArgs); code != domain.ExitBadInput {
+		t.Fatalf("expected verify with negative offset to return ExitBadInput(14), got %d, out: %s, err: %s",
+			code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "must not be negative") {
+		t.Fatalf("expected 'must not be negative' in stderr, got: %s", errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+
+	// 3. token exchange --clock-offset -10m (음수 오프셋 거부) -> ExitBadInput (14)
+	exchangeArgs := []string{
+		"exchange",
+		"--client-id", "client-subagent",
+		"--client-secret", "subagent-secret-key-02",
+		"--parent-token", tok,
+		"--child-sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt",
+		"--ttl", "30m",
+		"--clock-offset", "-10m",
+	}
+	if code := runner.Run(context.Background(), exchangeArgs); code != domain.ExitBadInput {
+		t.Fatalf("expected exchange with negative offset to return ExitBadInput(14), got %d, out: %s, err: %s",
+			code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "must not be negative") {
+		t.Fatalf("expected 'must not be negative' in stderr, got: %s", errOut.String())
+	}
+}

@@ -206,14 +206,10 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitBadInput
 	}
 
-	var offset time.Duration
-	if *clockOffsetStr != "" {
-		d, err := time.ParseDuration(*clockOffsetStr)
-		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset duration format: %v\n", err)
-			return domain.ExitBadInput
-		}
-		offset = d
+	offset, err := parseNonNegativeClockOffset(*clockOffsetStr)
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitBadInput
 	}
 
 	opts := token.VerifyOptions{
@@ -279,9 +275,9 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 	// 가상 시계 지원
 	exchangeService := r.exchange
 	if *clockOffsetStr != "" {
-		d, err := time.ParseDuration(*clockOffsetStr)
+		d, err := parseNonNegativeClockOffset(*clockOffsetStr)
 		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: invalid --clock-offset duration format: %v\n", err)
+			fmt.Fprintf(r.errOut, "Error: %v\n", err)
 			return domain.ExitBadInput
 		}
 		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
