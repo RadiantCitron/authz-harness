@@ -30,11 +30,12 @@ type TokenRunner struct {
 // NewTokenRunner 는 TokenRunner 를 생성한다.
 func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
 	stack, err := app.BuildStack(app.AppConfig{
-		StatePath:   statePath,
-		PrivKeyPath: privPath,
-		PubJWKSPath: pubPath,
-		ReplayPath:  replayPath,
-		AuditPath:   auditPath,
+		StatePath:      statePath,
+		PrivKeyPath:    privPath,
+		PubJWKSPath:    pubPath,
+		ReplayPath:     replayPath,
+		AuditPath:      auditPath,
+		WithoutGateway: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to build token stack: %w", err)
@@ -282,12 +283,13 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		}
 		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
 		offsetStack, err := app.BuildStack(app.AppConfig{
-			StatePath:   r.statePath,
-			PrivKeyPath: r.privPath,
-			PubJWKSPath: r.pubPath,
-			ReplayPath:  r.replayPath,
-			AuditPath:   r.auditPath,
-			Clock:       offsetClock,
+			StatePath:      r.statePath,
+			PrivKeyPath:    r.privPath,
+			PubJWKSPath:    r.pubPath,
+			ReplayPath:     r.replayPath,
+			AuditPath:      r.auditPath,
+			WithoutGateway: true,
+			Clock:          offsetClock,
 		})
 		if err != nil {
 			fmt.Fprintf(r.errOut, "Error: failed to build offset stack: %v\n", err)

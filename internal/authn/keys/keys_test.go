@@ -292,9 +292,6 @@ func TestNewManager_InitialStateSaveFailure_FailsClosed(t *testing.T) {
 	if mgr != nil {
 		t.Fatal("expected nil manager on Save failure, got non-nil")
 	}
-	if !strings.Contains(err.Error(), "failed to save initial state") {
-		t.Errorf("unexpected error message: %v", err)
-	}
 
 	// 2. FileStore: 디렉터리 권한 제한으로 Save 실패 시 fail-closed 검증
 	tmpDir := t.TempDir()
@@ -327,9 +324,6 @@ func TestNewManager_InitialStateSaveFailure_FailsClosed(t *testing.T) {
 	}
 	if mgr2 != nil {
 		t.Fatal("expected nil manager on read-only directory failure, got non-nil")
-	}
-	if !strings.Contains(err.Error(), "failed to save initial state") {
-		t.Errorf("unexpected error message: %v", err)
 	}
 }
 

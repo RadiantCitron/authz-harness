@@ -33,8 +33,9 @@ type AppConfig struct {
 	BudgetPath   string // 비면 filepath.Dir(ReplayPath)/budget_ledger.json
 	AuditPath    string
 	WorkspaceDir string
-	NetAllowList []string // net:fetch 허용 host:port (정규 형태). 비면 net:fetch 는 전부 거부
-	VerifyOnly   bool     // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
+	NetAllowList   []string // net:fetch 허용 host:port (정규 형태). 비면 net:fetch 는 전부 거부
+	WithoutGateway bool     // true: 토큰 전용 등 PEP 게이트웨이 조립 생략
+	VerifyOnly     bool     // true: Zone A(개인키) 미접근, 서명키 자동 회전/Issuer/PAP 미조립 (서브에이전트/PEP 검증 전용)
 	Clock        domain.Clock
 	Observer     observe.Observer
 }
@@ -228,7 +229,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	if stateStore != nil {
 		approvalConsumer = state.NewApprovalConsumer(stateStore)
 	}
-	if pdpSvc != nil && tokenVerifier != nil && workspaceJail != nil {
+	if !cfg.WithoutGateway && pdpSvc != nil && tokenVerifier != nil {
 		netGuard, err := netguard.NewGuard(cfg.NetAllowList, 0, 0)
 		if err != nil {
 			_ = auditWriter.Close()
