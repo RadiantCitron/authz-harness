@@ -283,7 +283,7 @@ func (s *pdpService) Decide(ctx context.Context, req Request) (*Decision, error)
 		}
 
 		if err := s.audit.Log(event); err != nil {
-			return nil, fmt.Errorf("pdp: audit logging failed (fail-closed): %w", err)
+			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pdp: audit logging failed (fail-closed)", err)
 		}
 	}
 

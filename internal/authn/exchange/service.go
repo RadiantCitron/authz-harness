@@ -231,7 +231,8 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error {
 	info, err := s.clients.AuthenticateClient(c.req.ClientID, c.req.ClientSecret)
 	if err != nil {
-		return &denial{domain.ReasonAuthnInvalidSecret, err.Error(), fmt.Errorf("client authentication failed: %w", err)}
+		reason := domain.ReasonFromError(err, domain.ReasonAuthnInvalidSecret)
+		return &denial{reason, err.Error(), domain.NewError(reason, "client authentication failed", err)}
 	}
 	c.clientInfo = info
 	return nil
@@ -240,13 +241,13 @@ func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error
 // delegation_subject: 자식 주체 허용 여부
 func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall) error {
 	if strings.TrimSpace(c.req.ChildSubject) == "" {
-		err := errors.New("child subject is required")
-		return &denial{domain.ReasonInvalidToken, "child subject is required", err}
+		msg := "child subject is required"
+		return &denial{domain.ReasonInvalidToken, msg, domain.NewError(domain.ReasonInvalidToken, msg, nil)}
 	}
 	if !c.clientInfo.IsSubjectAllowed(c.req.ChildSubject) {
-		err := fmt.Errorf("client %s is not authorized to request tokens for subject %s (%s)",
+		msg := fmt.Sprintf("client %s is not authorized to request tokens for subject %s (%s)",
 			c.req.ClientID, c.req.ChildSubject, domain.ReasonNoActiveGrant)
-		return &denial{domain.ReasonNoActiveGrant, err.Error(), err}
+		return &denial{domain.ReasonNoActiveGrant, msg, domain.NewError(domain.ReasonNoActiveGrant, msg, nil)}
 	}
 	return nil
 }
@@ -342,7 +343,8 @@ func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error
 	}, token.IssueOptions{}, c.auditCtx)
 	if err != nil {
 		// 발급기가 도메인 사유를 달아 주면 그대로 기록한다. 감사 사유와 돌려주는 종료 코드가 어긋나지 않게 한다.
-		return &denial{domain.ReasonFromError(err, domain.ReasonInvalidToken), err.Error(), fmt.Errorf("failed to issue child token: %w", err)}
+		reason := domain.ReasonFromError(err, domain.ReasonInvalidToken)
+		return &denial{reason, err.Error(), domain.NewError(reason, fmt.Sprintf("failed to issue child token: %v", err), err)}
 	}
 	c.child = res
 	return nil

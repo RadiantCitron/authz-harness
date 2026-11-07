@@ -114,7 +114,7 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	decision, err := r.pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	if decision.Decision == pdp.DecisionAllow {
@@ -139,14 +139,14 @@ func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCo
 	snapshot, err := r.pipSvc.GetSubjectSnapshot(ctx, req.Subject)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to query pip snapshot: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	// 결정 수행 (감사 로그 자동 기록)
 	decision, err := r.pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	// PDP 만 실행했으므로 판정 칸 하나만 그린다. 토큰 검증·경계·감사는 이 명령이 실행하지 않은 일이라 그리지 않는다.
