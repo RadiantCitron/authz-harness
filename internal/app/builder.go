@@ -228,7 +228,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 	if stateStore != nil {
 		approvalConsumer = state.NewApprovalConsumer(stateStore)
 	}
-	if pdpSvc != nil && tokenVerifier != nil {
+	if pdpSvc != nil && tokenVerifier != nil && workspaceJail != nil {
 		netGuard, err := netguard.NewGuard(cfg.NetAllowList, 0, 0)
 		if err != nil {
 			_ = auditWriter.Close()

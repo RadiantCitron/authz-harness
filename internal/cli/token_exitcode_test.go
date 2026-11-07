@@ -38,7 +38,7 @@ func corruptedRunner(t *testing.T, privPath, pubPath string) (*TokenRunner, *byt
 	f.WriteString(`{"trace_id":"t","actor":"a","act`)
 	f.Close()
 	out, errOut := &bytes.Buffer{}, &bytes.Buffer{}
-	r, err := NewTokenRunner(out, errOut, privPath, pubPath, filepath.Join(dir, "replay_ledger.json"), ap)
+	r, err := NewTokenRunner(out, errOut, filepath.Join(dir, "grants_state.json"), privPath, pubPath, filepath.Join(dir, "replay_ledger.json"), ap)
 	if err != nil {
 		t.Fatal(err)
 	}

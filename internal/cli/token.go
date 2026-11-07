@@ -20,6 +20,7 @@ type TokenRunner struct {
 	exchange   exchange.Service
 	out        io.Writer
 	errOut     io.Writer
+	statePath  string
 	privPath   string
 	pubPath    string
 	replayPath string
@@ -27,8 +28,9 @@ type TokenRunner struct {
 }
 
 // NewTokenRunner 는 TokenRunner 를 생성한다.
-func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
+func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
 	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:   statePath,
 		PrivKeyPath: privPath,
 		PubJWKSPath: pubPath,
 		ReplayPath:  replayPath,
@@ -43,6 +45,7 @@ func NewTokenRunner(out, errOut io.Writer, privPath, pubPath, replayPath, auditP
 		exchange:   stack.ExchangeService,
 		out:        out,
 		errOut:     errOut,
+		statePath:  statePath,
 		privPath:   privPath,
 		pubPath:    pubPath,
 		replayPath: replayPath,
@@ -283,6 +286,7 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		}
 		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
 		offsetStack, err := app.BuildStack(app.AppConfig{
+			StatePath:   r.statePath,
 			PrivKeyPath: r.privPath,
 			PubJWKSPath: r.pubPath,
 			ReplayPath:  r.replayPath,

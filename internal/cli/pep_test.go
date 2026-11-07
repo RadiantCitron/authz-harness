@@ -58,7 +58,7 @@ func setupPEPCLITestRig(t *testing.T) *pepCLITestRig {
 	errOut.Reset()
 
 	// 2. TokenRunner
-	tokenRunner, err := NewTokenRunner(out, errOut, privPath, pubJWKSPath, replayPath, auditPath)
+	tokenRunner, err := NewTokenRunner(out, errOut, statePath, privPath, pubJWKSPath, replayPath, auditPath)
 	if err != nil {
 		t.Fatalf("failed to create token runner: %v", err)
 	}

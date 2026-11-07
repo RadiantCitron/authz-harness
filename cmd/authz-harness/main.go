@@ -110,7 +110,7 @@ func main() {
 			}
 			os.Exit(int(exitCode))
 		case "token":
-			tokenRunner, err := cli.NewTokenRunner(os.Stdout, os.Stderr, privKeyPath, pubJWKSPath, replayPath, auditPath)
+			tokenRunner, err := cli.NewTokenRunner(os.Stdout, os.Stderr, statePath, privKeyPath, pubJWKSPath, replayPath, auditPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: failed to initialize token runner: %v\n", err)
 				os.Exit(int(domain.ExitInternalError))

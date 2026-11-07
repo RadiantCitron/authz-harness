@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ func setupCLITestRig(t *testing.T) (*TokenRunner, *bytes.Buffer, *bytes.Buffer, 
 	t.Helper()
 	tmpDir := t.TempDir()
 
+	statePath := filepath.Join(tmpDir, "grants_state.json")
 	privPath := filepath.Join(tmpDir, "signing_keys.priv.json")
 	pubPath := filepath.Join(tmpDir, "jwks.pub.json")
 	replayPath := filepath.Join(tmpDir, "replay_ledger.json")
@@ -23,7 +25,7 @@ func setupCLITestRig(t *testing.T) (*TokenRunner, *bytes.Buffer, *bytes.Buffer, 
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 
-	runner, err := NewTokenRunner(out, errOut, privPath, pubPath, replayPath, auditPath)
+	runner, err := NewTokenRunner(out, errOut, statePath, privPath, pubPath, replayPath, auditPath)
 	if err != nil {
 		t.Fatalf("failed to create token runner: %v", err)
 	}
@@ -247,5 +249,89 @@ func TestCLI_TokenExchange(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "DELEGATION_SCOPE_EXCEEDED") {
 		t.Fatalf("expected DELEGATION_SCOPE_EXCEEDED in output, got: %s", out.String())
+	}
+}
+
+func TestTokenRunner_Exchange_LineageEpochEnforced(t *testing.T) {
+	runner, out, errOut, privPath, _ := setupCLITestRig(t)
+	tmpDir := filepath.Dir(privPath)
+	statePath := filepath.Join(tmpDir, "grants_state.json")
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+
+	// 1. 부모 토큰 발급 (orchestrator-main: Epoch 1)
+	issueArgs := []string{
+		"issue",
+		"--client-id", "client-orchestrator",
+		"--client-secret", "orchestrator-secret-key-01",
+		"--sub", "orchestrator-main",
+		"--scope", "file:read:docs/plan.txt file:write:docs/out.txt",
+		"--aud", "authz-service",
+		"--ttl", "1h",
+	}
+	exitCode := runner.Run(context.Background(), issueArgs)
+	if exitCode != domain.ExitSuccess {
+		t.Fatalf("parent issue failed: %d, err: %s", exitCode, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	parentToken := lines[len(lines)-1]
+	out.Reset()
+	errOut.Reset()
+
+	// 2. 부모 주체(orchestrator-main)의 Security Epoch 증가 (상위 주체 권한 회수)
+	grantRunner, err := NewGrantRunner(out, errOut, statePath, auditPath)
+	if err != nil {
+		t.Fatalf("failed to create grant runner: %v", err)
+	}
+	bumpCode := grantRunner.Run(context.Background(), []string{"bump-epoch", "-sub", "orchestrator-main"})
+	if bumpCode != domain.ExitSuccess {
+		t.Fatalf("bump-epoch failed: %d, err: %s", bumpCode, errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+
+	// 3. 폐기된 부모 토큰으로 새 토큰 교환 시도 -> lineage_epoch 단계에서 차단되어야 함
+	exchangeArgs := []string{
+		"exchange",
+		"--client-id", "client-subagent",
+		"--client-secret", "subagent-secret-key-02",
+		"--parent-token", parentToken,
+		"--child-sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt",
+		"--ttl", "30m",
+	}
+	exitCode = runner.Run(context.Background(), exchangeArgs)
+	if exitCode != domain.ExitAuthzDenied {
+		t.Fatalf("expected exchange failure with exit code %d (ExitAuthzDenied), got %d, out: %s, err: %s",
+			domain.ExitAuthzDenied, exitCode, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "SUBJECT_EPOCH_REVOKED") {
+		t.Fatalf("expected SUBJECT_EPOCH_REVOKED in exchange output, got: %s", out.String())
+	}
+
+	// 4. 감사 로그에서 StageLineageEpoch 단계 및 SUBJECT_EPOCH_REVOKED 거부 확인
+	auditBytes, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatalf("failed to read audit file: %v", err)
+	}
+	var foundLineageEpochDeny bool
+	for _, l := range strings.Split(string(auditBytes), "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		var ev struct {
+			Action string `json:"action"`
+			Stage  string `json:"stage"`
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal([]byte(l), &ev) == nil {
+			if ev.Action == "token.exchange.deny" && ev.Stage == string(domain.StageLineageEpoch) && ev.Reason == string(domain.ReasonSubjectEpochRevoked) {
+				foundLineageEpochDeny = true
+				break
+			}
+		}
+	}
+	if !foundLineageEpochDeny {
+		t.Fatalf("expected audit event with stage=lineage_epoch and reason=SUBJECT_EPOCH_REVOKED, not found in audit.jsonl:\n%s", string(auditBytes))
 	}
 }
