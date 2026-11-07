@@ -7,14 +7,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
-	"authz-harness/internal/app"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
 	"authz-harness/internal/observe/slogadapter"
-	"authz-harness/internal/orchestrator"
 )
 
 // MCPRunner 는 `mcp` 서브커맨드를 주관하는 CLI 러너다.
@@ -118,44 +115,21 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 
 	executor := r.executor
 	if executor == nil {
-		// 1. 감사 로그 기록기 초기화
-		stack, err := app.BuildStack(app.AppConfig{AuditPath: auditFlag, VerifyOnly: true})
+		spawner, stack, err := buildWorkerSpawner(workerSpawnerConfig{
+			WorkerBin:     r.workerBin,
+			AuditPath:     auditFlag,
+			WorkspacePath: workspaceFlag,
+			StatePath:     stateFlag,
+			PubJWKSPath:   pubJWKSFlag,
+			ReplayPath:    replayFlag,
+			NetAllow:      netAllowFlag,
+			Verbose:       logLevel == slog.LevelDebug,
+			Timeout:       timeoutFlag,
+		}, r.errOut)
 		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: failed to init audit writer: %v\n", err)
 			return domain.ExitInternalError
 		}
 		defer stack.Close()
-		auditWriter := stack.AuditWriter
-
-		// 2. 바이너리 결정
-		binPath := r.workerBin
-		if binPath == "" {
-			exe, err := os.Executable()
-			if err != nil {
-				fmt.Fprintf(r.errOut, "Error: failed to get executable path: %v\n", err)
-				return domain.ExitInternalError
-			}
-			binPath = exe
-		}
-
-		absStateFlag, _ := filepath.Abs(stateFlag)
-		absPubJWKSFlag, _ := filepath.Abs(pubJWKSFlag)
-		absReplayFlag, _ := filepath.Abs(replayFlag)
-		absAuditFlag, _ := filepath.Abs(auditFlag)
-		absWorkspaceFlag, _ := filepath.Abs(workspaceFlag)
-
-		childArgs := orchestrator.WorkerArgs(absWorkspaceFlag, absStateFlag, absPubJWKSFlag, absReplayFlag, absAuditFlag, netAllowFlag, logLevel == slog.LevelDebug)
-
-		spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
-			BinaryPath: binPath,
-			Args:       childArgs,
-			Limits:     orchestrator.Limits{Timeout: timeoutFlag},
-			Audit:      auditWriter,
-		})
-		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: failed to create spawner: %v\n", err)
-			return domain.ExitInternalError
-		}
 
 		executor = mcp.NewSubprocessExecutor(spawner, mcp.WithLogger(logger))
 	}

@@ -5,12 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"authz-harness/internal/app"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/orchestrator"
 	"authz-harness/internal/subagent"
@@ -119,48 +116,22 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 		traceID = fmt.Sprintf("orch-%d", time.Now().UnixNano())
 	}
 
-	// 1. 감사 로그 기록기 초기화
-	stack, err := app.BuildStack(app.AppConfig{AuditPath: auditFlag, VerifyOnly: true})
+	// 1. Spawner 구성 (감사 로그 스택, 바이너리, 절대경로 정규화 포함)
+	spawner, stack, err := buildWorkerSpawner(workerSpawnerConfig{
+		WorkerBin:     r.workerBin,
+		AuditPath:     auditFlag,
+		WorkspacePath: workspaceFlag,
+		StatePath:     stateFlag,
+		PubJWKSPath:   pubJWKSFlag,
+		ReplayPath:    replayFlag,
+		Timeout:       timeoutFlag,
+	}, r.stderr)
 	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init audit writer: %v\n", err)
 		return domain.ExitInternalError
 	}
 	defer stack.Close()
-	auditWriter := stack.AuditWriter
 
-	// 2. 바이너리 결정
-	binPath := r.workerBin
-	if binPath == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			fmt.Fprintf(r.stderr, "Error: failed to get executable path: %v\n", err)
-			return domain.ExitInternalError
-		}
-		binPath = exe
-	}
-
-	// 상대 경로 파일인 경우 절대 경로로 정규화 (하위 프로세스 환경 차이 방지)
-	absStateFlag, _ := filepath.Abs(stateFlag)
-	absPubJWKSFlag, _ := filepath.Abs(pubJWKSFlag)
-	absReplayFlag, _ := filepath.Abs(replayFlag)
-	absAuditFlag, _ := filepath.Abs(auditFlag)
-	absWorkspaceFlag, _ := filepath.Abs(workspaceFlag)
-
-	// 3. Spawner 구성
-	childArgs := orchestrator.WorkerArgs(absWorkspaceFlag, absStateFlag, absPubJWKSFlag, absReplayFlag, absAuditFlag, "", false)
-
-	spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
-		BinaryPath: binPath,
-		Args:       childArgs,
-		Limits:     orchestrator.Limits{Timeout: timeoutFlag},
-		Audit:      auditWriter,
-	})
-	if err != nil {
-		fmt.Fprintf(r.stderr, "Error: failed to init spawner: %v\n", err)
-		return domain.ExitInternalError
-	}
-
-	// 4. 자식 워커 요청 프레임 구성
+	// 2. 자식 워커 요청 프레임 구성
 	subReq := subagent.SubagentRequest{
 		Version:  "1.0",
 		TraceID:  traceID,
