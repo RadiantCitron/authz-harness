@@ -54,16 +54,6 @@ func NewAtomicFileStore[T any](filePath string, opts ...AtomicFileStoreOption[T]
 	return store
 }
 
-// FilePath 는 관리 중인 파일 경로를 반환한다.
-func (s *AtomicFileStore[T]) FilePath() string {
-	return s.filePath
-}
-
-// LockPath 는 락 파일 경로를 반환한다.
-func (s *AtomicFileStore[T]) LockPath() string {
-	return s.lockPath
-}
-
 // Read 는 공유 락(LOCK_SH)을 획득한 후 파일 내용을 역직렬화하여 반환한다.
 // 파일이 존재하지 않는 경우 defaultFn이 설정되어 있으면 기본값을 반환하고, 없으면 os.ErrNotExist를 반환한다.
 func (s *AtomicFileStore[T]) Read() (*T, error) {

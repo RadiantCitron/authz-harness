@@ -172,14 +172,6 @@ func (m *mockSnapshotProvider) GetSubjectSnapshot(_ context.Context, subject str
 	}, nil
 }
 
-func (m *mockSnapshotProvider) GetActiveGrants(_ context.Context, _ string) ([]domain.Grant, error) {
-	return nil, nil
-}
-
-func (m *mockSnapshotProvider) GetCurrentEpoch(_ context.Context, subject string) (domain.Epoch, error) {
-	return m.epochs.Get(subject), nil
-}
-
 func TestExchange_WithSnapshotProvider_EarlyEpochRejection(t *testing.T) {
 	baseTime := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
 	dir := t.TempDir()

@@ -16,12 +16,6 @@ type SubjectSnapshot = domain.SubjectSnapshot
 type Service interface {
 	// GetSubjectSnapshot 은 PDP가 단일 트랜잭션에서 결정할 수 있도록 주체의 최신 Epoch와 활성 Grant 목록을 원자적으로 읽어 반환한다.
 	GetSubjectSnapshot(ctx context.Context, subject string) (*SubjectSnapshot, error)
-
-	// GetActiveGrants 는 특정 주체의 활성화(active)된 Grant 목록만 반환한다.
-	GetActiveGrants(ctx context.Context, subject string) ([]domain.Grant, error)
-
-	// GetCurrentEpoch 는 특정 주체의 현재 Security Epoch를 반환한다 (미등록 주체는 기본값 1).
-	GetCurrentEpoch(ctx context.Context, subject string) (domain.Epoch, error)
 }
 
 // pipService 는 PIP Service의 기본 구현체다.
@@ -100,28 +94,4 @@ func (s *pipService) GetSubjectSnapshot(ctx context.Context, subject string) (*S
 		SubjectEpochs: epochsCopy,
 		Timestamp:     s.clock.Now().UTC(),
 	}, nil
-}
-
-// GetActiveGrants 는 특정 주체의 활성 Grant 목록만 반환한다.
-func (s *pipService) GetActiveGrants(ctx context.Context, subject string) ([]domain.Grant, error) {
-	snapshot, err := s.GetSubjectSnapshot(ctx, subject)
-	if err != nil {
-		return nil, err
-	}
-	return snapshot.ActiveGrants, nil
-}
-
-// GetCurrentEpoch 는 특정 주체의 Security Epoch를 반환한다.
-func (s *pipService) GetCurrentEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
-	cleanSub := strings.TrimSpace(subject)
-	if cleanSub == "" {
-		return 0, domain.ErrEmptySubject
-	}
-
-	st, err := s.store.Load()
-	if err != nil {
-		return 0, fmt.Errorf("pip: failed to load state: %w", err)
-	}
-
-	return st.Epochs.Get(cleanSub), nil
 }

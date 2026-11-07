@@ -27,20 +27,6 @@ func (m *mockPIP) GetSubjectSnapshot(ctx context.Context, subject string) (*pip.
 	return m.snapshot, nil
 }
 
-func (m *mockPIP) GetActiveGrants(ctx context.Context, subject string) ([]domain.Grant, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.snapshot.ActiveGrants, nil
-}
-
-func (m *mockPIP) GetCurrentEpoch(ctx context.Context, subject string) (domain.Epoch, error) {
-	if m.err != nil {
-		return 0, m.err
-	}
-	return m.snapshot.CurrentEpoch, nil
-}
-
 // mockAudit 는 테스트용 감사 로거 구현체다.
 type mockAudit struct {
 	events []audit.Event

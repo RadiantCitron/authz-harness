@@ -121,59 +121,6 @@ func TestPIP_GetSubjectSnapshot(t *testing.T) {
 	}
 }
 
-func TestPIP_GetActiveGrants(t *testing.T) {
-	ctx := context.Background()
-	svc, store := setupTestPIP(t)
-
-	now := time.Now().UTC()
-	_ = store.Update(func(st *state.GrantsState) error {
-		st.Grants = append(st.Grants, domain.Grant{
-			ID:        "grant-1",
-			Subject:   "worker-01",
-			Action:    domain.ActionFileRead,
-			Resource:  "docs/a.txt",
-			Status:    domain.GrantStatusActive,
-			CreatedAt: now,
-		})
-		return nil
-	})
-
-	grants, err := svc.GetActiveGrants(ctx, "worker-01")
-	if err != nil {
-		t.Fatalf("GetActiveGrants failed: %v", err)
-	}
-	if len(grants) != 1 || grants[0].ID != "grant-1" {
-		t.Errorf("expected 1 grant with id grant-1, got %v", grants)
-	}
-}
-
-func TestPIP_GetCurrentEpoch(t *testing.T) {
-	ctx := context.Background()
-	svc, store := setupTestPIP(t)
-
-	_ = store.Update(func(st *state.GrantsState) error {
-		st.Epochs["worker-01"] = 5
-		return nil
-	})
-
-	epoch, err := svc.GetCurrentEpoch(ctx, "worker-01")
-	if err != nil {
-		t.Fatalf("GetCurrentEpoch failed: %v", err)
-	}
-	if epoch != 5 {
-		t.Errorf("expected epoch 5, got %d", epoch)
-	}
-
-	// 미등록 주체
-	defaultEpoch, err := svc.GetCurrentEpoch(ctx, "worker-new")
-	if err != nil {
-		t.Fatalf("GetCurrentEpoch failed: %v", err)
-	}
-	if defaultEpoch != 1 {
-		t.Errorf("expected default epoch 1, got %d", defaultEpoch)
-	}
-}
-
 func TestPIP_SnapshotApprovals(t *testing.T) { // TC-030-08
 	ctx := context.Background()
 	svc, store := setupTestPIP(t)

@@ -31,7 +31,6 @@ type ClientInfo struct {
 // ClientRegistry 는 클라이언트 인증 인터페이스다.
 type ClientRegistry interface {
 	AuthenticateClient(clientID, clientSecret string) (*ClientInfo, error)
-	GetClient(clientID string) (*ClientInfo, error)
 }
 
 type clientEntry struct {
@@ -117,16 +116,6 @@ func (r *InMemoryClientRegistry) AuthenticateClient(clientID, clientSecret strin
 		return nil, domain.NewError(domain.ReasonAuthnInvalidSecret, fmt.Sprintf("%s", clientID), ErrInvalidSecret)
 	}
 
-	info := entry.info
-	return &info, nil
-}
-
-// GetClient 는 클라이언트 정보를 반환한다.
-func (r *InMemoryClientRegistry) GetClient(clientID string) (*ClientInfo, error) {
-	entry, exists := r.clients[clientID]
-	if !exists {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownClient, clientID)
-	}
 	info := entry.info
 	return &info, nil
 }

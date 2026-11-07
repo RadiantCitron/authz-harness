@@ -98,10 +98,12 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 
 		if m.auditWriter != nil {
 			if err := m.auditWriter.Log(audit.Event{
-				Timestamp: now,
+				Timestamp: now.UTC(),
 				TraceID:   fmt.Sprintf("init-%s", kid),
+				Step:      "keys.init",
 				Actor:     "system",
 				Action:    "key.created",
+				Decision:  "allow",
 				Success:   true,
 				Metadata: map[string]interface{}{
 					"kid":    kid,
@@ -263,10 +265,12 @@ func (m *Manager) rotateKey(auditCtx domain.AuditContext) (*domain.JWK, error) {
 
 	if m.auditWriter != nil {
 		if err := m.auditWriter.Log(audit.Event{
-			Timestamp: now,
+			Timestamp: now.UTC(),
 			TraceID:   auditCtx.TraceID,
+			Step:      "keys.rotate",
 			Actor:     auditCtx.Actor,
 			Action:    "key.rotated",
+			Decision:  "allow",
 			Success:   true,
 			Reason:    auditCtx.Reason,
 			Metadata: map[string]interface{}{
@@ -372,10 +376,12 @@ func (m *Manager) revokeKey(kid string, auditCtx domain.AuditContext) error {
 
 	if m.auditWriter != nil {
 		if err := m.auditWriter.Log(audit.Event{
-			Timestamp: now,
+			Timestamp: now.UTC(),
 			TraceID:   auditCtx.TraceID,
+			Step:      "keys.revoke",
 			Actor:     auditCtx.Actor,
 			Action:    "key.revoked",
+			Decision:  "allow",
 			Success:   true,
 			Reason:    auditCtx.Reason,
 			Metadata: map[string]interface{}{

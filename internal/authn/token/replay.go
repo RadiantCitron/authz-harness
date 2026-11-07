@@ -33,7 +33,6 @@ type ReplayLedger interface {
 	CheckAndConsume(jti string, expiresAt time.Time) error
 	// IsConsumed 는 jti 가 이미 소비되었는지 공유 잠금으로 읽기만 한다(소비하지 않는다).
 	IsConsumed(jti string) (bool, error)
-	PruneExpired(now time.Time) error
 }
 
 // FileReplayLedger 는 storage.AtomicFileStore 기반으로 원자적 동기화를 보장하는 ReplayLedger 구현체다.
@@ -118,20 +117,4 @@ func (l *FileReplayLedger) IsConsumed(jti string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// PruneExpired 는 만료된 jti 항목을 파일에서 완전히 정리한다.
-func (l *FileReplayLedger) PruneExpired(now time.Time) error {
-	return l.store.Update(func(data *ReplayData) error {
-		validEntries := make([]ReplayEntry, 0, len(data.Entries))
-		for _, entry := range data.Entries {
-			if entry.ExpiresAt.After(now) {
-				validEntries = append(validEntries, entry)
-			}
-		}
-
-		data.UpdatedAt = now
-		data.Entries = validEntries
-		return nil
-	})
 }

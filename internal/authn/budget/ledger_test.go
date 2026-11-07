@@ -210,13 +210,14 @@ func TestCorruptLedgerFailClosed(t *testing.T) { // TC-020-07
 		t.Fatal("corrupt ledger must fail construction")
 	}
 	// 정상 생성 후 파일을 손상시켜 런타임 손상을 모사
-	bad := newLedger(t, filepath.Join(t.TempDir(), "x.json"), base)
-	if err := os.WriteFile(bad.store.FilePath(), junk, 0644); err != nil {
+	badPath := filepath.Join(t.TempDir(), "x.json")
+	bad := newLedger(t, badPath, base)
+	if err := os.WriteFile(badPath, junk, 0644); err != nil {
 		t.Fatal(err)
 	}
 	wantReason(t, bad.Consume("root", 1, 0, 0), domain.ReasonInternalError, 16)
 	wantReason(t, bad.Init("root", domain.Budget{MaxCalls: 1}, 1), domain.ReasonInternalError, 16)
-	got, _ := os.ReadFile(bad.store.FilePath())
+	got, _ := os.ReadFile(badPath)
 	if string(got) != string(junk) {
 		t.Fatalf("file modified: %s", got)
 	}
