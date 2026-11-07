@@ -61,6 +61,7 @@ func (s *e2e25Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 	if err != nil {
 		return err
 	}
+	defer stack.Close()
 	// Grant 및 Scope 와 무관하게 파일 경로 자체에 .. 탈출이 있으므로
 	// PDP 가 해당 경로에 대해 Grant 부재로 거부하지 않도록 와일드카드 또는 상대 경로 허용 세팅이 필요한지 점검
 	// 여기서는 worker-01 에게 와일드카드 또는 기본 Grant 를 부여하되, PEP 가 PDP 통과 후 Jail 에서 차단하도록 설계
@@ -142,6 +143,7 @@ func (s *e2e26Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 	if err != nil {
 		return err
 	}
+	defer stack.Close()
 	evilPath := env.WorkspaceDir + "-evil/secret.txt"
 	err = stack.StateStore.Update(func(st *state.GrantsState) error {
 		st.Grants = append(st.Grants, domain.Grant{
@@ -171,6 +173,7 @@ func (s *e2e26Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
 	evilPath := env.WorkspaceDir + "-evil/secret.txt"
 	res, err := stack.PEP.Execute(ctx, pep.Request{
@@ -224,6 +227,7 @@ func (s *e2e27Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironme
 	if err != nil {
 		return err
 	}
+	defer stack.Close()
 
 	// 1. 격리 외부 호스트 타깃 파일 생성
 	outsideFile := filepath.Join(env.RootDir, "outside_secret.txt")
@@ -255,6 +259,7 @@ func (s *e2e27Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 	if err != nil {
 		return domain.ExitInternalError, err
 	}
+	defer stack.Close()
 
 	res, err := stack.PEP.Execute(ctx, pep.Request{
 		Token:    s.token,
