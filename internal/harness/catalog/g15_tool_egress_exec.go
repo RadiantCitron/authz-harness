@@ -3,11 +3,11 @@ package catalog
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -72,21 +72,6 @@ func g15Token(stack *harnessStack, scope string) (string, error) {
 	return issueTestToken(stack, "client-orchestrator", "orchestrator-secret-key-01", g15Subject, scope, time.Hour, token.IssueOptions{})
 }
 
-func g15WorkerArgs(env *harness.SandboxEnvironment, netAllow []string) []string {
-	args := []string{
-		"subagent", "worker",
-		"-workspace", env.WorkspaceDir,
-		"-state-file", env.StatePath,
-		"-pub-jwks-file", env.PubJWKSPath,
-		"-replay-file", env.ReplayPath,
-		"-audit-file", env.AuditPath,
-	}
-	if len(netAllow) > 0 {
-		args = append(args, "-net-allow", strings.Join(netAllow, ","))
-	}
-	return args
-}
-
 type g15Spawn struct {
 	netAllow []string
 	limits   orchestrator.Limits
@@ -101,7 +86,7 @@ func g15SpawnWorker(ctx context.Context, env *harness.SandboxEnvironment, stack 
 	}
 	sp, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
 		BinaryPath:  env.BinaryPath,
-		Args:        g15WorkerArgs(env, sc.netAllow),
+		Args:        orchestrator.WorkerArgs(env.WorkspaceDir, env.StatePath, env.PubJWKSPath, env.ReplayPath, env.AuditPath, strings.Join(sc.netAllow, ","), false),
 		Limits:      limits,
 		Audit:       stack.AuditWriter,
 		Confiner:    sc.confiner,
@@ -169,12 +154,7 @@ type g15Scenario struct {
 func (s *g15Scenario) Metadata() harness.ScenarioMetadata { return s.meta }
 
 func (s *g15Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironment) error {
-	// Landlock 은 존재하지 않는 파일에 규칙을 걸 수 없으므로 audit lock 파일을 미리 만든다.
-	f, err := os.OpenFile(env.AuditPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("precreate audit lock: %w", err)
-	}
-	return f.Close()
+	return precreateAuditLock(env)
 }
 
 func (s *g15Scenario) Execute(ctx context.Context, env *harness.SandboxEnvironment) (domain.ExitCode, error) {
@@ -476,7 +456,7 @@ func newG15E2E79() harness.Scenario {
 			if err := g15Grant(ctx, stack, domain.ActionNetFetch, srv.Host); err != nil {
 				return domain.ExitInternalError, err
 			}
-			pol := confinement.WorkerPolicy(env.RootDir, env.WorkspaceDir, filepathDir(env.StatePath), env.AuditPath)
+			pol := confinement.WorkerPolicy(env.RootDir, env.WorkspaceDir, filepath.Dir(env.StatePath), env.AuditPath)
 			pol.AllowConnectPorts = []int{srv.Port}
 			platform := confinement.WithLauncher(confinement.Platform(), env.BinaryPath)
 
@@ -533,13 +513,6 @@ func newG15E2E79() harness.Scenario {
 			return domain.ExitPathViolation, nil
 		},
 	}
-}
-
-func filepathDir(p string) string {
-	if i := strings.LastIndex(p, string(os.PathSeparator)); i > 0 {
-		return p[:i]
-	}
-	return p
 }
 
 // g15FaultSpawn 은 bypass_open_socket 결함 워커를 주어진 격리로 스폰하고, 자식이 실제로 실행되었음을 확인한다.

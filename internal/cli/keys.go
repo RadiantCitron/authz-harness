@@ -27,7 +27,7 @@ type KeysRunner struct {
 
 // NewKeysRunner 는 지정된 입출력 스트림과 키 파일 경로로 KeysRunner를 생성한다.
 func NewKeysRunner(out, errOut io.Writer, privPath, pubPath, auditPath string) (*KeysRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{PrivKeyPath: privPath, PubJWKSPath: pubPath, AuditPath: auditPath})
+	stack, err := app.BuildStack(app.AppConfig{PrivKeyPath: privPath, PubJWKSPath: pubPath, AuditPath: auditPath, WithoutGateway: true})
 	if err != nil {
 		return nil, err
 	}

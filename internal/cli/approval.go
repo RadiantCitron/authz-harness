@@ -22,7 +22,7 @@ type ApprovalRunner struct {
 
 // NewApprovalRunner 는 상태 파일·감사 파일 경로로 ApprovalRunner 를 생성한다.
 func NewApprovalRunner(out, errOut io.Writer, statePath, auditPath string) (*ApprovalRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath})
+	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath, WithoutGateway: true})
 	if err != nil {
 		return nil, err
 	}

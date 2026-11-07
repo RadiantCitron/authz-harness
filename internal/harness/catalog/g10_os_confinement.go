@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -91,12 +90,7 @@ func (s *g10Scenario) Metadata() harness.ScenarioMetadata {
 }
 
 func (s *g10Scenario) Setup(ctx context.Context, env *harness.SandboxEnvironment) error {
-	// Landlock 은 존재하지 않는 파일에 규칙을 걸 수 없으므로 audit lock 파일을 미리 만든다.
-	f, err := os.OpenFile(env.AuditPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("precreate audit lock: %w", err)
-	}
-	return f.Close()
+	return precreateAuditLock(env)
 }
 
 func (s *g10Scenario) spawn(ctx context.Context, env *harness.SandboxEnvironment, stack *harnessStack, trace, mode, target string,

@@ -28,22 +28,10 @@ type TokenRunner struct {
 }
 
 // NewTokenRunner 는 TokenRunner 를 생성한다.
+// 주의: token inspect 는 서명 검증/키 생성이 불필요하므로 즉시 인스턴스만 생성하고,
+// 하위 명령(issue, verify, exchange) 실행 시점에 필요한 스택을 지연 조립한다.
 func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{
-		StatePath:      statePath,
-		PrivKeyPath:    privPath,
-		PubJWKSPath:    pubPath,
-		ReplayPath:     replayPath,
-		AuditPath:      auditPath,
-		WithoutGateway: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to build token stack: %w", err)
-	}
-
 	return &TokenRunner{
-		stack:      stack,
-		exchange:   stack.ExchangeService,
 		out:        out,
 		errOut:     errOut,
 		statePath:  statePath,
@@ -52,6 +40,27 @@ func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayP
 		replayPath: replayPath,
 		auditPath:  auditPath,
 	}, nil
+}
+
+func (r *TokenRunner) ensureStack(clock domain.Clock) error {
+	if r.stack != nil {
+		return nil
+	}
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:      r.statePath,
+		PrivKeyPath:    r.privPath,
+		PubJWKSPath:    r.pubPath,
+		ReplayPath:     r.replayPath,
+		AuditPath:      r.auditPath,
+		WithoutGateway: true,
+		Clock:          clock,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build token stack: %w", err)
+	}
+	r.stack = stack
+	r.exchange = stack.ExchangeService
+	return nil
 }
 
 // Close 는 TokenRunner 내부 스택 리소스를 정리한다.
@@ -113,6 +122,11 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 		return domain.ExitBadInput
 	}
 
+	if err := r.ensureStack(nil); err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitInternalError
+	}
+
 	req := token.IssueRequest{
 		ClientID:     *clientID,
 		ClientSecret: *clientSecret,
@@ -167,7 +181,7 @@ func (r *TokenRunner) runInspect(ctx context.Context, args []string) domain.Exit
 		return domain.ExitBadInput
 	}
 
-	header, claims, err := r.stack.TokenVerifier.InspectToken(*tokenStr)
+	header, claims, err := token.NewVerifier(nil, nil, nil, nil).InspectToken(*tokenStr)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "FAIL: [INSPECT_FAILED] %v\n", err)
 		return domain.ExitTokenInvalid
@@ -211,6 +225,11 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitBadInput
+	}
+
+	if err := r.ensureStack(nil); err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitInternalError
 	}
 
 	opts := token.VerifyOptions{
@@ -273,31 +292,19 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		return domain.ExitBadInput
 	}
 
-	// 가상 시계 지원
-	exchangeService := r.exchange
+	var clk domain.Clock
 	if *clockOffsetStr != "" {
 		d, err := parseNonNegativeClockOffset(*clockOffsetStr)
 		if err != nil {
 			fmt.Fprintf(r.errOut, "Error: %v\n", err)
 			return domain.ExitBadInput
 		}
-		offsetClock := domain.NewOffsetClock(domain.RealClock{}, d)
-		offsetStack, err := app.BuildStack(app.AppConfig{
-			StatePath:      r.statePath,
-			PrivKeyPath:    r.privPath,
-			PubJWKSPath:    r.pubPath,
-			ReplayPath:     r.replayPath,
-			AuditPath:      r.auditPath,
-			WithoutGateway: true,
-			Clock:          offsetClock,
-		})
-		if err != nil {
-			fmt.Fprintf(r.errOut, "Error: failed to build offset stack: %v\n", err)
-			return domain.ExitInternalError
-		}
-		defer offsetStack.Close()
+		clk = domain.NewOffsetClock(domain.RealClock{}, d)
+	}
 
-		exchangeService = offsetStack.ExchangeService
+	if err := r.ensureStack(clk); err != nil {
+		fmt.Fprintf(r.errOut, "Error: %v\n", err)
+		return domain.ExitInternalError
 	}
 
 	req := exchange.ExchangeRequest{
@@ -315,7 +322,7 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		Actor:   *clientID,
 	}
 
-	res, err := exchangeService.Exchange(ctx, req, auditCtx)
+	res, err := r.exchange.Exchange(ctx, req, auditCtx)
 	if err != nil {
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [EXCHANGE_DENIED] %s\n", reason)

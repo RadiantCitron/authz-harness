@@ -84,8 +84,14 @@ func EnsureKeyPair(privPath, pubPath string, clock domain.Clock) (string, error)
 		return "", fmt.Errorf("checkpoint: key generation failed: %w", err)
 	}
 	kid := kidOf(pub)
-	pb, _ := json.Marshal(privFile{KeyID: kid, PrivateKey: b64.EncodeToString(priv)})
-	ub, _ := json.Marshal(pubFile{KeyID: kid, PublicKey: b64.EncodeToString(pub)})
+	pb, err := json.Marshal(privFile{KeyID: kid, PrivateKey: b64.EncodeToString(priv)})
+	if err != nil {
+		return "", fmt.Errorf("checkpoint: marshal private key: %w", err)
+	}
+	ub, err := json.Marshal(pubFile{KeyID: kid, PublicKey: b64.EncodeToString(pub)})
+	if err != nil {
+		return "", fmt.Errorf("checkpoint: marshal public key: %w", err)
+	}
 	if err := storage.AtomicWriteFile(privPath, pb, 0o600); err != nil {
 		return "", fmt.Errorf("checkpoint: write private key: %w", err)
 	}

@@ -33,7 +33,7 @@ type SubagentRunner struct {
 func NewSubagentRunner(
 	stdout, stderr io.Writer,
 	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
-) (*SubagentRunner, error) {
+) *SubagentRunner {
 	return &SubagentRunner{
 		stdout:       stdout,
 		stderr:       stderr,
@@ -43,7 +43,7 @@ func NewSubagentRunner(
 		pubJWKSPath:  pubJWKSPath,
 		replayPath:   replayPath,
 		auditPath:    auditPath,
-	}, nil
+	}
 }
 
 // SetStdin 은 테스트 시 stdin 스트림을 재정의할 수 있도록 지원한다.

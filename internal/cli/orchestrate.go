@@ -29,7 +29,7 @@ type OrchestrateRunner struct {
 func NewOrchestrateRunner(
 	stdout, stderr io.Writer,
 	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
-) (*OrchestrateRunner, error) {
+) *OrchestrateRunner {
 	return &OrchestrateRunner{
 		stdout:       stdout,
 		stderr:       stderr,
@@ -38,7 +38,7 @@ func NewOrchestrateRunner(
 		pubJWKSPath:  pubJWKSPath,
 		replayPath:   replayPath,
 		auditPath:    auditPath,
-	}, nil
+	}
 }
 
 // SetWorkerBinaryPath 는 자식 프로세스로 실행할 바이너리 경로를 재정의한다 (테스트 지원).

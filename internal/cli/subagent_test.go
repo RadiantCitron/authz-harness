@@ -28,10 +28,7 @@ func TestSubagentRunner_TC01_NormalRead(t *testing.T) {
 
 	tokenStr := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create subagent runner: %v", err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	req := subagent.SubagentRequest{
 		Version:  "1.0",
@@ -67,10 +64,7 @@ func TestSubagentRunner_TC01_NormalRead(t *testing.T) {
 func TestSubagentRunner_TC02_InvalidJSONFrame(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
 
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create subagent runner: %v", err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	inBuf := bytes.NewBufferString("{broken-json-frame")
 	runner.SetStdin(inBuf)
@@ -92,10 +86,7 @@ func TestSubagentRunner_TC02_InvalidJSONFrame(t *testing.T) {
 func TestSubagentRunner_TC03_InvalidToken(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
 
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create subagent runner: %v", err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	req := subagent.SubagentRequest{
 		Version:  "1.0",
@@ -122,10 +113,7 @@ func TestSubagentRunner_TC04_AuthzDenied(t *testing.T) {
 	sub := "subagent-bob"
 	tokenStr := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create subagent runner: %v", err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	req := subagent.SubagentRequest{
 		Version:  "1.0",
@@ -166,10 +154,7 @@ func TestSubagentRunner_TC05_PathViolation(t *testing.T) {
 	rig.createGrant(t, sub, "operator", "file:read", "escape_link.txt")
 	tokenStr := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create subagent runner: %v", err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	req := subagent.SubagentRequest{
 		Version:  "1.0",
@@ -192,7 +177,7 @@ func TestSubagentRunner_TC05_PathViolation(t *testing.T) {
 
 func TestSubagentRunner_SubcommandValidation(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
-	runner, _ := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	if code := runner.Run(context.Background(), []string{}); code != domain.ExitBadInput {
 		t.Errorf("expected ExitBadInput for empty args, got %d", code)
@@ -208,10 +193,7 @@ func TestSubagentRunner_SubcommandValidation(t *testing.T) {
 // 로드맵 16 / 040 TC-040-12: -net-allow 검증
 func TestSubagentRunner_NetAllowFlag(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
-	runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 
 	runner.SetStdin(bytes.NewBufferString("{}"))
 	if c := runner.Run(context.Background(), []string{"worker", "-net-allow", "evil:80"}); c != domain.ExitBadInput {
@@ -250,10 +232,7 @@ func TestSubagentRunner_VerboseFlag(t *testing.T) {
 			rig.createGrant(t, sub, "operator", "file:read", testFile)
 			tokenStr := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-			runner, err := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := NewSubagentRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 			inBuf := &bytes.Buffer{}
 			_ = json.NewEncoder(inBuf).Encode(subagent.SubagentRequest{Version: "1.0", TraceID: "tr-verbose", Token: tokenStr, Action: "file:read", FilePath: testFile})
 			runner.SetStdin(inBuf)

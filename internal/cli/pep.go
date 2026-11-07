@@ -241,7 +241,9 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 
 		enc := json.NewEncoder(r.out)
 		enc.SetIndent("", "  ")
-		_ = enc.Encode(outObj)
+		if err := enc.Encode(outObj); err != nil {
+			fmt.Fprintf(r.errOut, "Error: failed to encode json output: %v\n", err)
+		}
 		return
 	}
 

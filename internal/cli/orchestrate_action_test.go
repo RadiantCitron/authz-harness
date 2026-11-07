@@ -19,10 +19,7 @@ func TestOrchestrateSpawn_ActionValidation(t *testing.T) {
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			rig := setupPEPCLITestRig(t)
-			runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-			if err != nil {
-				t.Fatal(err)
-			}
+			runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 			runner.SetWorkerBinaryPath(getTestBinary(t))
 			code := runner.Run(context.Background(), []string{"spawn", "-token", "not.a.jwt", "-action", tc.action, "-file", "x.txt"})
 			rejectedAtInput := code == domain.ExitBadInput && strings.Contains(rig.errOut.String(), "invalid")

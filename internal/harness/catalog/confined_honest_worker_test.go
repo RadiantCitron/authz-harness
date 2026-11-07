@@ -42,11 +42,7 @@ func (s *confinedHonestScenario) Metadata() harness.ScenarioMetadata {
 }
 
 func (s *confinedHonestScenario) Setup(ctx context.Context, env *harness.SandboxEnvironment) error {
-	f, err := os.OpenFile(env.AuditPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		return err
-	}
-	return f.Close()
+	return precreateAuditLock(env)
 }
 
 func (s *confinedHonestScenario) Execute(ctx context.Context, env *harness.SandboxEnvironment) (domain.ExitCode, error) {
@@ -87,10 +83,8 @@ func (s *confinedHonestScenario) Execute(ctx context.Context, env *harness.Sandb
 	pol := confinement.WorkerPolicy(env.RootDir, env.WorkspaceDir, filepath.Dir(env.StatePath), env.AuditPath)
 	pol.AllowConnectPorts = []int{port}
 	sp, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
-		BinaryPath: env.BinaryPath,
-		Args: []string{"subagent", "worker",
-			"-workspace", env.WorkspaceDir, "-state-file", env.StatePath, "-pub-jwks-file", env.PubJWKSPath,
-			"-replay-file", env.ReplayPath, "-audit-file", env.AuditPath, "-net-allow", u.Host},
+		BinaryPath:  env.BinaryPath,
+		Args:        orchestrator.WorkerArgs(env.WorkspaceDir, env.StatePath, env.PubJWKSPath, env.ReplayPath, env.AuditPath, u.Host, false),
 		Limits:      orchestrator.Limits{Timeout: 15 * time.Second},
 		Audit:       stack.AuditWriter,
 		Confiner:    confinement.WithLauncher(confinement.Platform(), env.BinaryPath),

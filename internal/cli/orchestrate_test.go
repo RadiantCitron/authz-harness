@@ -62,10 +62,7 @@ func TestOrchestrateRunner_TC06_NormalSpawn(t *testing.T) {
 	rig.createGrant(t, sub, "operator", "file:read", testFile)
 	tok := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create orchestrate runner: %v", err)
-	}
+	runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	runner.SetWorkerBinaryPath(bin)
 
 	rig.out.Reset()
@@ -95,10 +92,7 @@ func TestOrchestrateRunner_TC07_MissingRequiredArgs(t *testing.T) {
 	rig := setupPEPCLITestRig(t)
 	bin := getTestBinary(t)
 
-	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create orchestrate runner: %v", err)
-	}
+	runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	runner.SetWorkerBinaryPath(bin)
 
 	// -token 누락
@@ -129,10 +123,7 @@ func TestOrchestrateRunner_AT04_RejectsRemovedInjectFlag(t *testing.T) {
 	rig.createGrant(t, sub, "operator", "file:write", testFile)
 	tok := rig.issueToken(t, sub, "file:write", "authz-harness")
 
-	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create orchestrate runner: %v", err)
-	}
+	runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	runner.SetWorkerBinaryPath(bin)
 
 	auditBefore, err := os.ReadFile(rig.auditPath)
@@ -179,10 +170,7 @@ func TestOrchestrateRunner_TC08_HarvestDeniedExitCode(t *testing.T) {
 	sub := "subagent-worker-08"
 	tok := rig.issueToken(t, sub, "file:read", "authz-harness")
 
-	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create orchestrate runner: %v", err)
-	}
+	runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	runner.SetWorkerBinaryPath(bin)
 
 	rig.out.Reset()
@@ -225,10 +213,7 @@ func TestOrchestrateRunner_TC09_RevokedBeforeSpawn(t *testing.T) {
 	// 토큰 발급 뒤 PAP 로 Grant 회수 — 자식은 공유 장부에서 회수를 봐야 한다
 	rig.revokeGrant(t, gid)
 
-	runner, err := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-	if err != nil {
-		t.Fatalf("failed to create orchestrate runner: %v", err)
-	}
+	runner := NewOrchestrateRunner(rig.out, rig.errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 	runner.SetWorkerBinaryPath(bin)
 
 	rig.out.Reset()
@@ -301,11 +286,7 @@ func TestOrchestrateRunner_TC10_SingleAuditChain_And_Concurrency(t *testing.T) {
 			outBuf := &bytes.Buffer{}
 			errBuf := &bytes.Buffer{}
 
-			runner, err := NewOrchestrateRunner(outBuf, errBuf, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
-			if err != nil {
-				errCh <- fmt.Errorf("worker %d: runner create err: %w", idx, err)
-				return
-			}
+			runner := NewOrchestrateRunner(outBuf, errBuf, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath)
 			runner.SetWorkerBinaryPath(bin)
 
 			traceID := fmt.Sprintf("tr-concurr-%d-%d", idx, time.Now().UnixNano())

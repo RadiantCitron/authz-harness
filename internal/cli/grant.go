@@ -25,7 +25,7 @@ type GrantRunner struct {
 
 // NewGrantRunner 는 지정된 입출력 스트림과 파일 경로로 GrantRunner를 생성한다.
 func NewGrantRunner(out, errOut io.Writer, statePath, auditPath string) (*GrantRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath})
+	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath, WithoutGateway: true})
 	if err != nil {
 		return nil, err
 	}

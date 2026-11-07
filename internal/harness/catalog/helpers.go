@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"authz-harness/internal/app"
@@ -205,4 +206,14 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 		return domain.ExitInternalError, err
 	}
 	return res.ExitCode, nil
+}
+
+// precreateAuditLock 은 Landlock 이 존재하지 않는 파일에 규칙을 적용할 수 없으므로,
+// 감사 로그 잠금 파일(.lock)을 사전에 생성하여 격리 정책 위반을 방지한다.
+func precreateAuditLock(env *harness.SandboxEnvironment) error {
+	f, err := os.OpenFile(env.AuditPath+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("precreate audit lock: %w", err)
+	}
+	return f.Close()
 }

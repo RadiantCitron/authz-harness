@@ -134,19 +134,11 @@ func main() {
 			}
 			os.Exit(int(exitCode))
 		case "orchestrate":
-			orchRunner, err := cli.NewOrchestrateRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: failed to initialize orchestrate runner: %v\n", err)
-				os.Exit(int(domain.ExitInternalError))
-			}
+			orchRunner := cli.NewOrchestrateRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
 			exitCode := orchRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "subagent":
-			subRunner, err := cli.NewSubagentRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error: failed to initialize subagent runner: %v\n", err)
-				os.Exit(int(domain.ExitInternalError))
-			}
+			subRunner := cli.NewSubagentRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
 			exitCode := subRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "confine-exec": // 숨김 하위명령: 신뢰 런처 (사용법에 노출하지 않음)

@@ -47,11 +47,36 @@ func buildWorkerSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestrato
 	}
 
 	// 3. 상대 경로 파일인 경우 절대 경로로 정규화 (하위 프로세스 환경 차이 방지)
-	absState, _ := filepath.Abs(cfg.StatePath)
-	absPubJWKS, _ := filepath.Abs(cfg.PubJWKSPath)
-	absReplay, _ := filepath.Abs(cfg.ReplayPath)
-	absAudit, _ := filepath.Abs(cfg.AuditPath)
-	absWorkspace, _ := filepath.Abs(cfg.WorkspacePath)
+	absState, err := filepath.Abs(cfg.StatePath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve state path: %v\n", err)
+		return nil, nil, err
+	}
+	absPubJWKS, err := filepath.Abs(cfg.PubJWKSPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve pub jwks path: %v\n", err)
+		return nil, nil, err
+	}
+	absReplay, err := filepath.Abs(cfg.ReplayPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve replay path: %v\n", err)
+		return nil, nil, err
+	}
+	absAudit, err := filepath.Abs(cfg.AuditPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve audit path: %v\n", err)
+		return nil, nil, err
+	}
+	absWorkspace, err := filepath.Abs(cfg.WorkspacePath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve workspace path: %v\n", err)
+		return nil, nil, err
+	}
 
 	childArgs := orchestrator.WorkerArgs(absWorkspace, absState, absPubJWKS, absReplay, absAudit, cfg.NetAllow, cfg.Verbose)
 

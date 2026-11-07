@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -97,7 +98,7 @@ func recoverLocked(path string, clock domain.Clock) (*RecoveryResult, error) {
 		TraceID:   "audit-recover",
 		Actor:     "operator",
 		Action:    "audit.recovered",
-		Resource:  partialBase(res.PartialPath),
+		Resource:  filepath.Base(res.PartialPath),
 		Decision:  "allow",
 		Reason:    string(domain.ReasonAuditTailIncomplete),
 		Success:   true,
@@ -113,15 +114,6 @@ func recoverLocked(path string, clock domain.Clock) (*RecoveryResult, error) {
 		return nil, err
 	}
 	return res, nil
-}
-
-func partialBase(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[i+1:]
-		}
-	}
-	return p
 }
 
 // recoverNewline 은 T2(해시 검증을 통과한 온전한 기록에 줄바꿈만 빠진 꼬리)를 복구한다.
