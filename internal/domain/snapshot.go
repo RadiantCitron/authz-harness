@@ -18,6 +18,36 @@ type SubjectSnapshot struct {
 	Approvals []Approval `json:"approvals,omitempty"`
 }
 
+// ValidateLineageEpoch 는 주체 본인(sub, currentEpoch)과 조상 위임 사슬(act)의 Epoch 를 검증한다.
+// 본인 또는 조상의 제시 Epoch 가 현재 활성 Epoch 와 일치하지 않으면 ReasonSubjectEpochRevoked 를 반환한다.
+// 모두 정상이면 빈 Reason("")을 반환한다.
+func (s *SubjectSnapshot) ValidateLineageEpoch(sub string, currentEpoch Epoch, act *ActorClaim) Reason {
+	if s == nil {
+		return ReasonNoActiveGrant
+	}
+	// 1. 주체 본인 Epoch 검증
+	epoch := Epoch(currentEpoch)
+	if epoch < 1 {
+		epoch = 1
+	}
+	if epoch != s.CurrentEpoch {
+		return ReasonSubjectEpochRevoked
+	}
+
+	// 2. 위임 조상 사슬(act) 연쇄 검증
+	if act != nil {
+		if s.SubjectEpochs == nil {
+			return ReasonSubjectEpochRevoked
+		}
+		for a := act; a != nil; a = a.Actor {
+			if a.Epoch < 1 || s.SubjectEpochs.Get(a.Subject) != a.Epoch {
+				return ReasonSubjectEpochRevoked
+			}
+		}
+	}
+	return ""
+}
+
 // SnapshotProvider 는 PDP가 주체 상태 스냅샷을 조회하는 도메인 포트(DIP)다.
 type SnapshotProvider interface {
 	GetSubjectSnapshot(ctx context.Context, subject string) (*SubjectSnapshot, error)
