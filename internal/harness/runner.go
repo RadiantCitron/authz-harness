@@ -289,8 +289,10 @@ func (r *DefaultRunner) RunScenario(ctx context.Context, id string) (ScenarioRes
 		assertionRes.FailureReasons = append(assertionRes.FailureReasons, "invariant violation: "+iv.Detail)
 	}
 
+	var dErr *domain.Error
+	isExpectedDomainErr := errors.As(execErr, &dErr) && dErr.ExitCode == actualExitCode
 	overallPassed := assertionRes.Passed && !invariantBroken &&
-		(execErr == nil || actualExitCode != domain.ExitSuccess)
+		(execErr == nil || isExpectedDomainErr)
 
 	return ScenarioResult{
 		Metadata:  meta,

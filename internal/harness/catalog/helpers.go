@@ -182,7 +182,7 @@ func executeHarnessAction(ctx context.Context, env *harness.SandboxEnvironment, 
 			// 감사 실패 등 도메인 에러 판정
 			var dErr *domain.Error
 			if errors.As(err, &dErr) {
-				return dErr.ExitCode, err
+				return dErr.ExitCode, nil
 			}
 			return domain.ExitInternalError, err
 		}

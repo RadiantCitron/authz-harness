@@ -586,7 +586,7 @@ func TestRunner_InvariantViolationJudgement(t *testing.T) {
 	}{
 		{"TC-010-01 에러 없음", domain.ExitAuthzDenied, nil, true, false},
 		{"TC-010-02 불변식 위반", domain.ExitAuthzDenied, Invariantf("child alive"), false, true},
-		{"TC-010-03 일반 에러 + 비0 코드", domain.ExitAuthzDenied, errors.New("audit write failed"), true, false},
+		{"TC-010-03 일반 에러 발생 시 실패", domain.ExitAuthzDenied, errors.New("audit write failed"), false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
