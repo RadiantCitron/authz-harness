@@ -3,7 +3,6 @@ package token
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -39,7 +38,6 @@ type ReplayLedger interface {
 
 // FileReplayLedger 는 storage.AtomicFileStore 기반으로 원자적 동기화를 보장하는 ReplayLedger 구현체다.
 type FileReplayLedger struct {
-	mu    sync.Mutex
 	store *storage.AtomicFileStore[ReplayData]
 	clock domain.Clock
 }
@@ -77,9 +75,6 @@ func NewFileReplayLedger(filePath string, clock domain.Clock) (*FileReplayLedger
 
 // CheckAndConsume 는 jti 가 이미 원장에 존재하는지 검사하고, 없으면 등록(소비)한다.
 func (l *FileReplayLedger) CheckAndConsume(jti string, expiresAt time.Time) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	return l.store.Update(func(data *ReplayData) error {
 		now := l.clock.Now()
 
@@ -113,15 +108,9 @@ func (l *FileReplayLedger) CheckAndConsume(jti string, expiresAt time.Time) erro
 
 // IsConsumed 는 jti 가 원장에 있는지 읽기 전용으로 확인한다.
 func (l *FileReplayLedger) IsConsumed(jti string) (bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	data, err := l.store.Read()
 	if err != nil {
 		return false, err
-	}
-	if data == nil {
-		return false, nil
 	}
 	for _, e := range data.Entries {
 		if e.JTI == jti {
@@ -133,9 +122,6 @@ func (l *FileReplayLedger) IsConsumed(jti string) (bool, error) {
 
 // PruneExpired 는 만료된 jti 항목을 파일에서 완전히 정리한다.
 func (l *FileReplayLedger) PruneExpired(now time.Time) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	return l.store.Update(func(data *ReplayData) error {
 		validEntries := make([]ReplayEntry, 0, len(data.Entries))
 		for _, entry := range data.Entries {

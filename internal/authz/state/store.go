@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"authz-harness/internal/domain"
@@ -46,7 +45,6 @@ type Store interface {
 // FileStore 는 storage.AtomicFileStore 기반의 파일 시스템 저장소 구현체다.
 type FileStore struct {
 	store *storage.AtomicFileStore[GrantsState]
-	mu    sync.Mutex
 	clock domain.Clock
 }
 
@@ -92,15 +90,9 @@ func NewFileStore(path string, opts ...Option) (*FileStore, error) {
 // Load 는 공유 락(LOCK_SH) 하에서 상태 파일을 읽어 역직렬화한다.
 // 파일이 존재하지 않는 경우 빈 초기 상태를 반환한다.
 func (s *FileStore) Load() (*GrantsState, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	state, err := s.store.Read()
 	if err != nil {
 		return nil, err
-	}
-	if state == nil {
-		state = NewEmptyGrantsState(s.clock.Now())
 	}
 	ensureStateFields(state)
 	return state, nil
@@ -112,9 +104,6 @@ func (s *FileStore) Save(state *GrantsState) error {
 		return errors.New("state: state cannot be nil")
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.normalizeState(state)
 	return s.store.Write(state)
 }
@@ -124,9 +113,6 @@ func (s *FileStore) Update(fn func(state *GrantsState) error) error {
 	if fn == nil {
 		return errors.New("state: update function cannot be nil")
 	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	return s.store.Update(func(state *GrantsState) error {
 		ensureStateFields(state)
