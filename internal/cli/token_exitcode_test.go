@@ -42,13 +42,11 @@ func corruptedRunner(t *testing.T, privPath, pubPath string) (*TokenRunner, *byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { r.Close() })
 	return r, out, errOut
 }
 
 func TestExit_C1_IssueAuditCorrupted(t *testing.T) {
-	r, _, _, priv, pub := setupCLITestRig(t)
-	r.Close()
+	_, _, _, priv, pub := setupCLITestRig(t)
 	r2, _, errOut := corruptedRunner(t, priv, pub)
 	if c := r2.Run(context.Background(), issueArgs); c != domain.ExitAuditFailure {
 		t.Fatalf("want 15 got %d (%s)", c, errOut)
@@ -58,7 +56,6 @@ func TestExit_C1_IssueAuditCorrupted(t *testing.T) {
 func TestExit_C2_VerifyExchangeAuditCorrupted(t *testing.T) {
 	r, out, _, priv, pub := setupCLITestRig(t)
 	tok := issueToken(t, r, out)
-	r.Close()
 	r2, _, errOut := corruptedRunner(t, priv, pub)
 	if c := r2.Run(context.Background(), []string{"verify", "--token", tok, "--expected-aud", "authz-service"}); c != domain.ExitAuditFailure {
 		t.Errorf("verify: want 15 got %d (%s)", c, errOut)
@@ -72,7 +69,6 @@ func TestExit_C2_VerifyExchangeAuditCorrupted(t *testing.T) {
 
 func TestExit_C3_SubjectNotAllowed(t *testing.T) {
 	r, _, errOut, _, _ := setupCLITestRig(t)
-	defer r.Close()
 	c := r.Run(context.Background(), []string{"issue", "--client-id", "client-subagent", "--client-secret", "subagent-secret-key-02",
 		"--sub", "intruder", "--scope", "file:read:a"})
 	if c != domain.ExitAuthzDenied {
@@ -82,7 +78,6 @@ func TestExit_C3_SubjectNotAllowed(t *testing.T) {
 
 func TestExit_C4_WrongSecret(t *testing.T) {
 	r, _, errOut, _, _ := setupCLITestRig(t)
-	defer r.Close()
 	c := r.Run(context.Background(), []string{"issue", "--client-id", "client-orchestrator", "--client-secret", "wrong",
 		"--sub", "worker-01", "--scope", "file:read:a"})
 	if c != domain.ExitTokenInvalid {

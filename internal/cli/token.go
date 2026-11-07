@@ -16,8 +16,6 @@ import (
 
 // TokenRunner 는 `token` 하위 명령어(issue, inspect, verify, exchange) 실행을 주관하는 러너다.
 type TokenRunner struct {
-	stack      *app.AppStack
-	exchange   exchange.Service
 	out        io.Writer
 	errOut     io.Writer
 	statePath  string
@@ -28,8 +26,7 @@ type TokenRunner struct {
 }
 
 // NewTokenRunner 는 TokenRunner 를 생성한다.
-// 주의: token inspect 는 서명 검증/키 생성이 불필요하므로 즉시 인스턴스만 생성하고,
-// 하위 명령(issue, verify, exchange) 실행 시점에 필요한 스택을 지연 조립한다.
+// 무상태(Stateless) 러너로서 각 서브커맨드 실행 시 필요한 스택을 독립 조립하고 즉시 해제한다.
 func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayPath, auditPath string) (*TokenRunner, error) {
 	return &TokenRunner{
 		out:        out,
@@ -40,35 +37,6 @@ func NewTokenRunner(out, errOut io.Writer, statePath, privPath, pubPath, replayP
 		replayPath: replayPath,
 		auditPath:  auditPath,
 	}, nil
-}
-
-func (r *TokenRunner) ensureStack(clock domain.Clock) error {
-	if r.stack != nil {
-		return nil
-	}
-	stack, err := app.BuildStack(app.AppConfig{
-		StatePath:      r.statePath,
-		PrivKeyPath:    r.privPath,
-		PubJWKSPath:    r.pubPath,
-		ReplayPath:     r.replayPath,
-		AuditPath:      r.auditPath,
-		WithoutGateway: true,
-		Clock:          clock,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to build token stack: %w", err)
-	}
-	r.stack = stack
-	r.exchange = stack.ExchangeService
-	return nil
-}
-
-// Close 는 TokenRunner 내부 스택 리소스를 정리한다.
-func (r *TokenRunner) Close() error {
-	if r.stack != nil {
-		return r.stack.Close()
-	}
-	return nil
 }
 
 // Run 은 token 하위 명령어를 파싱하고 라우팅한다.
@@ -122,10 +90,19 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 		return domain.ExitBadInput
 	}
 
-	if err := r.ensureStack(nil); err != nil {
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:      r.statePath,
+		PrivKeyPath:    r.privPath,
+		PubJWKSPath:    r.pubPath,
+		ReplayPath:     r.replayPath,
+		AuditPath:      r.auditPath,
+		WithoutGateway: true,
+	})
+	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitInternalError
 	}
+	defer stack.Close()
 
 	req := token.IssueRequest{
 		ClientID:     *clientID,
@@ -148,7 +125,7 @@ func (r *TokenRunner) runIssue(ctx context.Context, args []string) domain.ExitCo
 		Actor:   *clientID,
 	}
 
-	result, err := r.stack.TokenIssuer.IssueToken(req, opts, auditCtx)
+	result, err := stack.TokenIssuer.IssueToken(req, opts, auditCtx)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "FAIL: [ISSUE_DENIED] %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitTokenInvalid)
@@ -227,10 +204,18 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitBadInput
 	}
 
-	if err := r.ensureStack(nil); err != nil {
+	stack, err := app.BuildStack(app.AppConfig{
+		PubJWKSPath:    r.pubPath,
+		ReplayPath:     r.replayPath,
+		AuditPath:      r.auditPath,
+		WithoutGateway: true,
+		VerifyOnly:     true,
+	})
+	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitInternalError
 	}
+	defer stack.Close()
 
 	opts := token.VerifyOptions{
 		ExpectedAudience: *expectedAud,
@@ -244,7 +229,7 @@ func (r *TokenRunner) runVerify(ctx context.Context, args []string) domain.ExitC
 		Actor:   "cli-verifier",
 	}
 
-	verified, err := r.stack.TokenVerifier.VerifyToken(*tokenStr, opts, auditCtx)
+	verified, err := stack.TokenVerifier.VerifyToken(*tokenStr, opts, auditCtx)
 	if err != nil {
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [TOKEN_VERIFY_BLOCKED] %s\n", reason)
@@ -302,10 +287,20 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		clk = domain.NewOffsetClock(domain.RealClock{}, d)
 	}
 
-	if err := r.ensureStack(clk); err != nil {
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:      r.statePath,
+		PrivKeyPath:    r.privPath,
+		PubJWKSPath:    r.pubPath,
+		ReplayPath:     r.replayPath,
+		AuditPath:      r.auditPath,
+		WithoutGateway: true,
+		Clock:          clk,
+	})
+	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitInternalError
 	}
+	defer stack.Close()
 
 	req := exchange.ExchangeRequest{
 		ClientID:     *clientID,
@@ -322,7 +317,7 @@ func (r *TokenRunner) runExchange(ctx context.Context, args []string) domain.Exi
 		Actor:   *clientID,
 	}
 
-	res, err := r.exchange.Exchange(ctx, req, auditCtx)
+	res, err := stack.ExchangeService.Exchange(ctx, req, auditCtx)
 	if err != nil {
 		reason := extractReason(err)
 		fmt.Fprintf(r.out, "FAIL: [EXCHANGE_DENIED] %s\n", reason)

@@ -116,10 +116,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := tokenRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := tokenRunner.Close(); err != nil {
-				logger.Error("failed to close token runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "pep":
 			pepRunner, err := cli.NewPEPRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)

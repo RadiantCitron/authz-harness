@@ -392,3 +392,106 @@ func TestTokenRunner_NegativeClockOffset_Rejected(t *testing.T) {
 		t.Fatalf("expected 'must not be negative' in stderr, got: %s", errOut.String())
 	}
 }
+
+// TestTokenRunner_ReusedRunner_ClockOffset_Honored 는 동일한 TokenRunner 인스턴스로
+// issue 후 exchange --clock-offset +2h 호출 시, 기존 스택 캐싱 버그(AP4-01) 없이
+// 주입된 가상 시계(OffsetClock)가 정상 적용되어 만료된 부모 토큰이 거부(ExitTokenInvalid 12)됨을 검증한다.
+func TestTokenRunner_ReusedRunner_ClockOffset_Honored(t *testing.T) {
+	runner, out, errOut, _, _ := setupCLITestRig(t)
+
+	// 1. 1시간 TTL 부모 토큰 발급 (RealClock 기준)
+	issueArgs := []string{
+		"issue",
+		"--client-id", "client-orchestrator",
+		"--client-secret", "orchestrator-secret-key-01",
+		"--sub", "orchestrator-main",
+		"--scope", "file:read:docs/plan.txt",
+		"--aud", "authz-service",
+		"--ttl", "1h",
+	}
+	if code := runner.Run(context.Background(), issueArgs); code != domain.ExitSuccess {
+		t.Fatalf("issue failed: %d, err: %s", code, errOut.String())
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	parentTok := lines[len(lines)-1]
+	out.Reset()
+	errOut.Reset()
+
+	// 2. 동일 runner 인스턴스로 exchange --clock-offset +2h 실행
+	// 부모 토큰은 1시간 후 만료이므로, +2시간 시계에서는 반드시 만료(TOKEN_EXPIRED) 거부되어야 함.
+	exchangeArgs := []string{
+		"exchange",
+		"--client-id", "client-subagent",
+		"--client-secret", "subagent-secret-key-02",
+		"--parent-token", parentTok,
+		"--child-sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt",
+		"--ttl", "30m",
+		"--clock-offset", "+2h",
+	}
+	code := runner.Run(context.Background(), exchangeArgs)
+	if code != domain.ExitTokenInvalid {
+		t.Fatalf("expected exchange with +2h offset on 1h token to return ExitTokenInvalid(12), got %d, out: %s, err: %s",
+			code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "TOKEN_EXPIRED") {
+		t.Fatalf("expected 'TOKEN_EXPIRED' in stdout, got: %s", out.String())
+	}
+}
+
+// TestTokenRunner_Verify_NoZoneAPrivateKeyRequired 는 검증자 환경에서
+// Zone A 개인키(privPath)가 아예 존재하지 않아도 token verify 가 정상 동작하며,
+// 불필요하게 Zone A 개인키 파일이 디스크에 생성되지 않음을 검증한다 (VerifyOnly 격리).
+func TestTokenRunner_Verify_NoZoneAPrivateKeyRequired(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	statePath := filepath.Join(tmpDir, "grants_state.json")
+	privPath := filepath.Join(tmpDir, "signing_keys.priv.json") // 생성하지 않음!
+	pubPath := filepath.Join(tmpDir, "jwks.pub.json")
+	replayPath := filepath.Join(tmpDir, "replay_ledger.json")
+	auditPath := filepath.Join(tmpDir, "audit.jsonl")
+
+	// 정상 토큰 1개와 pubPath(JWKS)만 별도 발급 장치에서 준비
+	issuerDir := t.TempDir()
+	issuerPriv := filepath.Join(issuerDir, "signing_keys.priv.json")
+	issuerPub := pubPath // 공개키는 공유
+	issuerRunner, err := NewTokenRunner(&bytes.Buffer{}, &bytes.Buffer{}, statePath, issuerPriv, issuerPub, replayPath, auditPath)
+	if err != nil {
+		t.Fatalf("failed to create issuer runner: %v", err)
+	}
+	var issueOut, issueErr bytes.Buffer
+	issuerRunner.out = &issueOut
+	issuerRunner.errOut = &issueErr
+	code := issuerRunner.Run(context.Background(), []string{
+		"issue",
+		"--client-id", "client-orchestrator",
+		"--client-secret", "orchestrator-secret-key-01",
+		"--sub", "worker-01",
+		"--scope", "file:read:docs/plan.txt",
+		"--aud", "authz-service",
+	})
+	if code != domain.ExitSuccess {
+		t.Fatalf("failed to issue token: %d, err: %s", code, issueErr.String())
+	}
+	lines := strings.Split(strings.TrimSpace(issueOut.String()), "\n")
+	tok := lines[len(lines)-1]
+
+	// 이제 privPath 가 존재하지 않는 검증자 러너 생성
+	var verifyOut, verifyErr bytes.Buffer
+	verifierRunner, err := NewTokenRunner(&verifyOut, &verifyErr, statePath, privPath, pubPath, replayPath, auditPath)
+	if err != nil {
+		t.Fatalf("failed to create verifier runner: %v", err)
+	}
+
+	// verify 실행
+	vCode := verifierRunner.Run(context.Background(), []string{"verify", "--token", tok})
+	if vCode != domain.ExitSuccess {
+		t.Fatalf("expected verify to succeed without private key, got %d, out: %s, err: %s",
+			vCode, verifyOut.String(), verifyErr.String())
+	}
+
+	// Zone A 비밀키 파일이 검증 과정에서 생성되지 않았는지 확인 (Zero Leakage / VerifyOnly)
+	if _, err := os.Stat(privPath); !os.IsNotExist(err) {
+		t.Fatalf("expected privPath to NOT exist in verify-only mode, but file was created: %v", err)
+	}
+}
