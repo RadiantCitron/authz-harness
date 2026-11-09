@@ -202,7 +202,12 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 			if pipSvc != nil {
 				exOpts = append(exOpts, exchange.WithSnapshotProvider(pipSvc))
 			}
-			exchangeSvc = exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock, exOpts...)
+			es, err := exchange.NewExchangeService(tokenIssuer, tokenVerifier, clientReg, nil, auditWriter, cfg.Clock, exOpts...)
+			if err != nil {
+				_ = auditWriter.Close()
+				return nil, fmt.Errorf("app builder: exchange service: %w", err)
+			}
+			exchangeSvc = es
 		}
 	}
 

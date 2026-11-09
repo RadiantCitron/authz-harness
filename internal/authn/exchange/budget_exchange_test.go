@@ -67,7 +67,10 @@ func newBudgetEnv(t *testing.T, withExchangeLedger, withIssuerLedger bool) *budg
 	if withExchangeLedger {
 		eopts = append(eopts, exchange.WithBudgetLedger(ledger))
 	}
-	svc := exchange.NewExchangeService(issuer, verifier, clients, nil, aw, clk, eopts...)
+	svc, err := exchange.NewExchangeService(issuer, verifier, clients, nil, aw, clk, eopts...)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &budgetEnv{svc, issuer, verifier, ledger, ledgerP, clk, filepath.Join(dir, "audit.jsonl"), aw}
 }
 

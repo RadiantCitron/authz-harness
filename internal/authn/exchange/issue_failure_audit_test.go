@@ -23,7 +23,10 @@ func TestExchange_T8_ChildIssueFailureKeepsExchangeOutcome(t *testing.T) {
 	e := newBudgetEnv(t, false, false)
 	parent := e.root(t, nil).TokenString
 	issuer := token.NewService(noActiveKey{}, token.NewInMemoryClientRegistry(), e.aw, e.clk)
-	svc := exchange.NewExchangeService(issuer, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk)
+	svc, err := exchange.NewExchangeService(issuer, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk)
+	if err != nil {
+		t.Fatalf("NewExchangeService failed: %v", err)
+	}
 	trace := domain.AuditContext{TraceID: "trace-t8", Actor: "t8"}
 
 	res, err := svc.Exchange(context.Background(), exReq(parent, "worker-01", nil), trace)

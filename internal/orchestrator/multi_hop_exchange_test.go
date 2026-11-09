@@ -147,7 +147,10 @@ func TestMultiHop_ExchangeFailureExitCode(t *testing.T) {
 	t.Run("교환 감사 기록 실패는 15", func(t *testing.T) {
 		e := newHopEnv(t)
 		// 거부 감사를 쓰지 못하는 교환 서비스(같은 발급기·검증기, 감사기만 실패)를 주입한다.
-		failing := exchange.NewExchangeService(e.stack.TokenIssuer, e.stack.TokenVerifier, e.stack.ClientReg, nil, failingAudit{}, domain.RealClock{})
+		failing, err := exchange.NewExchangeService(e.stack.TokenIssuer, e.stack.TokenVerifier, e.stack.ClientReg, nil, failingAudit{}, domain.RealClock{})
+		if err != nil {
+			t.Fatalf("NewExchangeService failed: %v", err)
+		}
 		exit, err := e.run(t, e.cfg, failing, "file:read", "file:write")
 		if err == nil {
 			t.Fatal("audit failure must fail closed")

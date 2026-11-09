@@ -118,8 +118,12 @@ func snapCases() map[string]func(t *testing.T) *budgetEnv {
 		return err
 	}
 	withSnaps := func(e *budgetEnv, sp domain.SnapshotProvider) *exchange.ExchangeService {
-		return exchange.NewExchangeService(e.issuer, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk,
+		s, err := exchange.NewExchangeService(e.issuer, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk,
 			exchange.WithBudgetLedger(e.ledger), exchange.WithSnapshotProvider(sp))
+		if err != nil {
+			panic(err)
+		}
+		return s
 	}
 	return map[string]func(t *testing.T) *budgetEnv{
 		"client_auth": run(func(t *testing.T, e *budgetEnv) error {
@@ -163,8 +167,11 @@ func snapCases() map[string]func(t *testing.T) *budgetEnv {
 			return ex(e, exReq(r.TokenString, "worker-02", &domain.Budget{MaxCalls: 3}))
 		}),
 		"token_issue_fail": run(func(t *testing.T, e *budgetEnv) error {
-			svc := exchange.NewExchangeService(&failingIssuer{}, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk)
-			_, err := svc.Exchange(context.Background(), exReq(plain(e, t), "worker-01", nil), trace)
+			svc, err := exchange.NewExchangeService(&failingIssuer{}, e.verifier, token.NewInMemoryClientRegistry(), nil, e.aw, e.clk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = svc.Exchange(context.Background(), exReq(plain(e, t), "worker-01", nil), trace)
 			return err
 		}),
 		"success_plain": run(func(t *testing.T, e *budgetEnv) error { return ex(e, exReq(plain(e, t), "worker-01", nil)) }),

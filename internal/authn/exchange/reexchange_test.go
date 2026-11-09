@@ -209,7 +209,7 @@ func TestExchange_WithSnapshotProvider_EarlyEpochRejection(t *testing.T) {
 			"worker-01": 1,
 		},
 	}
-	svc := exchange.NewExchangeService(
+	svc, err := exchange.NewExchangeService(
 		issuer,
 		verifier,
 		clients,
@@ -218,6 +218,9 @@ func TestExchange_WithSnapshotProvider_EarlyEpochRejection(t *testing.T) {
 		clk,
 		exchange.WithSnapshotProvider(sp),
 	)
+	if err != nil {
+		t.Fatalf("NewExchangeService failed: %v", err)
+	}
 
 	// 1. lead-01 (Epoch 1) -> mid-01 교환 성공
 	p0, err := issuer.IssueToken(token.IssueRequest{

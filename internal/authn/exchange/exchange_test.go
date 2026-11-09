@@ -74,7 +74,10 @@ func setupTestHarness(t *testing.T, now time.Time) (*exchange.ExchangeService, *
 	verifier := token.NewVerifier(keyMgr, replayLedger, auditWriter, clk)
 	validator := exchange.NewDownscopeValidator()
 
-	svc := exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, clk)
+	svc, err := exchange.NewExchangeService(issuer, verifier, clients, validator, auditWriter, clk)
+	if err != nil {
+		t.Fatalf("NewExchangeService failed: %v", err)
+	}
 
 	return svc, issuer, verifier, keyMgr, auditWriter, auditPath, clk
 }

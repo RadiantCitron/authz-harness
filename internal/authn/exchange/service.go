@@ -51,7 +51,6 @@ type ExchangeService struct {
 	budgets     budget.Ledger
 	snapshots   domain.SnapshotProvider
 	engine      *pipeline.Engine[exchangeCall]
-	engineErr   error
 }
 
 // Option 은 ExchangeService 의 선택적 의존성 주입 옵션이다.
@@ -77,7 +76,7 @@ func NewExchangeService(
 	auditWriter audit.Writer,
 	clock domain.Clock,
 	opts ...Option,
-) *ExchangeService {
+) (*ExchangeService, error) {
 	if clock == nil {
 		clock = domain.RealClock{}
 	}
@@ -98,8 +97,12 @@ func NewExchangeService(
 	for _, opt := range opts {
 		opt(s)
 	}
-	s.engine, s.engineErr = pipeline.New[exchangeCall](s.assemble(), nil)
-	return s
+	eng, err := pipeline.New[exchangeCall](s.assemble(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("exchange: failed to assemble pipeline: %w", err)
+	}
+	s.engine = eng
+	return s, nil
 }
 
 // exchangeCall 은 파이프라인이 단계마다 채워 가는 한 번의 교환 상태다. 필드마다 채우는 단계를 밝힌다.
@@ -156,24 +159,19 @@ func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
 }
 
 // Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
-// 출구는 맨 끝 return 하나뿐이다. 조립 실패(engineErr)는 엔진이 없어 감사 마감 대상이 아니므로 Fail-Closed 에러만 담는다.
+// 출구는 맨 끝 return 하나뿐이다.
 func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (res *ExchangeResult, err error) {
-	if s.engineErr != nil {
-		err = domain.NewError(domain.ReasonInternalError, "exchange pipeline assembly failed (fail-closed)", s.engineErr)
-	} else {
-		now := s.clock.Now().UTC()
-		traceID := auditCtx.TraceID
-		if traceID == "" {
-			traceID = fmt.Sprintf("trace-%d", now.UnixNano())
-		}
-		actor := auditCtx.Actor
-		if actor == "" {
-			actor = req.ClientID
-		}
-		c := &exchangeCall{req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
-		res, err = s.finalize(c, s.engine.Run(ctx, c))
+	now := s.clock.Now().UTC()
+	traceID := auditCtx.TraceID
+	if traceID == "" {
+		traceID = fmt.Sprintf("trace-%d", now.UnixNano())
 	}
-	return res, err
+	actor := auditCtx.Actor
+	if actor == "" {
+		actor = req.ClientID
+	}
+	c := &exchangeCall{req: req, auditCtx: auditCtx, now: now, traceID: traceID, actor: actor}
+	return s.finalize(c, s.engine.Run(ctx, c))
 }
 
 // finalize 는 단일 마감이다. 거부 감사, AUDIT_LOG_FAILED 승격, 성공 감사를 한 곳에서 처리한다.

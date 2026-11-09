@@ -20,9 +20,9 @@ func (noSnaps) GetSubjectSnapshot(context.Context, string) (*domain.SubjectSnaps
 
 // TC-080 2층위: 조립 목록은 domain.ExchangeStages() 와 ID·순서·성격·조건부가 같다.
 func TestAssembleMatchesExchangeStages(t *testing.T) {
-	s := NewExchangeService(nil, nil, nil, nil, nil, nil, WithBudgetLedger(budget.Ledger(nil)), WithSnapshotProvider(noSnaps{}))
-	if s.engineErr != nil {
-		t.Fatal(s.engineErr)
+	s, err := NewExchangeService(nil, nil, nil, nil, nil, nil, WithBudgetLedger(budget.Ledger(nil)), WithSnapshotProvider(noSnaps{}))
+	if err != nil {
+		t.Fatal(err)
 	}
 	steps := s.assemble()
 	specs := domain.ExchangeStages()
@@ -45,7 +45,10 @@ func TestAssembleMatchesExchangeStages(t *testing.T) {
 
 // 조건부 단계는 스냅샷 공급자·예산 관여 여부에 따라 건너뛴다.
 func TestConditionalStepsApply(t *testing.T) {
-	bare := NewExchangeService(nil, nil, nil, nil, nil, nil)
+	bare, err := NewExchangeService(nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, st := range bare.assemble() {
 		if st.ID == string(domain.StageLineageEpoch) && st.Applies(&exchangeCall{}) {
 			t.Error("lineage_epoch must be skipped without a snapshot provider")
@@ -60,7 +63,10 @@ func TestConditionalStepsApply(t *testing.T) {
 
 // TC-080-08: budget_reserve 를 소비로 바꾼 변이는 조립이 거부된다(등급 하강).
 func TestAssembleRejectsReserveAsConsume(t *testing.T) {
-	s := NewExchangeService(nil, nil, nil, nil, nil, nil)
+	s, err := NewExchangeService(nil, nil, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	steps := s.assemble()
 	steps[len(steps)-1].Kind = pipeline.Consume
 	if _, err := pipeline.New[exchangeCall](steps, nil); err == nil {
