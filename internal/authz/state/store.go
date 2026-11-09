@@ -1,3 +1,15 @@
+// Package state 는 Zone B 권한 상태(.authz-state/public/grants_state.json)의 직렬화 모델 및 동시성 안전한 저장소(Store)를 제공한다.
+//
+// [저장소 동시성 및 원자성 원칙]
+// 1. 단일 파일 잠금 (flock 기반 storage.AtomicFileStore):
+//   - 다중 프로세스 및 다중 고루틴 환경에서 상태 파일을 안전하게 공유하기 위해 storage.AtomicFileStore 제네릭 엔진을 활용한다.
+//   - 읽기 시 공유 락(syscall.LOCK_SH), 쓰기 시 배타적 락(syscall.LOCK_EX)을 사용한다.
+//
+// 2. 원자적 교체 (Atomic Rename):
+//   - 디스크 쓰기 시 임시 파일에 먼저 기록하고 fsync 후 목적 경로로 atomic rename 하므로, 전원 차단이나 충돌 시에도 파일이 깨지지 않는다.
+//
+// 3. 방어적 정규화 (ensureStateFields):
+//   - JSON 역직렬화 시 Grants, Epochs, Approvals 슬라이스나 맵이 nil 로 풀리지 않도록 빈 인스턴스로 자동 보정한다 (Go typed nil / nil slice 방어).
 package state
 
 import (
@@ -13,11 +25,20 @@ import (
 
 // GrantsState 는 Zone B 상태 파일(.authz-state/public/grants_state.json)의 직렬화 모델이다.
 type GrantsState struct {
-	Version   int                   `json:"version"`
-	UpdatedAt time.Time             `json:"updated_at"`
-	Grants    []domain.Grant        `json:"grants"`
-	Epochs    domain.SecurityEpochs `json:"epochs"`
-	Approvals []domain.Approval     `json:"approvals,omitempty"`
+	// Version 은 상태 파일의 스키마 버전 번호다.
+	Version int `json:"version"`
+
+	// UpdatedAt 은 마지막 상태 갱신 UTC 시각이다.
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Grants 는 전체 주체에 대한 권한 부여 및 회수 이력 목록이다.
+	Grants []domain.Grant `json:"grants"`
+
+	// Epochs 는 주체별 Security Epoch 세대 맵이다.
+	Epochs domain.SecurityEpochs `json:"epochs"`
+
+	// Approvals 는 발급되어 유효한 1회성 사람 승인(Approval) 목록이다.
+	Approvals []domain.Approval `json:"approvals,omitempty"`
 }
 
 // NewEmptyGrantsState 는 주어진 시각을 UpdatedAt 으로 하는 기본 버전 1의 비어있는 GrantsState 구조체를 반환한다.
@@ -30,7 +51,7 @@ func NewEmptyGrantsState(now time.Time) *GrantsState {
 	}
 }
 
-// Store 는 Zone B 상태 파일을 동시성 안전하게 다루는 저장소 인터페이스다.
+// Store 는 Zone B 상태 파일을 동시성 안전하게 다루는 DIP 저장소 인터페이스다.
 type Store interface {
 	// Load 는 상태 파일을 읽어 스냅샷을 반환한다. 파일이 없으면 초기화된 빈 상태를 반환한다.
 	Load() (*GrantsState, error)
@@ -111,6 +132,7 @@ func (s *FileStore) Update(fn func(state *GrantsState) error) error {
 	})
 }
 
+// ensureStateFields 는 역직렬화 후 슬라이스나 맵이 nil 일 경우 빈 컨테이너로 초기화하여 nil 역참조를 방지한다.
 func ensureStateFields(state *GrantsState) {
 	if state.Grants == nil {
 		state.Grants = make([]domain.Grant, 0)
@@ -123,6 +145,7 @@ func ensureStateFields(state *GrantsState) {
 	}
 }
 
+// normalizeState 는 디스크 저장 직전에 UpdatedAt 과 버전 필드를 정규화한다.
 func (s *FileStore) normalizeState(state *GrantsState) {
 	state.UpdatedAt = s.clock.Now().UTC()
 	if state.Version == 0 {

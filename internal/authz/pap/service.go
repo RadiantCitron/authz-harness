@@ -1,3 +1,17 @@
+// Package pap 는 정책 관리점(Policy Administration Point)으로서 권한(Grant)의 발급 및 회수, 사람 승인(Approval)의 발급, 주체별 Security Epoch 의 전진(Bump)을 총괄한다.
+//
+// [ADR 0010: 권한 관리 변경과 감사 기록 원칙]
+// 1. 늘리는 변경 (CreateGrant, CreateApproval):
+//   - 새로이 권한을 부여하는 작업은 반드시 저장소 반영 전에 감사를 먼저 기록한다 (Pre-Store Audit).
+//   - 감사 로깅에 실패하면 저장소를 변경하지 않고 즉시 Fail-Closed 로 거부하므로 롤백이 필요 없다.
+//   - 감사는 성공했으나 디스크 저장이 실패한 경우, 후속 거부 감사에 해당 ID 를 기록하여 추적성을 유지한다.
+//
+// 2. 줄이는 변경 (RevokeGrant, BumpEpoch):
+//   - 탈취 또는 위협 대응을 위한 권한 회수 및 세대 전진은 저장소 반영 후 감사를 기록한다 (Post-Store Audit).
+//   - 감사 로그 쓰기가 실패하더라도 이미 적용된 회수 상태는 되돌리지 않는다 (Fail-Closed 보안 유지).
+//
+// 3. 거부 감사와 Zero Leakage:
+//   - recordDenied 메서드는 오류 기록 시 임의의 사용자 입력 문자열을 배제하고 오직 표준 domain.Reason 사유 코드만 감사 이벤트에 기록한다.
 package pap
 
 import (
@@ -13,36 +27,53 @@ import (
 )
 
 var (
+	// ErrGrantNotFound 는 요청된 ID의 Grant 를 찾을 수 없을 때 발생하는 에러다.
 	ErrGrantNotFound = errors.New("pap: grant not found")
 )
 
-// CreateGrantRequest 는 권한 신규 발급 요청 명세다.
+// CreateGrantRequest 는 권한 신규 발급 요청 매개변수 집합이다.
 type CreateGrantRequest struct {
-	Subject  string        `json:"subject"`
-	Action   domain.Action `json:"action"`
-	Resource string        `json:"resource"`
+	// Subject 는 권한을 부여받을 주체 식별자다.
+	Subject string `json:"subject"`
 
-	// RequiresApproval 이 true 이면 이 Grant 로 허용되는 요청도 사람 승인이 필요하다(ask).
+	// Action 은 허용할 도구 작업이다 (예: "file:read", "exec:run").
+	Action domain.Action `json:"action"`
+
+	// Resource 는 허용할 리소스 경로 또는 식별자다.
+	Resource string `json:"resource"`
+
+	// RequiresApproval 이 true 이면 이 Grant 로 허용되는 요청도 실행 전 사람 승인이 필요하다 (ASK 전이).
 	RequiresApproval bool `json:"requires_approval,omitempty"`
 }
 
-// CreateApprovalRequest 는 사람 승인 발급 요청 명세다. ArgHash 가 비면 인자 바인딩이 없다.
+// CreateApprovalRequest 는 사람 승인(Approval) 1회성 발급 요청 명세다.
 type CreateApprovalRequest struct {
-	Subject  string
-	Action   domain.Action
+	// Subject 는 승인 대상 주체 식별자다.
+	Subject string
+
+	// Action 은 승인할 도구 작업이다.
+	Action domain.Action
+
+	// Resource 는 승인할 리소스 경로다.
 	Resource string
+
+	// TokenJTI 는 요청 토큰의 JTI 바인딩이다.
 	TokenJTI string
-	ArgHash  string
-	TTL      time.Duration // 0 이면 기본값(5m)
+
+	// ArgHash 는 실행 인자의 SHA-256 해시 바인딩이다 (비어있으면 무조건 허용).
+	ArgHash string
+
+	// TTL 은 승인의 유효 수명이다 (기본값 5분).
+	TTL time.Duration
 }
 
-// GrantFilter 는 권한 목록 조회 시 필터 조건이다.
+// GrantFilter 는 권한 목록 조회 시 적용할 필터 조건이다.
 type GrantFilter struct {
 	Subject string              `json:"subject,omitempty"`
 	Status  *domain.GrantStatus `json:"status,omitempty"`
 }
 
-// Service 는 정책 관리점(PAP)의 핵심 관리 규약이다.
+// Service 는 정책 관리점(PAP)의 핵심 관리 규약 DIP 인터페이스다.
 type Service interface {
 	// CreateGrant 는 주체에게 특정 리소스/액션의 활성 권한을 발급하고 감사 로그를 남긴다.
 	CreateGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error)
@@ -59,7 +90,7 @@ type Service interface {
 	// CreateApproval 은 (주체, 액션, 리소스, jti, 선택적 arg_hash)에 묶인 1회용 승인을 발급하고 감사 로그를 남긴다.
 	CreateApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error)
 
-	// ListApprovals 는 승인 목록을 반환한다(subject 가 비면 전체).
+	// ListApprovals 는 승인 목록을 반환한다 (subject 가 비면 전체).
 	ListApprovals(ctx context.Context, subject string) ([]domain.Approval, error)
 }
 
@@ -73,7 +104,7 @@ type papService struct {
 // ServiceOption 은 PAP Service 구성 옵션이다.
 type ServiceOption func(*papService)
 
-// WithClock 은 가상 시계를 주입하기 위한 옵션이다.
+// WithClock 은 가상 시계를 주입하기 위한 함수형 옵션이다.
 func WithClock(c domain.Clock) ServiceOption {
 	return func(s *papService) {
 		if c != nil {
@@ -82,7 +113,7 @@ func WithClock(c domain.Clock) ServiceOption {
 	}
 }
 
-// NewService 는 PAP 서비스를 생성한다.
+// NewService 는 state.Store 와 audit.Writer 를 기반으로 PAP 서비스를 생성한다.
 func NewService(store state.Store, auditWriter audit.Writer, opts ...ServiceOption) Service {
 	s := &papService{
 		store: store,
@@ -99,13 +130,12 @@ func NewService(store state.Store, auditWriter audit.Writer, opts ...ServiceOpti
 func (s *papService) createGrant(ctx context.Context, req CreateGrantRequest) (*domain.Grant, error) {
 	now := s.clock.Now().UTC()
 	grant := &domain.Grant{
-		ID:        fmt.Sprintf("grant-%d", now.UnixNano()),
-		Subject:   strings.TrimSpace(req.Subject),
-		Action:    req.Action,
-		Resource:  strings.TrimSpace(req.Resource),
-		Status:    domain.GrantStatusActive,
-		CreatedAt: now,
-
+		ID:               fmt.Sprintf("grant-%d", now.UnixNano()),
+		Subject:          strings.TrimSpace(req.Subject),
+		Action:           req.Action,
+		Resource:         strings.TrimSpace(req.Resource),
+		Status:           domain.GrantStatusActive,
+		CreatedAt:        now,
 		RequiresApproval: req.RequiresApproval,
 	}
 
@@ -126,10 +156,9 @@ func (s *papService) createGrant(ctx context.Context, req CreateGrantRequest) (*
 			Decision:  "allow",
 			Success:   true,
 			Metadata: map[string]interface{}{
-				"grant_id": grant.ID,
-				"subject":  grant.Subject,
-				"action":   string(grant.Action),
-
+				"grant_id":          grant.ID,
+				"subject":           grant.Subject,
+				"action":            string(grant.Action),
 				"requires_approval": grant.RequiresApproval,
 			},
 		}
@@ -196,7 +225,7 @@ func (s *papService) revokeGrant(ctx context.Context, grantID string) (*domain.G
 			},
 		}
 		if err := s.audit.Log(auditEv); err != nil {
-			// 줄이는 변경(회수)은 되돌리지 않는다(ADR 0010). 되돌리면 그 사이 성공한 다른 변경까지 지운다.
+			// 줄이는 변경(회수)은 되돌리지 않는다 (ADR 0010). 되돌리면 그 사이 성공한 다른 변경까지 지운다.
 			return nil, domain.NewError(domain.ReasonAuditLogFailed, "pap: grant revoked but audit logging failed", err)
 		}
 	}
@@ -331,7 +360,7 @@ func (s *papService) createApproval(ctx context.Context, req CreateApprovalReque
 	return &a, nil
 }
 
-// ListApprovals 는 승인 목록을 반환한다(subject 가 비면 전체).
+// ListApprovals 는 승인 목록을 반환한다 (subject 가 비면 전체).
 func (s *papService) ListApprovals(ctx context.Context, subject string) ([]domain.Approval, error) {
 	st, err := s.store.Load()
 	if err != nil {
@@ -347,8 +376,8 @@ func (s *papService) ListApprovals(ctx context.Context, subject string) ([]domai
 	return out, nil
 }
 
-// recordDenied 는 쓰기 명령의 실패를 <action> 거부 기록으로 남긴다(계획 019 D-01·D-03).
-// 사용자 입력 문자열과 오류 문구는 담지 않고 사유 코드만 담는다.
+// recordDenied 는 쓰기 명령의 실패를 <action> 거부 기록으로 남긴다 (계획 019 D-01·D-03).
+// 사용자 입력 문자열과 오류 문구는 담지 않고 사유 코드만 담는다 (Zero Leakage).
 // ids 는 [키, 값] 쌍이며 프로그램이 만든 ID(grant_id, approval_id)만 받는다: 늘림 쪽 저장 실패를 앞선 created 기록과 잇는다.
 // 이미 감사 실패인 오류는 다시 기록하지 않고, 기록이 실패하면 원래 거부 대신 AUDIT_LOG_FAILED 를 돌려준다.
 func (s *papService) recordDenied(step, action string, err error, ids ...string) error {
