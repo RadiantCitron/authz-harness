@@ -47,6 +47,9 @@ type VerifyOptions struct {
 	RecordReplay     bool // true 인 경우 jti 를 Replay 원장에 검사 및 소비 등록
 	CheckReplay      bool // true 인 경우 jti 가 이미 소비되었는지 읽기만 확인한다(소비는 ConsumeReplay)
 	ClockOffset      time.Duration
+	// AllowNegativeClockOffset 이 false(기본) 이면 음수 ClockOffset 을 거부한다. 음수 오프셋은 만료된 토큰을 되살리는
+	// 손잡이이므로 nbf 이전 시각을 일부러 시뮬레이션하는 시험만 명시적으로 켠다. CLI 는 이 필드를 노출하지 않는다.
+	AllowNegativeClockOffset bool
 }
 
 // TokenVerifier 인터페이스다.
@@ -112,6 +115,15 @@ func (v *Verifier) InspectToken(tokenStr string) (*JWTHeader, *domain.TokenClaim
 
 // VerifyToken 은 9단계 엄격한 authn 단계 검증 파이프라인을 실행한다.
 func (v *Verifier) VerifyToken(tokenStr string, opts VerifyOptions, auditCtx domain.AuditContext) (*domain.VerifiedClaims, error) {
+	// 음수 오프셋은 만료된 토큰을 되살리는 손잡이이므로 명시 허용 없이는 검증 전에 거부한다 (Fail-Closed).
+	if opts.ClockOffset < 0 && !opts.AllowNegativeClockOffset {
+		const details = "negative clock offset is not allowed"
+		if aerr := v.logAudit(v.clock.Now().UTC(), auditCtx, "", "", false, domain.ReasonInvalidArguments, details); aerr != nil {
+			return nil, auditFailure(aerr)
+		}
+		return nil, domain.NewError(domain.ReasonInvalidArguments, details, nil)
+	}
+
 	effectiveClock := v.clock
 	if opts.ClockOffset != 0 {
 		effectiveClock = domain.NewOffsetClock(v.clock, opts.ClockOffset)

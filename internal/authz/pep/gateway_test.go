@@ -322,6 +322,65 @@ func Test10AcceptanceScenarios(t *testing.T) {
 		}
 	})
 
+	t.Run("TC-PEP-OFFSET-01: 음수 시계 오프셋은 명시 허용 없이는 input 단계에서 거부 (계획 040)", func(t *testing.T) {
+		h := setupTestHarness(t)
+		sub := "alice"
+		resPath := "neg_offset.txt"
+
+		tok := issueValidToken(t, h, sub, "file:write", 10*time.Minute, 1)
+		createGrant(t, h, sub, domain.ActionFileWrite, resPath)
+
+		result, err := h.gateway.Execute(ctx, pep.Request{
+			Token:       tok,
+			Action:      domain.ActionFileWrite,
+			Resource:    resPath,
+			Data:        []byte("write data"),
+			ClockOffset: -1 * time.Minute,
+		})
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Allowed || result.ExitCode != domain.ExitBadInput {
+			t.Errorf("expected ExitBadInput, got allowed=%v exit=%d", result.Allowed, result.ExitCode)
+		}
+		if result.Reason != domain.ReasonInvalidArguments {
+			t.Errorf("expected ReasonInvalidArguments, got %s", result.Reason)
+		}
+		if result.Stage != domain.StageInput {
+			t.Errorf("expected rejection at input stage, got %s", result.Stage)
+		}
+		if _, err := os.Stat(filepath.Join(h.workspaceDir, resPath)); !os.IsNotExist(err) {
+			t.Errorf("file must not exist after rejected negative offset")
+		}
+	})
+
+	t.Run("TC-PEP-OFFSET-02: AllowNegativeClockOffset 를 켜면 음수 오프셋이 authn 까지 전달되어 nbf 이전으로 거부", func(t *testing.T) {
+		h := setupTestHarness(t)
+		sub := "alice"
+		resPath := "neg_offset_allowed.txt"
+
+		tok := issueValidToken(t, h, sub, "file:write", 10*time.Minute, 1)
+		createGrant(t, h, sub, domain.ActionFileWrite, resPath)
+
+		result, err := h.gateway.Execute(ctx, pep.Request{
+			Token:                    tok,
+			Action:                   domain.ActionFileWrite,
+			Resource:                 resPath,
+			Data:                     []byte("write data"),
+			ClockOffset:              -10 * time.Minute,
+			AllowNegativeClockOffset: true,
+		})
+		if err != nil {
+			t.Fatalf("execute error: %v", err)
+		}
+		if result.Allowed || result.ExitCode != domain.ExitTokenInvalid {
+			t.Errorf("expected ExitTokenInvalid, got allowed=%v exit=%d", result.Allowed, result.ExitCode)
+		}
+		if result.Reason != domain.ReasonTokenNotYetValid {
+			t.Errorf("expected ReasonTokenNotYetValid, got %s", result.Reason)
+		}
+	})
+
 	t.Run("TC-PEP-05: authn 단계 거부 - 이미 소비된 jti Replay 재사용 토큰", func(t *testing.T) {
 		h := setupTestHarness(t)
 		sub := "alice"

@@ -213,6 +213,34 @@ func TestScenario5_ExpiredTokenBlocked(t *testing.T) {
 	}
 }
 
+// 음수 시계 오프셋은 명시 허용 없이는 검증기가 직접 거부한다 (계획 040).
+func TestVerifyToken_NegativeClockOffsetRejectedByDefault(t *testing.T) {
+	rig := setupTestRig(t)
+	res, err := rig.issuer.IssueToken(IssueRequest{
+		ClientID:     "client-orchestrator",
+		ClientSecret: "orchestrator-secret-key-01",
+		Subject:      "worker-01",
+		TTL:          1 * time.Hour,
+	}, IssueOptions{}, domain.AuditContext{})
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	_, err = rig.verifier.VerifyToken(res.TokenString, VerifyOptions{ClockOffset: -1 * time.Minute}, domain.AuditContext{})
+	if err == nil {
+		t.Fatal("expected negative clock offset to be rejected, got pass")
+	}
+	if got := domain.ReasonFromError(err, ""); got != domain.ReasonInvalidArguments {
+		t.Fatalf("expected reason %s, got %s (%v)", domain.ReasonInvalidArguments, got, err)
+	}
+
+	// 명시 허용 시에는 거부 사유가 InvalidArguments 가 아니다 (nbf 이전 등 다른 사유로 평가된다).
+	_, err = rig.verifier.VerifyToken(res.TokenString, VerifyOptions{ClockOffset: -10 * time.Minute, AllowNegativeClockOffset: true}, domain.AuditContext{})
+	if err != nil && domain.ReasonFromError(err, "") == domain.ReasonInvalidArguments {
+		t.Fatalf("allowed negative offset must not be rejected as invalid arguments: %v", err)
+	}
+}
+
 // 시나리오 6: Replay 원장 중복 소비 차단
 func TestScenario6_ReplayBlocked(t *testing.T) {
 	rig := setupTestRig(t)

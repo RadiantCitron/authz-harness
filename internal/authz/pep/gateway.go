@@ -27,8 +27,11 @@ type Request struct {
 	ExpectedAudience   string        // 토큰 수신자 기대값 (기본값: "authz-harness")
 	ExpectedSubject    string        // 선택적 주체 기대값 검증
 	ClockOffset        time.Duration // 선택적 가상 시계 오프셋 (테스트 및 시간 시뮬레이션)
-	TraceID            string        // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
-	RequireTraceID     bool          // true 인 경우 TraceID 누락 시 input 단계에서 즉각 차단 (E2E-28 검증용)
+	// AllowNegativeClockOffset 이 false(기본) 이면 음수 ClockOffset 을 input 단계에서 거부한다(만료 토큰 부활 방지).
+	// nbf 이전 시각을 일부러 시뮬레이션하는 하네스 시나리오만 켠다. CLI·서브프로세스 워커는 노출하지 않는다.
+	AllowNegativeClockOffset bool
+	TraceID                  string // 트랜잭션 추적 식별자 (미지정 시 자동 생성)
+	RequireTraceID           bool   // true 인 경우 TraceID 누락 시 input 단계에서 즉각 차단 (E2E-28 검증용)
 }
 
 // Result 는 PEP 관문 집행 결과 및 단계별 판정 세부 정보다.
@@ -220,6 +223,10 @@ func (g *gateway) input(_ context.Context, c *Call) error {
 	if req.RequireTraceID && strings.TrimSpace(req.TraceID) == "" {
 		return domain.NewError(domain.ReasonMissingTraceContext, "trace_id is required but missing", nil)
 	}
+	// 음수 오프셋은 만료된 토큰을 되살리는 손잡이이므로 명시 허용 없이는 인증 전에 거부한다 (Fail-Closed).
+	if req.ClockOffset < 0 && !req.AllowNegativeClockOffset {
+		return domain.NewError(domain.ReasonInvalidArguments, "clock offset must not be negative", nil)
+	}
 	normAction, actErr := domain.ParseAction(string(req.Action))
 	var tool Tool
 	if actErr == nil {
@@ -251,6 +258,8 @@ func (g *gateway) authn(_ context.Context, c *Call) error {
 		RecordReplay:     false,
 		CheckReplay:      true,
 		ClockOffset:      req.ClockOffset,
+
+		AllowNegativeClockOffset: req.AllowNegativeClockOffset,
 	}, auditCtx)
 	if verifyErr != nil {
 		reason := extractReasonFromTokenError(verifyErr)

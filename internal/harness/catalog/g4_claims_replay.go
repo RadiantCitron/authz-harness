@@ -149,7 +149,9 @@ func (s *e2e15Scenario) Execute(ctx context.Context, env *harness.SandboxEnviron
 		Resource:    "output.txt",
 		Data:        []byte("fail"),
 		ClockOffset: -10 * time.Minute,
-		TraceID:     "trace-e2e-15",
+		// nbf 이전 시각을 일부러 시뮬레이션하는 유일한 시나리오이므로 음수 오프셋을 명시 허용한다 (계획 040).
+		AllowNegativeClockOffset: true,
+		TraceID:                  "trace-e2e-15",
 	})
 	if err != nil {
 		return domain.ExitInternalError, err
