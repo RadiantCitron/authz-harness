@@ -3,14 +3,16 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"authz-harness/internal/domain"
 	"authz-harness/internal/mcp"
-	"authz-harness/internal/orchestrator"
 )
 
 type dummyMCPExecutor struct{}
@@ -53,74 +55,103 @@ func TestMCPRunner_InvalidCommand(t *testing.T) {
 	}
 }
 
-// 로드맵 16 / 050 TC-050-04
-func TestMCPWorkerArgs_NetAllowPassthrough(t *testing.T) {
-	with := orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", "127.0.0.1:18080", false)
-	n := len(with)
-	if with[n-2] != "-net-allow" || with[n-1] != "127.0.0.1:18080" {
-		t.Fatalf("expected trailing -net-allow, got %v", with)
-	}
-	for _, a := range orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", "", false) {
-		if a == "-net-allow" {
-			t.Fatal("-net-allow must be absent when flag is empty")
-		}
-	}
-}
-
-// 보고서 029 P-2: MCP 로거 레벨은 전역 로거(-verbose)를 따른다.
-func TestMCPRunner_LogLevelFollowsGlobalLogger(t *testing.T) {
-	// id 없는 notification 프레임은 서버가 Debug 로그만 남기고 무시한다.
-	const frame = `{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n"
-	const debugMsg = "ignoring notification frame without id"
-
+// 계획 032 S2 (M1~M3, D-01): MCPRunner.Run 실제 구동 시 워커 프로세스 argv에 -net-allow 및 -verbose가 올바르게 주입되는지
+// 가짜 워커 스크립트를 통해 관찰한다.
+func TestMCPRunner_WorkerArgsPassthrough(t *testing.T) {
 	tests := []struct {
-		name      string
-		level     slog.Level
-		wantDebug bool
+		name        string
+		args        []string
+		globalDebug bool
+		wantNet     bool
+		wantNetArg  string
+		wantVerbose bool
 	}{
-		{"전역 Debug면 MCP Debug 로그 출력", slog.LevelDebug, true},
-		{"전역 Info면 MCP Debug 로그 미출력", slog.LevelInfo, false},
+		{
+			name:        "M1: net-allow 플래그 전달",
+			args:        []string{"serve", "-net-allow", "127.0.0.1:18080"},
+			globalDebug: false,
+			wantNet:     true,
+			wantNetArg:  "127.0.0.1:18080",
+			wantVerbose: false,
+		},
+		{
+			name:        "M2: net-allow 플래그 생략",
+			args:        []string{"serve"},
+			globalDebug: false,
+			wantNet:     false,
+			wantVerbose: false,
+		},
+		{
+			name:        "M3: 전역 Debug 레벨 시 -verbose 전달",
+			args:        []string{"serve"},
+			globalDebug: true,
+			wantNet:     false,
+			wantVerbose: true,
+		},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := slog.Default()
 			t.Cleanup(func() { slog.SetDefault(prev) })
-			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: tc.level})))
+			level := slog.LevelInfo
+			if tc.globalDebug {
+				level = slog.LevelDebug
+			}
+			slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: level})))
 
+			tmpDir := t.TempDir()
+			argsFile := filepath.Join(tmpDir, "worker_args.txt")
+
+			// 가짜 워커 셸 스크립트 작성 (argv 전체를 argsFile에 한 줄씩 기록하고 정상 JSON-RPC 워커처럼 EOF까지 stdin 대기 후 종료)
+			scriptPath := filepath.Join(tmpDir, "fake_worker.sh")
+			scriptContent := fmt.Sprintf("#!/bin/sh\nfor a in \"$@\"; do echo \"$a\" >> %q; done\necho '{\"version\":\"1.0\",\"trace_id\":\"t\",\"exit_code\":0}'\n", argsFile)
+			if err := os.WriteFile(scriptPath, []byte(scriptContent), 0o755); err != nil {
+				t.Fatalf("failed to write fake worker script: %v", err)
+			}
+
+			// tools/call 요청 프레임
+			callFrame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"file_read","arguments":{"path":"test.txt"},"_meta":{"authz_token":"test-token"}}}` + "\n"
+			in := strings.NewReader(callFrame)
+			out := &bytes.Buffer{}
 			errOut := &bytes.Buffer{}
-			runner := NewMCPRunner(strings.NewReader(frame), &bytes.Buffer{}, errOut, "", "", "", "", "", &dummyMCPExecutor{})
-			if code := runner.Run(context.Background(), []string{"serve"}); code != domain.ExitSuccess {
-				t.Fatalf("expected ExitSuccess, got %v (stderr: %s)", code, errOut.String())
-			}
-			if got := strings.Contains(errOut.String(), debugMsg); got != tc.wantDebug {
-				t.Errorf("debug log present=%v, want %v (stderr: %q)", got, tc.wantDebug, errOut.String())
-			}
-		})
-	}
-}
 
-// 보고서 029 P-1: verbose 일 때만 worker 에 -verbose 를 넘기고, -net-allow 와 독립이다.
-func TestMCPWorkerArgs_VerbosePassthrough(t *testing.T) {
-	tests := []struct {
-		name    string
-		netAllo string
-		verbose bool
-	}{
-		{"verbose 아님", "", false},
-		{"verbose", "", true},
-		{"verbose + net-allow", "127.0.0.1:18080", true},
-		{"net-allow 만", "127.0.0.1:18080", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := false
-			for _, a := range orchestrator.WorkerArgs("/w", "/s", "/p", "/r", "/a", tc.netAllo, tc.verbose) {
-				if a == "-verbose" {
-					got = true
+			rig := setupPEPCLITestRig(t)
+			runner := NewMCPRunner(in, out, errOut, rig.workspaceDir, rig.statePath, rig.pubJWKSPath, rig.replayPath, rig.auditPath, nil)
+			runner.SetWorkerBinaryPath(scriptPath)
+
+			code := runner.Run(context.Background(), tc.args)
+			if code != domain.ExitSuccess {
+				t.Fatalf("expected ExitSuccess(0), got %v (stderr: %s)", code, errOut.String())
+			}
+
+			captured, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatalf("failed to read captured worker args: %v", err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(captured)), "\n")
+
+			hasNet := false
+			var netVal string
+			hasVerbose := false
+			for i, line := range lines {
+				if line == "-net-allow" && i+1 < len(lines) {
+					hasNet = true
+					netVal = lines[i+1]
+				}
+				if line == "-verbose" {
+					hasVerbose = true
 				}
 			}
-			if got != tc.verbose {
-				t.Fatalf("-verbose present=%v, want %v", got, tc.verbose)
+
+			if hasNet != tc.wantNet {
+				t.Errorf("net-allow presence: got %v, want %v (args: %v)", hasNet, tc.wantNet, lines)
+			}
+			if tc.wantNet && netVal != tc.wantNetArg {
+				t.Errorf("net-allow value: got %q, want %q", netVal, tc.wantNetArg)
+			}
+			if hasVerbose != tc.wantVerbose {
+				t.Errorf("verbose presence: got %v, want %v (args: %v)", hasVerbose, tc.wantVerbose, lines)
 			}
 		})
 	}
