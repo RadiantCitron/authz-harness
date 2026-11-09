@@ -2,7 +2,9 @@
 // Ed25519 서명 체크포인트를 제공한다. Zone A 감사 전용 키를 다루므로 internal/audit 와 분리돼 있으며,
 // 워커 경로는 이 패키지를 import 하지 않는다(TC-060-02).
 //
-// 한계: 체크포인트는 서명 시점까지의 레코드만 보호하며, 오래된 유효 체크포인트로의 되돌리기(rollback)는 막지 못한다.
+// [보안 한계 및 설계 의도]
+// 한계: 체크포인트는 서명 시점까지의 레코드만 보호하며, 오래된 유효 체크포인트로의 되돌리기(Rollback)는 막지 못한다.
+// 본 패키지는 관리자 명령(audit checkpoint create / verify)을 통해 감사 장부의 헤드 해시와 줄 수를 서명 박제하여 외부 감사관에게 증거로 제출할 수 있도록 돕는다.
 package checkpoint
 
 import (
@@ -25,12 +27,21 @@ import (
 	"authz-harness/internal/storage"
 )
 
-// Checkpoint 는 서명된 감사 체인 스냅샷이다. Signature 는 base64url 이다.
+// Checkpoint 는 서명된 감사 체인 스냅샷 구조체다. Signature 는 base64url 문자열이다.
 type Checkpoint struct {
-	LineCount int    `json:"line_count"`
-	HeadHash  string `json:"head_hash"`
+	// LineCount 는 체크포인트 작성 시점까지의 총 감사 레코드 수다.
+	LineCount int `json:"line_count"`
+
+	// HeadHash 는 마지막 감사 레코드의 curr_hash 값이다.
+	HeadHash string `json:"head_hash"`
+
+	// Timestamp 는 체크포인트 생성 UTC 시각이다 (RFC 3339 Nano).
 	Timestamp string `json:"timestamp"`
-	KeyID     string `json:"key_id"`
+
+	// KeyID 는 서명에 사용된 감사 전용 Ed25519 공개키 식별자다.
+	KeyID string `json:"key_id"`
+
+	// Signature 는 위 4개 필드의 정규화된 바이트열에 대한 Base64URL 전자 서명이다.
 	Signature string `json:"signature"`
 }
 
@@ -46,16 +57,19 @@ type pubFile struct {
 
 var b64 = base64.RawURLEncoding
 
+// kidOf 는 공개키의 SHA-256 해시 앞 8바이트를 기반으로 키 식별자를 도출한다.
 func kidOf(pub ed25519.PublicKey) string {
 	h := sha256.Sum256(pub)
 	return "audit-ckpt-" + hex.EncodeToString(h[:8])
 }
 
+// canonical 은 서명 대상이 되는 체크포인트의 정규화된 바이트열을 반환한다.
 func canonical(c Checkpoint) []byte {
 	return []byte(fmt.Sprintf("audit-ckpt-v1|%d|%s|%s|%s", c.LineCount, c.HeadHash, c.Timestamp, c.KeyID))
 }
 
-// EnsureKeyPair 는 감사 전용 키 쌍을 확보한다. 둘 다 없으면 생성하고, 하나만 있으면 Fail-Closed 오류를 낸다.
+// EnsureKeyPair 는 감사 전용 비대칭 키 쌍을 확보한다.
+// 둘 다 없으면 신규 생성하고, 둘 중 하나만 존재하면 상태 불일치로 Fail-Closed 오류를 반환한다.
 func EnsureKeyPair(privPath, pubPath string, clock domain.Clock) (string, error) {
 	_, privErr := os.Stat(privPath)
 	_, pubErr := os.Stat(pubPath)
@@ -166,7 +180,7 @@ func currHashOf(line string) (string, error) {
 // Create 는 현재 감사 체인의 (줄 수, 마지막 curr_hash)에 서명한 체크포인트를 outPath 에 쓴다.
 func Create(auditPath, privPath, pubPath, outPath string, clock domain.Clock) (*Checkpoint, error) {
 	var lines []string
-	// 감사 잠금 안에서는 읽기만 한다(키 파일·다른 잠금 접근 금지).
+	// 감사 잠금 안에서는 읽기만 한다 (키 파일·다른 잠금 접근 금지).
 	err := storage.WithFileLock(auditPath+".lock", syscall.LOCK_SH, func() error {
 		var rerr error
 		lines, rerr = readLines(auditPath)

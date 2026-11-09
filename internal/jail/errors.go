@@ -1,3 +1,4 @@
+// Package jail 은 격리 경계 위반 시 발생하는 센티넬 에러 및 도메인 사유 매핑을 제공한다.
 package jail
 
 import (
@@ -20,7 +21,7 @@ var (
 	ErrInvalidPathCharacters = errors.New("jail: invalid path characters")
 )
 
-// ReasonFromError 는 jail 에러를 domain.Reason 코드로 변환한다.
+// ReasonFromError 는 jail 센티넬 에러를 표준 domain.Reason 코드로 변환한다.
 func ReasonFromError(err error) domain.Reason {
 	if err == nil {
 		return domain.ReasonAuthorized

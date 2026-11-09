@@ -1,3 +1,14 @@
+// Package storage 는 다중 프로세스 동시성 제어(flock) 및 정전/충돌에 안전한 원자적 파일 교체(Write-to-Temp & Atomic Rename) 저장소를 제공한다.
+//
+// [핵심 동시성 및 내구성 보장 원칙]
+// 1. Go 제네릭 기반 단일 원자 저장소 (AtomicFileStore[T any]):
+//   - 임의의 JSON 직렬화 가능 구조체 T에 대해 공유 락(LOCK_SH) 읽기, 배타 락(LOCK_EX) 쓰기 및 원자적 갱신(Update) 인터페이스를 제공한다.
+//
+// 2. 가드레일 TC-081-01 storage 일원화 준수:
+//   - 전체 비즈니스 계층(authn, keys, authz/state, audit)은 직접 syscall.Flock 을 호출하지 않고 본 storage 패키지를 통해 파일 락을 획득한다.
+//
+// 3. 디렉터리 동기화 (syncDir / F_FULLFSYNC):
+//   - 파일 자체의 fsync 뿐만 아니라 부모 디렉터리 엔트리까지 fsync 하여, OS 충돌이나 급작스러운 전원 차단 시에도 디스크 상의 원자성을 보장한다.
 package storage
 
 import (
@@ -9,10 +20,10 @@ import (
 	"syscall"
 )
 
-// AtomicFileStoreOption 은 AtomicFileStore 설정 함수다.
+// AtomicFileStoreOption 은 AtomicFileStore[T] 설정 함수형 옵션(Functional Option)이다.
 type AtomicFileStoreOption[T any] func(*AtomicFileStore[T])
 
-// WithPerm 은 파일 저장 시 적용할 파일 권한을 설정한다.
+// WithPerm 은 파일 저장 시 적용할 파일 권한을 설정한다 (기본값: 0600).
 func WithPerm[T any](perm os.FileMode) AtomicFileStoreOption[T] {
 	return func(s *AtomicFileStore[T]) {
 		s.perm = perm
@@ -41,7 +52,7 @@ type AtomicFileStore[T any] struct {
 	defaultFn func() *T
 }
 
-// NewAtomicFileStore 는 filePath 경로를 관리하는 AtomicFileStore[T]를 생성한다.
+// NewAtomicFileStore 는 filePath 경로를 관리하는 AtomicFileStore[T] 인스턴스를 생성한다.
 func NewAtomicFileStore[T any](filePath string, opts ...AtomicFileStoreOption[T]) *AtomicFileStore[T] {
 	store := &AtomicFileStore[T]{
 		filePath: filePath,

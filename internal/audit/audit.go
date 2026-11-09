@@ -1,3 +1,26 @@
+// Package audit 는 RFC 및 ROADMAP §15 감사 모델을 준수하는 추가 전용(Append-only) 위변조 방지 감사 로그 엔진을 제공한다.
+//
+// [핵심 감사 아키텍처 및 무결성 보장 원칙]
+// 1. 단방향 SHA-256 해시 체인 (Hash Chain Integrity):
+//   - 각 감사 레코드는 직전 레코드의 해시(PrevHash)와 자신의 정규화된 필드들을 결정론적으로 결합하여 CurrHash 를 계산한다.
+//   - 임의의 중간 레코드 변조나 삭제 발생 시 전체 해시 체인이 깨져 audit verify 시 즉각 감지된다 (ReasonAuditIntegrityBroken).
+//
+// 2. 결정론적 해시 인코딩 및 스키마 진화 (v0 ~ v4):
+//   - v0 ~ v2: 고정 구분자(|) 기반 파이프 문자열 결합 (과거 호환성 보존).
+//   - v3: 구분자 모호성 공격을 방어하는 길이 접두 인코딩(Length-Prefixed, "<len>:<val>") 및 도메인 분리 태그("authz-audit-v3").
+//   - v4: Stage 검문소 단계를 체인 해시에 추가 결합("authz-audit-v4", ADR 0009).
+//
+// 3. 다중 프로세스 원자적 동기화 (Process Synchronization):
+//   - 다중 워커/오케스트레이터 프로세스가 동시에 감사 파일에 접근할 때, `auditPath + ".lock"` 파일에 대해
+//     syscall.Flock(LOCK_EX) 배타 락을 획득하여 단일 쓰기 및 연속된 해시 체인 번호를 보장한다.
+//
+// 4. 잘린 꼬리 감지 및 자동 복구 (Tail Incomplete vs Integrity Broken):
+//   - 프로세스 비정상 종료로 마지막 줄바꿈(\n)이 누락되거나 일부 바이트만 쓰인 경우,
+//     무조건적인 변조로 보지 않고 ReasonAuditTailIncomplete 로 식별하여 audit recover 로 안전 복구할 수 있게 지원한다.
+//
+// 5. Zero Leakage 감사 원칙:
+//   - 감사 로그에는 서명된 원시 Bearer Token 문자열이 절대 기록되지 않으며, 오직 JTI 와 클레임 요약만 기록된다.
+//   - VerifyHashChain 시 레코드 내 원시 JWT 패턴(domain.ContainsRawToken) 발견 시 즉각 무결성 오류를 발생시킨다.
 package audit
 
 import (
@@ -18,11 +41,11 @@ import (
 	"authz-harness/internal/storage"
 )
 
-// Event 는 domain.AuditEvent 의 별칭이다(DIP: 스키마 정의는 도메인에 있다). ROADMAP.md §15 감사 모델 준수.
+// Event 는 domain.AuditEvent 의 별칭이다 (DIP: 스키마 정의는 도메인에 있다). ROADMAP.md §15 감사 모델 준수.
 type Event = domain.AuditEvent
 
-// MaxRecordBytes 는 감사 한 줄(줄바꿈 제외 JSON 바이트)의 상한이다.
-// Writer·검증기·체크포인트가 같은 값을 쓴다(plan-008 W4).
+// MaxRecordBytes 는 감사 한 줄(줄바꿈 제외 JSON 바이트)의 상한이다 (1MB).
+// Writer·검증기·체크포인트가 동일한 기준값을 공유한다 (plan-008 W4).
 const MaxRecordBytes = 1 << 20
 
 // ComputeEventHash 는 prevHash 와 이벤트의 불변 핵심 필드들을 결정론적으로 결합하여 SHA-256 해시를 계산한다.
@@ -57,15 +80,17 @@ func ComputeEventHash(prevHash string, ev Event) string {
 	return hex.EncodeToString(h[:])
 }
 
+// computeHashV3 는 길이 접두 인코딩 기반의 v3 해시 계산을 수행한다.
 func computeHashV3(prevHash string, ev Event) string {
 	return lengthPrefixedHash("authz-audit-v3", v3Fields(prevHash, ev))
 }
 
-// computeHashV4 는 v3 입력에 Stage 를 더한다(ADR 0009). 단계 값을 고치면 해시가 달라져 audit verify 가 잡는다.
+// computeHashV4 는 v3 입력에 Stage 를 더한다 (ADR 0009). 단계 값을 고치면 해시가 달라져 audit verify 가 잡는다.
 func computeHashV4(prevHash string, ev Event) string {
 	return lengthPrefixedHash("authz-audit-v4", append(v3Fields(prevHash, ev), ev.Stage))
 }
 
+// v3Fields 는 v3 해시 계산에 참여하는 정규화 필드 목록을 반환한다.
 func v3Fields(prevHash string, ev Event) []string {
 	return []string{
 		prevHash,
@@ -84,6 +109,7 @@ func v3Fields(prevHash string, ev Event) []string {
 	}
 }
 
+// lengthPrefixedHash 는 "도메인태그 + 길이1:값1 + 길이2:값2 + ..." 형태의 문자열을 SHA-256 해시로 변환한다.
 func lengthPrefixedHash(domainTag string, fields []string) string {
 	var b strings.Builder
 	b.WriteString(domainTag)
@@ -99,7 +125,7 @@ func lengthPrefixedHash(domainTag string, fields []string) string {
 // CurrentSchemaVersion 은 JSONLWriter 가 새로 쓰는 레코드의 스키마 버전이다.
 const CurrentSchemaVersion = 4
 
-// NormalizeEvent 는 감사 이벤트의 최상위 필드를 정규화한다.
+// NormalizeEvent 는 감사 이벤트의 최상위 필드를 표준 규약에 맞게 정규화한다.
 func NormalizeEvent(ev *Event) {
 	if ev.Timestamp.IsZero() {
 		ev.Timestamp = domain.RealClock{}.Now()
@@ -140,11 +166,7 @@ func NormalizeEvent(ev *Event) {
 		}
 	}
 
-	// 3. Action 표준화:
-	// PEP 관문은 사전에 정의된 표준 도메인 액션(pep.allow, pep.deny, budget.consumed 등)을 직접 발행한다.
-	// 이전의 레거시 "pep.*" 강제 치환 및 "authn.exchange_denied" 매핑은 사문화되어 제거되었다.
-
-	// TokenJTI 승격
+	// 3. TokenJTI 승격 (비어있고 Metadata["token_jti"]가 있으면 최상위로 승격)
 	if ev.TokenJTI == "" && ev.Metadata != nil {
 		if jti, ok := ev.Metadata["token_jti"].(string); ok && jti != "" {
 			ev.TokenJTI = jti
@@ -152,7 +174,7 @@ func NormalizeEvent(ev *Event) {
 	}
 }
 
-// Writer 는 감사 로그를 thread-safe하게 Append-only 방식으로 기록하는 인터페이스다.
+// Writer 는 감사 로그를 thread-safe하게 Append-only 방식으로 기록하는 DIP 인터페이스다.
 type Writer = domain.AuditWriter
 
 // JSONLWriter 는 파일에 JSON Lines 형식으로 이벤트를 기록하는 구현체다.
@@ -175,7 +197,7 @@ func NewJSONLWriter(path string) (*JSONLWriter, error) {
 	}, nil
 }
 
-// readLastEvent 는 파일의 마지막 레코드를 안전하게 읽어 반환한다.
+// readLastEvent 는 파일의 마지막 레코드를 역방향으로 안전하게 읽어 반환한다.
 func readLastEvent(f *os.File) (*Event, error) {
 	stat, err := f.Stat()
 	if err != nil {
@@ -224,7 +246,7 @@ func readLastEvent(f *os.File) (*Event, error) {
 
 // tailState 는 감사 파일의 크기와, 마지막 바이트가 '\n' 인지를 돌려준다.
 // 빈 파일은 「온전」(endsNL=true)으로 본다. Writer 는 언제나 '\n' 으로 끝나는 줄을 쓰므로
-// 마지막 바이트가 '\n' 이 아니면 기록 도중 끊긴 꼬리가 있는 것이다(plan-010).
+// 마지막 바이트가 '\n' 이 아니면 기록 도중 끊긴 꼬리가 있는 것이다 (plan-010).
 func tailState(f *os.File) (size int64, endsNL bool, err error) {
 	stat, err := f.Stat()
 	if err != nil {
@@ -274,7 +296,7 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 	NormalizeEvent(&event)
 	event.SchemaVersion = CurrentSchemaVersion // 호출자 값은 덮어쓴다
 
-	// 3. 파일의 마지막 레코드로부터 prev_hash 추출 (다중 프로세스 체인 연속성 보장)
+	// 2. 파일의 마지막 레코드로부터 prev_hash 추출 (다중 프로세스 체인 연속성 보장)
 	prevHash := ""
 	if _, endsNL, terr := tailState(w.file); terr != nil {
 		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to inspect audit file tail: %v", terr), terr)
@@ -315,7 +337,7 @@ func (w *JSONLWriter) appendLocked(event Event) error {
 	event.Metadata["prev_hash"] = event.PrevHash
 	event.Metadata["curr_hash"] = event.CurrHash
 
-	// 4. JSON 직렬화 및 쓰기
+	// 3. JSON 직렬화 및 쓰기
 	data, err := json.Marshal(event)
 	if err != nil {
 		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to marshal audit event: %v", err), err)
@@ -364,7 +386,7 @@ func VerifyHashChain(path string) error {
 	}
 	defer f.Close()
 
-	// 파일이 \n 으로 끝나지 않으면 마지막 조각은 잘린 꼬리다(plan-010, D-03).
+	// 파일이 \n 으로 끝나지 않으면 마지막 조각은 잘린 꼬리다 (plan-010, D-03).
 	_, endsNL, err := tailState(f)
 	if err != nil {
 		return domain.NewError(domain.ReasonAuditLogFailed, fmt.Sprintf("failed to inspect audit file tail %s: %v", path, err), err)
@@ -387,7 +409,7 @@ func VerifyHashChain(path string) error {
 		var ev Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			if atTail {
-				// 앞 레코드는 모두 통과했고, 줄바꿈 없는 마지막 조각만 깨짐 → 기록 도중 충돌(T1).
+				// 앞 레코드는 모두 통과했고, 줄바꿈 없는 마지막 조각만 깨짐 -> 기록 도중 충돌 (T1).
 				return domain.NewError(domain.ReasonAuditTailIncomplete, fmt.Sprintf("audit record #%d is an incomplete tail (no newline, not valid JSON); run 'audit recover'", n), err)
 			}
 			return domain.NewError(domain.ReasonAuditIntegrityBroken, fmt.Sprintf("audit record #%d is not valid JSON: %v", n, err), err)
@@ -425,7 +447,7 @@ func VerifyHashChain(path string) error {
 		expectedPrevHash = evCurrHash
 
 		if atTail {
-			// 해시 검증까지 통과한 온전한 기록이 줄바꿈만 빠진 상태(T2).
+			// 해시 검증까지 통과한 온전한 기록이 줄바꿈만 빠진 상태 (T2).
 			return domain.NewError(domain.ReasonAuditTailIncomplete, fmt.Sprintf("audit record #%d is a complete record missing trailing newline; run 'audit recover'", n), nil)
 		}
 		return nil
@@ -463,7 +485,7 @@ func VerifyHashChain(path string) error {
 				return err
 			}
 		} else if !endsNL {
-			// 공백만 남은 꼬리.
+			// 공백만 남은 꼬리
 			return domain.NewError(domain.ReasonAuditTailIncomplete, "audit file ends without newline after the last record; run 'audit recover'", nil)
 		}
 	}

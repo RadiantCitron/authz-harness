@@ -1,3 +1,4 @@
+// Package orchestrator 는 출력 스트림의 바이트 상한을 강제하는 스레드 안전한 버퍼를 제공한다.
 package orchestrator
 
 import (
@@ -8,7 +9,8 @@ import (
 
 var errOutputLimitExceeded = errors.New("output limit exceeded")
 
-// limitedBuffer 는 바이트 상한이 있는 쓰기 버퍼다. 상한 초과 시 onExceed 를 정확히 한 번 호출한다.
+// limitedBuffer 는 바이트 상한(max)이 있는 동시성 안전 쓰기 버퍼다.
+// 상한 초과 시 onExceed 콜백을 sync.Once 로 정확히 한 번 호출하여 부모가 자식 프로세스 그룹을 즉시 종료하도록 유도한다.
 type limitedBuffer struct {
 	mu       sync.Mutex
 	buf      bytes.Buffer

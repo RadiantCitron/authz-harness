@@ -1,3 +1,11 @@
+// Package orchestrator 는 자식 프로세스 환경변수 격리 및 안전한 정제 기능을 제공한다.
+//
+// [환경변수 보안 원칙: 화이트리스트 및 차단 접두사 (Zero Leakage)]
+// 1. 최소 환경 상속 (Strict Whitelist):
+//   - 부모 프로세스의 모든 환경변수를 상속하지 않고, PATH, TMPDIR, HOME 등 필수 시스템 환경변수만 선별적으로 상속한다.
+//
+// 2. 민감 비밀값 차단 (Blocked Prefixes):
+//   - "ZONE_A_", "SECRET_", "AUTHZ_KEY_" 로 시작하는 민감 키 및 서명키 관련 환경변수는 자식 프로세스에 절대 상속되지 않는다.
 package orchestrator
 
 import "strings"

@@ -1,3 +1,18 @@
+// Package jail 은 지정된 Workspace Root 디렉터리 내에 한정된 안전한 파일 접근 격리 경계(Jail)를 제공한다.
+//
+// [격리 보안 원칙 및 공격 방어 불변식]
+// 1. 디렉터리 탈출 방어 (Path Traversal Defense):
+//   - "../" 상위 순회 문자열이나 루트 외부 절대 경로 지정을 filepath.Rel 을 통해 수학적으로 차단한다 (ErrPathTraversal).
+//
+// 2. 심볼릭 링크 탈출 방어 (Symlink Escape Defense):
+//   - 파일이 존재하는 경우 filepath.EvalSymlinks 로 실제 물리 경로를 평가하여 작업공간 외부 링크를 차단한다 (ErrSymlinkEscape).
+//   - 쓰기 시 아직 존재하지 않는 파일인 경우, 존재하는 가장 가까운 조상 디렉터리를 역추적하여 조상 경로의 외부 심볼릭 링크를 사전 차단한다.
+//
+// 3. 널 바이트 삽입 방어 (Null Byte Defense):
+//   - C 계열 파일 시스템 시스템 콜 취약점 유발 문자열(\x00)을 전수 거부한다 (ErrInvalidPathCharacters).
+//
+// 4. 원자적 파일 쓰기 (Atomic Write):
+//   - 부모 디렉터리 자동 생성(0755) 및 storage.AtomicWriteFile(0644) 연계를 통해 안전한 임시 파일 작성 후 원자적 교체를 수행한다.
 package jail
 
 import (

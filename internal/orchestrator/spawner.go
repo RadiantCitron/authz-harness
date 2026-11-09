@@ -1,3 +1,19 @@
+// Package orchestrator 는 서브에이전트 자식 프로세스를 안전하게 생성(Spawn), 감시, 자원 통제 및 결과를 수거하는 오케스트레이션 엔진을 제공한다.
+//
+// [프로세스 격리 및 보안 가드레일 원칙]
+// 1. 단일 프레임 stdin 통신 (No Token in CLI Args):
+//   - 부모 프로세스는 명령행 인자(argv)에 토큰을 절대 넘기지 않는다 (ps 또는 /proc 조회에 의한 유출 원천 차단).
+//   - 모든 요청 매개변수는 stdin 단일 JSON 프레임으로 주입한다.
+//
+// 2. 프로세스 그룹 격리 및 완벽한 수거 (Process Group & Signal Isolation):
+//   - 자식 프로세스 생성 시 Setpgid 를 통해 독립된 프로세스 그룹을 할당한다.
+//   - 타임아웃, 출력 상한 초과, 컨텍스트 취소 시 프로세스 그룹 전체에 SIGKILL(-pgid)을 발행하여 좀비/고아 프로세스 생성을 방지한다.
+//
+// 3. 자원 한계 강제 (Limited Buffer & Timeout):
+//   - 자식의 stdout/stderr 출력이 제한(MaxOutputBytes)을 초과하면 즉시 cancel()을 호출하여 프로세스를 종료시키고 ReasonToolLimitExceeded 로 판정한다.
+//
+// 4. 벽시계 계측 (measureWall):
+//   - 프로세스 실행의 실제 경과 시간은 가상 시계가 아닌 OS 실제 벽시계(time.Now)로 계측하며, 가드레일 TC-130-01 허용 목록에 등록된 유일한 time.Now 사용처다.
 package orchestrator
 
 import (
@@ -116,17 +132,16 @@ func (s *SubprocessSpawner) Spawn(ctx context.Context, req subagent.SubagentRequ
 	cmd.Env = SanitizeEnv(os.Environ(), s.cfg.ExtraEnv...)
 	configureProcessGroup(cmd, s.cfg.Limits.WaitDelay)
 
-	// stdin 단일 프레임 주입
+	// stdin 단일 프레임 주입 (커맨드라인 인자 토큰 노출 금지)
 	cmd.Stdin = bytes.NewReader(reqBytes)
 
-	// stdout, stderr 상한 버퍼 바인딩 (초과 시 execCtx 취소 → 그룹 SIGKILL)
+	// stdout, stderr 상한 버퍼 바인딩 (초과 시 execCtx 취소 -> 그룹 SIGKILL)
 	stdoutBuf := newLimitedBuffer(s.cfg.Limits.MaxOutputBytes, cancel)
 	stderrBuf := newLimitedBuffer(s.cfg.Limits.MaxOutputBytes, cancel)
 	cmd.Stdout = stdoutBuf
 	cmd.Stderr = stderrBuf
 
 	// 2-1. OS 격리 적용 (단일 지점). 부모가 아는 사실(적용했는가/못 했는가)만 감사한다.
-	// 자식의 종료 코드(13 등)는 재해석하지 않는다: 차단 여부는 부모 관찰(시나리오)이 판정한다.
 	if s.cfg.Confiner != nil || s.cfg.Confinement.Require {
 		c := s.cfg.Confiner
 		if c == nil {
@@ -267,7 +282,7 @@ func measureWall(fn func()) time.Duration {
 }
 
 // auditResource 는 부모 감사 이벤트의 resource 를 정한다. net:fetch 의 URL 은 자격 정보·질의 문자열을 담을 수 있으므로
-// 원문 대신 지문만 기록한다(PEP 가 <invalid-url> 로 가리는 것과 같은 원칙). 다른 액션은 그대로다.
+// 원문 대신 지문만 기록한다 (PEP 가 <invalid-url> 로 가리는 것과 같은 원칙). 다른 액션은 그대로다.
 func auditResource(req subagent.SubagentRequest) string {
 	if req.Action == string(domain.ActionNetFetch) {
 		return "net-url:" + domain.DataDigest([]byte(req.FilePath))

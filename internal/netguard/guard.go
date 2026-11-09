@@ -1,7 +1,18 @@
-// Package netguard 는 net:fetch 도구를 위한 루프백 전용 URL 정규화와 egress 가드다.
+// Package netguard 는 net:fetch 도구를 위한 루프백 전용 URL 정규화와 Egress 가드를 제공한다.
 //
-// 검사한 주소와 실제로 연결하는 주소가 같아야 한다. 그래서 DNS 조회, 리다이렉트 추종,
-// 환경변수 프록시를 모두 막고 연결 함수가 검증된 주소만 연결하게 고정한다.
+// [네트워크 격리 보안 원칙 및 SSRF 방어 불변식]
+// 1. 루프백 IP 리터럴 강제 (Strict Loopback Only):
+//   - 호스트명은 반드시 리터럴 "127.0.0.1" 또는 "[::1]" 이어야 하며, 도메인 이름(localhost 등)은 DNS Rebinding 공격 방지를 위해 거부한다.
+//
+// 2. DNS 조회 및 리다이렉트 완전 차단:
+//   - Custom DialContext 에서 주소를 고정(t.HostPort)하여 DNS 조회를 원천 차단한다.
+//   - CheckRedirect 훅에서 HTTP 리다이렉트를 즉각 거부하여 Egress 탈출을 방지한다.
+//
+// 3. 무프록시 연결 (Proxy: nil):
+//   - 시스템 환경변수(HTTP_PROXY, ALL_PROXY 등)에 의한 우회 연결을 방지하기 위해 Proxy 설정을 비활성화한다.
+//
+// 4. Zero Leakage URL 지문 기록:
+//   - 감사 로그에는 질의 파라미터나 토큰이 포함될 수 있는 전체 URL 원문 대신 SHA-256 지문(DataDigest)만 기록한다.
 package netguard
 
 import (
@@ -20,11 +31,11 @@ import (
 )
 
 const (
-	defaultMaxBytes = int64(1 << 20)
+	defaultMaxBytes = int64(1 << 20) // 1MB
 	defaultTimeout  = 5 * time.Second
 )
 
-// Target 은 정규화된 요청 대상이다.
+// Target 은 정규화된 네트워크 요청 대상 구조체다.
 type Target struct {
 	HostPort string // "127.0.0.1:<port>" 또는 "[::1]:<port>"
 	URL      string // "http://" + HostPort + path[?query]
@@ -34,7 +45,7 @@ func deny(msg string) error {
 	return domain.NewError(domain.ReasonEgressDenied, msg, nil)
 }
 
-// ParseTarget 은 raw 를 정규 Target 으로 바꾸는 순수 함수다(소켓·DNS·allow-list 없음).
+// ParseTarget 은 raw 문자열을 정규 Target 으로 변환하는 순수 함수다 (소켓·DNS·allow-list 없음).
 func ParseTarget(raw string) (Target, error) {
 	if raw == "" {
 		return Target{}, deny("empty target")
@@ -87,7 +98,7 @@ func ParseTarget(raw string) (Target, error) {
 	return Target{HostPort: hp, URL: out}, nil
 }
 
-// Guard 는 allow-list 대조(Check)와 안전한 GET(Fetch)을 제공한다.
+// Guard 는 allow-list 대조(Check)와 안전한 HTTP GET(Fetch)을 제공하는 네트워크 경계 수문장이다.
 type Guard struct {
 	allow    map[string]struct{}
 	maxBytes int64
@@ -128,7 +139,7 @@ func (g *Guard) Fetch(ctx context.Context, t Target) ([]byte, error) {
 	}
 	dialer := &net.Dialer{}
 	tr := &http.Transport{
-		Proxy:             nil,
+		Proxy:             nil, // 프록시 무력화 (Zero Leakage / Egress Bypass 차단)
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if addr != t.HostPort {
