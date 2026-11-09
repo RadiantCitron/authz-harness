@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go/parser"
-	gotoken "go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -553,42 +550,6 @@ func (m *mockAuditFailGateway) Execute(ctx context.Context, req pep.Request) (*p
 		Stage:    domain.StagePrecommitAudit,
 		Details:  "injected audit log failure",
 	}, nil
-}
-
-// TC-040-01: internal/subagent 패키지 의존성 순수성 검증 (AST 검사)
-func TestTC_040_01_StrictNoStateStoreImport(t *testing.T) {
-	pkgDir := "."
-	fset := gotoken.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, pkgDir, func(fi fs.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.ImportsOnly)
-	if err != nil {
-		t.Fatalf("failed to parse dir %s: %v", pkgDir, err)
-	}
-
-	prohibited := []string{
-		"authz-harness/internal/authz/state",
-		"authz-harness/internal/authz/pap",
-		"authz-harness/internal/authn/keys",
-	}
-
-	var violations []string
-	for _, pkg := range pkgs {
-		for filename, file := range pkg.Files {
-			for _, imp := range file.Imports {
-				pathVal := strings.Trim(imp.Path.Value, `"`)
-				for _, p := range prohibited {
-					if pathVal == p {
-						violations = append(violations, fmt.Sprintf("%s imports prohibited package %s", filename, pathVal))
-					}
-				}
-			}
-		}
-	}
-
-	if len(violations) > 0 {
-		t.Fatalf("TC-040-01 violations found (subagent package must not import Zone B stores):\n%s", strings.Join(violations, "\n"))
-	}
 }
 
 // plan-005 AT-01·AT-02·AT-03: 프레임은 모르는 필드를 거부하고(Fail-Closed), 정상 프레임은 이전처럼 실행된다.

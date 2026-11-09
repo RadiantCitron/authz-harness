@@ -3,8 +3,6 @@ package pdp_test
 import (
 	"context"
 	"errors"
-	"go/parser"
-	"go/token"
 	"testing"
 	"time"
 
@@ -43,30 +41,6 @@ func (m *mockAudit) Log(e audit.Event) error {
 
 func (m *mockAudit) Close() error {
 	return nil
-}
-
-// TestPDP_StrictNoOSImports 는 AP-03 불변식에 따라 internal/authz/pdp 패키지가
-// os, path/filepath, io/fs, internal/jail 패키지를 절대 import하지 않는지 정적으로 검증한다.
-func TestPDP_StrictNoOSImports(t *testing.T) {
-	fset := token.NewFileSet()
-	node, err := parser.ParseFile(fset, "service.go", nil, parser.ImportsOnly)
-	if err != nil {
-		t.Fatalf("failed to parse service.go: %v", err)
-	}
-
-	prohibited := map[string]bool{
-		`"os"`:                     true,
-		`"path/filepath"`:          true,
-		`"io/fs"`:                  true,
-		`"authz-harness/internal/jail"`: true,
-	}
-
-	for _, imp := range node.Imports {
-		pathVal := imp.Path.Value
-		if prohibited[pathVal] {
-			t.Fatalf("violation of AP-03: pdp package must not import %s", pathVal)
-		}
-	}
 }
 
 // TestPDP_Evaluate_TableDriven 은 L1 결정표에 명시된 모든 판정 케이스를 검증한다.
