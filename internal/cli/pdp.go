@@ -15,9 +15,6 @@ import (
 
 // PDPRunner 는 `pdp` 하위 명령어(decide, explain) 실행을 주관하는 러너다.
 type PDPRunner struct {
-	pdpSvc    pdp.Service
-	pipSvc    pip.Service
-	stack     *app.AppStack
 	out       io.Writer
 	errOut    io.Writer
 	auditPath string
@@ -26,15 +23,7 @@ type PDPRunner struct {
 
 // NewPDPRunner 는 지정된 입출력 스트림과 파일 경로로 PDPRunner를 생성한다.
 func NewPDPRunner(out, errOut io.Writer, statePath, auditPath string) (*PDPRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath, VerifyOnly: true})
-	if err != nil {
-		return nil, err
-	}
-
 	return &PDPRunner{
-		pdpSvc:    stack.PDP,
-		pipSvc:    stack.PIP,
-		stack:     stack,
 		out:       out,
 		errOut:    errOut,
 		auditPath: auditPath,
@@ -42,13 +31,15 @@ func NewPDPRunner(out, errOut io.Writer, statePath, auditPath string) (*PDPRunne
 	}, nil
 }
 
-// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
-func (r *PDPRunner) Close() error {
-	return r.stack.Close()
-}
-
 // Run 은 전달받은 인자(args)를 바탕으로 `pdp` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.
 func (r *PDPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	stack, err := app.BuildStack(app.AppConfig{StatePath: r.statePath, AuditPath: r.auditPath, VerifyOnly: true})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to initialize pdp runner: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer stack.Close()
+
 	if len(args) == 0 {
 		fmt.Fprintf(r.errOut, "Error: pdp subcommand required (decide, explain)\n")
 		return domain.ExitBadInput
@@ -59,9 +50,9 @@ func (r *PDPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 
 	switch subcmd {
 	case "decide":
-		return r.runDecide(ctx, subArgs)
+		return r.runDecide(ctx, stack.PDP, subArgs)
 	case "explain":
-		return r.runExplain(ctx, subArgs)
+		return r.runExplain(ctx, stack.PDP, stack.PIP, subArgs)
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown pdp subcommand '%s'\n", subcmd)
 		return domain.ExitBadInput
@@ -105,13 +96,13 @@ func (r *PDPRunner) parsePDPRequest(cmdName string, args []string) (*pdp.Request
 	}, domain.ExitSuccess
 }
 
-func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCode {
+func (r *PDPRunner) runDecide(ctx context.Context, pdpSvc pdp.Service, args []string) domain.ExitCode {
 	req, code := r.parsePDPRequest("pdp decide", args)
 	if code != domain.ExitSuccess {
 		return code
 	}
 
-	decision, err := r.pdpSvc.Decide(ctx, *req)
+	decision, err := pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
@@ -129,21 +120,21 @@ func (r *PDPRunner) runDecide(ctx context.Context, args []string) domain.ExitCod
 	return domain.ExitCodeForReason(decision.Reason)
 }
 
-func (r *PDPRunner) runExplain(ctx context.Context, args []string) domain.ExitCode {
+func (r *PDPRunner) runExplain(ctx context.Context, pdpSvc pdp.Service, pipSvc pip.Service, args []string) domain.ExitCode {
 	req, code := r.parsePDPRequest("pdp explain", args)
 	if code != domain.ExitSuccess {
 		return code
 	}
 
 	// PIP로부터 현재 스냅샷 조회 (설명 뷰를 위한 상세 상태)
-	snapshot, err := r.pipSvc.GetSubjectSnapshot(ctx, req.Subject)
+	snapshot, err := pipSvc.GetSubjectSnapshot(ctx, req.Subject)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to query pip snapshot: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	// 결정 수행 (감사 로그 자동 기록)
-	decision, err := r.pdpSvc.Decide(ctx, *req)
+	decision, err := pdpSvc.Decide(ctx, *req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: decision evaluation failed: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)

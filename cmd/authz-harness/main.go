@@ -68,10 +68,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := grantRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := grantRunner.Close(); err != nil {
-				logger.Error("failed to close grant runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "approval":
 			approvalRunner, err := cli.NewApprovalRunner(os.Stdout, os.Stderr, statePath, auditPath)
@@ -80,10 +76,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := approvalRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := approvalRunner.Close(); err != nil {
-				logger.Error("failed to close approval runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "pdp":
 			pdpRunner, err := cli.NewPDPRunner(os.Stdout, os.Stderr, statePath, auditPath)
@@ -92,10 +84,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := pdpRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := pdpRunner.Close(); err != nil {
-				logger.Error("failed to close pdp runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "keys":
 			keysRunner, err := cli.NewKeysRunner(os.Stdout, os.Stderr, privKeyPath, pubJWKSPath, auditPath)
@@ -104,10 +92,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := keysRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := keysRunner.Close(); err != nil {
-				logger.Error("failed to close keys runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "token":
 			tokenRunner, err := cli.NewTokenRunner(os.Stdout, os.Stderr, statePath, privKeyPath, pubJWKSPath, replayPath, auditPath)
@@ -124,10 +108,6 @@ func main() {
 				os.Exit(int(domain.ExitInternalError))
 			}
 			exitCode := pepRunner.Run(context.Background(), args[1:])
-			// os.Exit 는 defer 를 실행하지 않으므로 종료 직전에 명시적으로 정리한다.
-			if err := pepRunner.Close(); err != nil {
-				logger.Error("failed to close pep runner", "error", err)
-			}
 			os.Exit(int(exitCode))
 		case "orchestrate":
 			orchRunner := cli.NewOrchestrateRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)

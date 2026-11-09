@@ -14,44 +14,42 @@ import (
 
 // ApprovalRunner 는 사람 승인자를 대역하는 `approval` 하위 명령어 러너다.
 type ApprovalRunner struct {
-	papSvc pap.Service
-	stack  *app.AppStack
-	out    io.Writer
-	errOut io.Writer
+	out       io.Writer
+	errOut    io.Writer
+	statePath string
+	auditPath string
 }
 
 // NewApprovalRunner 는 상태 파일·감사 파일 경로로 ApprovalRunner 를 생성한다.
 func NewApprovalRunner(out, errOut io.Writer, statePath, auditPath string) (*ApprovalRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath, WithoutGateway: true})
-	if err != nil {
-		return nil, err
-	}
-	return &ApprovalRunner{papSvc: stack.PAP, stack: stack, out: out, errOut: errOut}, nil
-}
-
-// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
-func (r *ApprovalRunner) Close() error {
-	return r.stack.Close()
+	return &ApprovalRunner{out: out, errOut: errOut, statePath: statePath, auditPath: auditPath}, nil
 }
 
 // Run 은 `approval grant|list` 를 라우팅한다.
 func (r *ApprovalRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	stack, err := app.BuildStack(app.AppConfig{StatePath: r.statePath, AuditPath: r.auditPath, WithoutGateway: true})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to initialize approval runner: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer stack.Close()
+
 	if len(args) == 0 {
 		fmt.Fprintf(r.errOut, "Error: approval subcommand required (grant, list)\n")
 		return domain.ExitBadInput
 	}
 	switch args[0] {
 	case "grant":
-		return r.runGrant(ctx, args[1:])
+		return r.runGrant(ctx, stack.PAP, args[1:])
 	case "list":
-		return r.runList(ctx, args[1:])
+		return r.runList(ctx, stack.PAP, args[1:])
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown approval subcommand '%s'\n", args[0])
 		return domain.ExitBadInput
 	}
 }
 
-func (r *ApprovalRunner) runGrant(ctx context.Context, args []string) domain.ExitCode {
+func (r *ApprovalRunner) runGrant(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("approval grant", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 	var sub, act, res, jti, argHash string
@@ -70,7 +68,7 @@ func (r *ApprovalRunner) runGrant(ctx context.Context, args []string) domain.Exi
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitBadInput
 	}
-	a, err := r.papSvc.CreateApproval(ctx, pap.CreateApprovalRequest{
+	a, err := papSvc.CreateApproval(ctx, pap.CreateApprovalRequest{
 		Subject: sub, Action: action, Resource: res, TokenJTI: jti, ArgHash: argHash, TTL: ttl,
 	})
 	if err != nil {
@@ -82,7 +80,7 @@ func (r *ApprovalRunner) runGrant(ctx context.Context, args []string) domain.Exi
 	return domain.ExitSuccess
 }
 
-func (r *ApprovalRunner) runList(ctx context.Context, args []string) domain.ExitCode {
+func (r *ApprovalRunner) runList(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("approval list", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 	var sub string
@@ -90,7 +88,7 @@ func (r *ApprovalRunner) runList(ctx context.Context, args []string) domain.Exit
 	if err := fs.Parse(args); err != nil {
 		return domain.ExitBadInput
 	}
-	list, err := r.papSvc.ListApprovals(ctx, sub)
+	list, err := papSvc.ListApprovals(ctx, sub)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitInternalError

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"authz-harness/internal/app"
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/keys"
 	"authz-harness/internal/domain"
@@ -36,11 +37,18 @@ func newKeysRunnerForFailure(t *testing.T) (*KeysRunner, *bytes.Buffer, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = r.Close() })
-	active, err := r.mgr.GetActiveSigningKey()
+
+	// 초기 활성 키 생성을 위해 임시 스택을 열고 KID 수거 후 닫는다.
+	initStack, err := app.BuildStack(app.AppConfig{PrivKeyPath: priv, PubJWKSPath: pub, AuditPath: filepath.Join(dir, "audit.jsonl"), WithoutGateway: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	active, err := initStack.KeyManager.GetActiveSigningKey()
+	_ = initStack.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	store, err := keys.NewFileStore(priv, pub)
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +57,7 @@ func newKeysRunnerForFailure(t *testing.T) (*KeysRunner, *bytes.Buffer, string) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.mgr = failMgr
+	r.mgrOverride = failMgr
 	r.errOut = &errOut
 	return r, &errOut, active.KID
 }
@@ -82,7 +90,7 @@ func TestKeysRunner_RevokeUnknownKidExitCode(t *testing.T) {
 	if code := r.Run(context.Background(), []string{"revoke", "--kid", "no-such-kid"}); code != domain.ExitAuditFailure {
 		t.Fatalf("deny audit failure: expected %d, got %d", domain.ExitAuditFailure, code)
 	}
-	r.mgr = r.stack.KeyManager
+	r.mgrOverride = nil
 	if code := r.Run(context.Background(), []string{"revoke", "--kid", "no-such-kid"}); code != domain.ExitBadInput {
 		t.Fatalf("expected %d, got %d", domain.ExitBadInput, code)
 	}
@@ -91,7 +99,7 @@ func TestKeysRunner_RevokeUnknownKidExitCode(t *testing.T) {
 // 계획 018 C3: 일반 저장 오류는 16 을 유지한다.
 func TestKeysRunner_PlainStoreErrorExitCode(t *testing.T) {
 	r, _, kid := newKeysRunnerForFailure(t)
-	r.mgr = errKeyManager{r.mgr}
+	r.mgrOverride = errKeyManager{r.mgrOverride}
 	if code := r.Run(context.Background(), []string{"rotate"}); code != domain.ExitInternalError {
 		t.Fatalf("rotate: expected %d, got %d", domain.ExitInternalError, code)
 	}

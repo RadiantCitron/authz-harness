@@ -15,8 +15,6 @@ import (
 
 // GrantRunner 는 `grant` 하위 명령어 실행을 주관하는 러너다.
 type GrantRunner struct {
-	papSvc    pap.Service
-	stack     *app.AppStack
 	out       io.Writer
 	errOut    io.Writer
 	auditPath string
@@ -25,14 +23,7 @@ type GrantRunner struct {
 
 // NewGrantRunner 는 지정된 입출력 스트림과 파일 경로로 GrantRunner를 생성한다.
 func NewGrantRunner(out, errOut io.Writer, statePath, auditPath string) (*GrantRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{StatePath: statePath, AuditPath: auditPath, WithoutGateway: true})
-	if err != nil {
-		return nil, err
-	}
-
 	return &GrantRunner{
-		papSvc:    stack.PAP,
-		stack:     stack,
 		out:       out,
 		errOut:    errOut,
 		auditPath: auditPath,
@@ -40,13 +31,15 @@ func NewGrantRunner(out, errOut io.Writer, statePath, auditPath string) (*GrantR
 	}, nil
 }
 
-// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
-func (r *GrantRunner) Close() error {
-	return r.stack.Close()
-}
-
 // Run 은 전달받은 인자(args)를 바탕으로 `grant` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.
 func (r *GrantRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	stack, err := app.BuildStack(app.AppConfig{StatePath: r.statePath, AuditPath: r.auditPath, WithoutGateway: true})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to initialize grant runner: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer stack.Close()
+
 	if len(args) == 0 {
 		fmt.Fprintf(r.errOut, "Error: grant subcommand required (create, revoke, bump-epoch, list)\n")
 		return domain.ExitBadInput
@@ -57,20 +50,20 @@ func (r *GrantRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 
 	switch subcmd {
 	case "create":
-		return r.runCreate(ctx, subArgs)
+		return r.runCreate(ctx, stack.PAP, subArgs)
 	case "revoke":
-		return r.runRevoke(ctx, subArgs)
+		return r.runRevoke(ctx, stack.PAP, subArgs)
 	case "bump-epoch":
-		return r.runBumpEpoch(ctx, subArgs)
+		return r.runBumpEpoch(ctx, stack.PAP, subArgs)
 	case "list":
-		return r.runList(ctx, subArgs)
+		return r.runList(ctx, stack.PAP, subArgs)
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown grant subcommand '%s'\n", subcmd)
 		return domain.ExitBadInput
 	}
 }
 
-func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitCode {
+func (r *GrantRunner) runCreate(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("grant create", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -96,7 +89,7 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitBadInput
 	}
 
-	grant, err := r.papSvc.CreateGrant(ctx, pap.CreateGrantRequest{
+	grant, err := papSvc.CreateGrant(ctx, pap.CreateGrantRequest{
 		Subject:  sub,
 		Action:   action,
 		Resource: res,
@@ -113,7 +106,7 @@ func (r *GrantRunner) runCreate(ctx context.Context, args []string) domain.ExitC
 	return domain.ExitSuccess
 }
 
-func (r *GrantRunner) runRevoke(ctx context.Context, args []string) domain.ExitCode {
+func (r *GrantRunner) runRevoke(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("grant revoke", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -129,7 +122,7 @@ func (r *GrantRunner) runRevoke(ctx context.Context, args []string) domain.ExitC
 		return domain.ExitBadInput
 	}
 
-	revoked, err := r.papSvc.RevokeGrant(ctx, id)
+	revoked, err := papSvc.RevokeGrant(ctx, id)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
@@ -144,7 +137,7 @@ func (r *GrantRunner) runRevoke(ctx context.Context, args []string) domain.ExitC
 	return domain.ExitSuccess
 }
 
-func (r *GrantRunner) runBumpEpoch(ctx context.Context, args []string) domain.ExitCode {
+func (r *GrantRunner) runBumpEpoch(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("grant bump-epoch", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -160,7 +153,7 @@ func (r *GrantRunner) runBumpEpoch(ctx context.Context, args []string) domain.Ex
 		return domain.ExitBadInput
 	}
 
-	newEpoch, err := r.papSvc.BumpEpoch(ctx, sub)
+	newEpoch, err := papSvc.BumpEpoch(ctx, sub)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
@@ -171,7 +164,7 @@ func (r *GrantRunner) runBumpEpoch(ctx context.Context, args []string) domain.Ex
 	return domain.ExitSuccess
 }
 
-func (r *GrantRunner) runList(ctx context.Context, args []string) domain.ExitCode {
+func (r *GrantRunner) runList(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("grant list", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -195,7 +188,7 @@ func (r *GrantRunner) runList(ctx context.Context, args []string) domain.ExitCod
 		filter.Status = &st
 	}
 
-	grants, err := r.papSvc.ListGrants(ctx, filter)
+	grants, err := papSvc.ListGrants(ctx, filter)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: %v\n", err)
 		return domain.ExitInternalError

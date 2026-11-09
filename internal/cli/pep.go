@@ -17,7 +17,6 @@ import (
 
 // PEPRunner 는 `pep` 하위 명령어(read, write) 실행을 주관하는 CLI 러너다.
 type PEPRunner struct {
-	stack        *app.AppStack
 	out          io.Writer
 	errOut       io.Writer
 	workspaceDir string
@@ -32,20 +31,7 @@ func NewPEPRunner(
 	out, errOut io.Writer,
 	workspaceDir, statePath, pubJWKSPath, replayPath, auditPath string,
 ) (*PEPRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{
-		WorkspaceDir: workspaceDir,
-		StatePath:    statePath,
-		PubJWKSPath:  pubJWKSPath,
-		ReplayPath:   replayPath,
-		AuditPath:    auditPath,
-		VerifyOnly:   true, // PEP CLI 는 검증 전용(Zone A 개인키 미접근)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to build pep stack: %w", err)
-	}
-
 	return &PEPRunner{
-		stack:        stack,
 		out:          out,
 		errOut:       errOut,
 		workspaceDir: workspaceDir,
@@ -56,16 +42,22 @@ func NewPEPRunner(
 	}, nil
 }
 
-// Close 는 PEPRunner 내부 스택(AuditWriter 등) 리소스를 정리한다.
-func (r *PEPRunner) Close() error {
-	if r.stack != nil {
-		return r.stack.Close()
-	}
-	return nil
-}
-
 // Run 은 주어진 인자에 따라 `read` 또는 `write` 서브커맨드를 라우팅 실행한다.
 func (r *PEPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	stack, err := app.BuildStack(app.AppConfig{
+		WorkspaceDir: r.workspaceDir,
+		StatePath:    r.statePath,
+		PubJWKSPath:  r.pubJWKSPath,
+		ReplayPath:   r.replayPath,
+		AuditPath:    r.auditPath,
+		VerifyOnly:   true, // PEP CLI 는 검증 전용(Zone A 개인키 미접근)
+	})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to initialize pep runner: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer stack.Close()
+
 	if len(args) == 0 {
 		fmt.Fprintf(r.errOut, "Error: missing pep subcommand (expected 'read' or 'write')\n")
 		return domain.ExitBadInput
@@ -74,9 +66,9 @@ func (r *PEPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	subcmd := args[0]
 	switch subcmd {
 	case "read":
-		return r.runRead(ctx, args[1:])
+		return r.runRead(ctx, stack.PEP, args[1:])
 	case "write":
-		return r.runWrite(ctx, args[1:])
+		return r.runWrite(ctx, stack.PEP, args[1:])
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown pep subcommand '%s'\n", subcmd)
 		return domain.ExitBadInput
@@ -103,7 +95,7 @@ func (r *PEPRunner) parseCommonPEPFlags(fs *flag.FlagSet, c *pepCommonFlags) {
 	fs.StringVar(&c.traceID, "trace-id", "", "Explicit transaction trace ID")
 }
 
-func (r *PEPRunner) executePEPAction(ctx context.Context, action domain.Action, actionName string, c pepCommonFlags, resource string, data []byte) domain.ExitCode {
+func (r *PEPRunner) executePEPAction(ctx context.Context, gateway pep.Gateway, action domain.Action, actionName string, c pepCommonFlags, resource string, data []byte) domain.ExitCode {
 	if strings.TrimSpace(resource) == "" {
 		fmt.Fprintf(r.errOut, "Error: missing resource path for %s\n", actionName)
 		return domain.ExitBadInput
@@ -137,7 +129,7 @@ func (r *PEPRunner) executePEPAction(ctx context.Context, action domain.Action, 
 		TraceID:            traceID,
 	}
 
-	res, err := r.stack.PEP.Execute(ctx, req)
+	res, err := gateway.Execute(ctx, req)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: internal error executing pep %s: %v\n", actionName, err)
 		return domain.ExitInternalError
@@ -147,7 +139,7 @@ func (r *PEPRunner) executePEPAction(ctx context.Context, action domain.Action, 
 	return res.ExitCode
 }
 
-func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode {
+func (r *PEPRunner) runRead(ctx context.Context, gateway pep.Gateway, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("pep read", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -162,10 +154,10 @@ func (r *PEPRunner) runRead(ctx context.Context, args []string) domain.ExitCode 
 		resource = fs.Arg(0)
 	}
 
-	return r.executePEPAction(ctx, domain.ActionFileRead, "read", c, resource, nil)
+	return r.executePEPAction(ctx, gateway, domain.ActionFileRead, "read", c, resource, nil)
 }
 
-func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode {
+func (r *PEPRunner) runWrite(ctx context.Context, gateway pep.Gateway, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("pep write", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 
@@ -198,7 +190,7 @@ func (r *PEPRunner) runWrite(ctx context.Context, args []string) domain.ExitCode
 		writeBytes = []byte(dataStr)
 	}
 
-	return r.executePEPAction(ctx, domain.ActionFileWrite, "write", c, resource, writeBytes)
+	return r.executePEPAction(ctx, gateway, domain.ActionFileWrite, "write", c, resource, writeBytes)
 }
 
 func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string) {

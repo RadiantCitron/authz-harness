@@ -16,25 +16,17 @@ import (
 
 // KeysRunner 는 `keys` 하위 명령어 실행을 주관하는 러너다.
 type KeysRunner struct {
-	mgr       keys.KeyManager
-	stack     *app.AppStack
-	out       io.Writer
-	errOut    io.Writer
-	privPath  string
-	pubPath   string
-	auditPath string
+	mgrOverride keys.KeyManager // 테스트 주입 지원 (D-07)
+	out         io.Writer
+	errOut      io.Writer
+	privPath    string
+	pubPath     string
+	auditPath   string
 }
 
 // NewKeysRunner 는 지정된 입출력 스트림과 키 파일 경로로 KeysRunner를 생성한다.
 func NewKeysRunner(out, errOut io.Writer, privPath, pubPath, auditPath string) (*KeysRunner, error) {
-	stack, err := app.BuildStack(app.AppConfig{PrivKeyPath: privPath, PubJWKSPath: pubPath, AuditPath: auditPath, WithoutGateway: true})
-	if err != nil {
-		return nil, err
-	}
-
 	return &KeysRunner{
-		mgr:       stack.KeyManager,
-		stack:     stack,
 		out:       out,
 		errOut:    errOut,
 		privPath:  privPath,
@@ -43,13 +35,20 @@ func NewKeysRunner(out, errOut io.Writer, privPath, pubPath, auditPath string) (
 	}, nil
 }
 
-// Close 는 러너가 소유한 합성 루트 자원(감사 파일 등)을 정리한다.
-func (r *KeysRunner) Close() error {
-	return r.stack.Close()
-}
-
 // Run 은 전달받은 인자(args)를 바탕으로 `keys` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.
 func (r *KeysRunner) Run(ctx context.Context, args []string) domain.ExitCode {
+	stack, err := app.BuildStack(app.AppConfig{PrivKeyPath: r.privPath, PubJWKSPath: r.pubPath, AuditPath: r.auditPath, WithoutGateway: true})
+	if err != nil {
+		fmt.Fprintf(r.errOut, "Error: failed to initialize keys runner: %v\n", err)
+		return domain.ExitInternalError
+	}
+	defer stack.Close()
+
+	mgr := stack.KeyManager
+	if r.mgrOverride != nil {
+		mgr = r.mgrOverride
+	}
+
 	if len(args) == 0 {
 		fmt.Fprintf(r.errOut, "Error: keys subcommand required (list, rotate, revoke)\n")
 		return domain.ExitBadInput
@@ -60,28 +59,28 @@ func (r *KeysRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 
 	switch subcmd {
 	case "list":
-		return r.runList(subArgs)
+		return r.runList(mgr, subArgs)
 	case "rotate":
-		return r.runRotate(subArgs)
+		return r.runRotate(mgr, subArgs)
 	case "revoke":
-		return r.runRevoke(subArgs)
+		return r.runRevoke(mgr, subArgs)
 	default:
 		fmt.Fprintf(r.errOut, "Error: unknown keys subcommand '%s'. Available: list, rotate, revoke\n", subcmd)
 		return domain.ExitBadInput
 	}
 }
 
-func (r *KeysRunner) runList(args []string) domain.ExitCode {
+func (r *KeysRunner) runList(mgr keys.KeyManager, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("keys list", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
 	if err := fs.Parse(args); err != nil {
 		return domain.ExitBadInput
 	}
 
-	keyList, err := r.mgr.ListKeys()
+	keyList, err := mgr.ListKeys()
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to list keys: %v\n", err)
-		return domain.ExitInternalError
+		return domain.ExitCodeFromError(err, domain.ExitInternalError)
 	}
 
 	if len(keyList) == 0 {
@@ -115,7 +114,7 @@ func (r *KeysRunner) runList(args []string) domain.ExitCode {
 	return domain.ExitSuccess
 }
 
-func (r *KeysRunner) runRotate(args []string) domain.ExitCode {
+func (r *KeysRunner) runRotate(mgr keys.KeyManager, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("keys rotate", flag.ContinueOnError)
 	actor := fs.String("actor", "operator", "키 회전을 수행하는 행위자")
 	reason := fs.String("reason", "manual rotation", "키 회전 사유")
@@ -137,7 +136,7 @@ func (r *KeysRunner) runRotate(args []string) domain.ExitCode {
 		Reason:  *reason,
 	}
 
-	newKey, err := r.mgr.RotateKey(auditCtx)
+	newKey, err := mgr.RotateKey(auditCtx)
 	if err != nil {
 		fmt.Fprintf(r.errOut, "Error: failed to rotate key: %v\n", err)
 		return domain.ExitCodeFromError(err, domain.ExitInternalError)
@@ -149,7 +148,7 @@ func (r *KeysRunner) runRotate(args []string) domain.ExitCode {
 	return domain.ExitSuccess
 }
 
-func (r *KeysRunner) runRevoke(args []string) domain.ExitCode {
+func (r *KeysRunner) runRevoke(mgr keys.KeyManager, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("keys revoke", flag.ContinueOnError)
 	kid := fs.String("kid", "", "폐기할 키의 KID (필수)")
 	actor := fs.String("actor", "operator", "키 폐기를 수행하는 행위자")
@@ -177,7 +176,7 @@ func (r *KeysRunner) runRevoke(args []string) domain.ExitCode {
 		Reason:  *reason,
 	}
 
-	if err := r.mgr.RevokeKey(*kid, auditCtx); err != nil {
+	if err := mgr.RevokeKey(*kid, auditCtx); err != nil {
 		if errors.Is(err, keys.ErrKeyNotFound) {
 			fmt.Fprintf(r.errOut, "Error: key not found: %s\n", *kid)
 			return domain.ExitCodeFromError(err, domain.ExitBadInput)
