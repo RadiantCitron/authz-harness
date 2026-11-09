@@ -104,6 +104,10 @@ func NewManager(store Store, auditLog audit.Writer, opts ...ManagerOption) (*Man
 			bootstrappedStatus = entry.Status
 			return nil
 		})
+		if errors.Is(err, ErrVerifyOnlyStore) {
+			// 검증 전용 스택은 키를 만들 수 없다. 조립은 허용하고, 검증 단계가 모든 토큰을 거부한다(Fail-Closed).
+			return m, nil
+		}
 		if err != nil {
 			return nil, fmt.Errorf("keys manager: failed to save initial state: %w", err)
 		}

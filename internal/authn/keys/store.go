@@ -18,6 +18,9 @@ var (
 	ErrKeyNotFound = errors.New("key not found in key ring")
 	ErrKeyRetired  = errors.New("key is retired")
 	ErrNoActiveKey = errors.New("no active signing key found")
+
+	// ErrVerifyOnlyStore 는 Zone A 없이 조립된 저장소에 키 변경을 시도했다는 뜻이다.
+	ErrVerifyOnlyStore = errors.New("keys store: cannot update in verify-only mode (privStore is nil)")
 )
 
 // ZoneAPrivateKeyEntry 는 Zone A 파일에 저장되는 개별 키 모델이다.
@@ -196,7 +199,7 @@ func (fs *FileStore) LoadPublic() (*domain.JWKS, error) {
 // Zone A 파일(0600)과 Zone B 공개 JWKS 파일(0644)을 동일 배타 락 구간 내에서 원자적으로 동시 갱신한다.
 func (fs *FileStore) Update(fn func(priv *ZoneAPrivateState) error) error {
 	if fs.privStore == nil {
-		return errors.New("keys store: cannot update in verify-only mode (privStore is nil)")
+		return ErrVerifyOnlyStore
 	}
 	if fn == nil {
 		return errors.New("keys store: update function must not be nil")
