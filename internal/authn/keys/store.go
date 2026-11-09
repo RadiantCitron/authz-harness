@@ -69,6 +69,13 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 		if err := os.MkdirAll(privDir, 0700); err != nil {
 			return nil, fmt.Errorf("keys store: failed to create private dir %s: %w", privDir, err)
 		}
+		// MkdirAll 은 이미 있는 폴더의 권한을 바꾸지 않으므로 Zone A 폴더를 직접 0700 으로 좁힌다.
+		// 경로에 폴더가 없으면(".") 사용자의 작업 폴더이므로 건드리지 않는다.
+		if privDir != "." {
+			if err := os.Chmod(privDir, 0700); err != nil {
+				return nil, fmt.Errorf("keys store: failed to restrict private dir %s: %w", privDir, err)
+			}
+		}
 	}
 
 	pubDir := filepath.Dir(pubPath)

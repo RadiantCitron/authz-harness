@@ -86,9 +86,7 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		cfg.BudgetPath,
 		cfg.AuditPath,
 	}
-	if !cfg.VerifyOnly && cfg.PrivKeyPath != "" {
-		pathsToEnsure = append(pathsToEnsure, cfg.PrivKeyPath)
-	}
+	// Zone A 폴더는 여기서 만들지 않는다. keys.NewFileStore 가 0700 으로 만들고 권한을 보장한다.
 
 	for _, p := range pathsToEnsure {
 		if p != "" {
