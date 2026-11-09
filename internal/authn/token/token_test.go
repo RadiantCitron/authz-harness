@@ -20,7 +20,7 @@ type testRig struct {
 	auditPath    string
 }
 
-func setupTestRig(t *testing.T) *testRig {
+func setupTestRig(t testing.TB) *testRig {
 	t.Helper()
 	tmpDir := t.TempDir()
 
@@ -361,7 +361,7 @@ func FuzzTokenParser(f *testing.F) {
 	f.Add("a.b.c.d")
 	f.Add("")
 
-	rig := setupTestRig(&testing.T{})
+	rig := setupTestRig(f)
 
 	f.Fuzz(func(t *testing.T, token string) {
 		_, _, _ = rig.verifier.InspectToken(token)

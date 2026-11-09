@@ -204,30 +204,61 @@ func TestKeyManager_Concurrency(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
+	errCh := make(chan error, goroutines)
 	for i := 0; i < goroutines; i++ {
 		go func(idx int) {
 			defer wg.Done()
 			if idx%3 == 0 {
-				_, _ = mgr.RotateKey(domain.AuditContext{
+				_, err := mgr.RotateKey(domain.AuditContext{
 					TraceID: fmt.Sprintf("trace-%d", idx),
 					Actor:   "concurrent-worker",
 					Reason:  "rotation test",
 				})
+				if err != nil {
+					errCh <- fmt.Errorf("goroutine %d RotateKey failed: %w", idx, err)
+				}
 			} else {
-				_, _ = mgr.ListKeys()
-				_, _ = mgr.GetActiveSigningKey()
+				if _, err := mgr.ListKeys(); err != nil {
+					errCh <- fmt.Errorf("goroutine %d ListKeys failed: %w", idx, err)
+				}
+				if _, err := mgr.GetActiveSigningKey(); err != nil {
+					errCh <- fmt.Errorf("goroutine %d GetActiveSigningKey failed: %w", idx, err)
+				}
 			}
 		}(i)
 	}
 
 	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("concurrent operation error: %v", err)
+	}
 
 	keys, err := mgr.ListKeys()
 	if err != nil {
 		t.Fatalf("concurrent ListKeys failed: %v", err)
 	}
-	if len(keys) < 1 {
-		t.Fatalf("expected at least 1 key after concurrent operations, got %d", len(keys))
+	// 초기 키 1개 + 4회 회전 (idx=0, 3, 6, 9) = 총 5개 키
+	if len(keys) != 5 {
+		t.Fatalf("expected exactly 5 keys after concurrent operations, got %d", len(keys))
+	}
+
+	activeCount := 0
+	verifyOnlyCount := 0
+	for _, k := range keys {
+		switch k.Status {
+		case domain.KeyStatusActive:
+			activeCount++
+		case domain.KeyStatusVerifyOnly:
+			verifyOnlyCount++
+		}
+	}
+	if activeCount != 1 {
+		t.Errorf("expected active count 1, got %d", activeCount)
+	}
+	if verifyOnlyCount != 4 {
+		t.Errorf("expected verify-only count 4, got %d", verifyOnlyCount)
 	}
 }
 
