@@ -12,7 +12,7 @@
 //
 // 3. 3대 판정 유형 (ALLOW / DENY / ASK):
 //   - DecisionAllow: 활성 Grant 가 존재하고 human approval 이 불필요하거나 유효한 Approval 이 바인딩된 경우.
-//   - DecisionAsk: 권한은 부여되어 있으나 위험 작업이어서 사람 승인이 필요한 경우 (PEP Stage 07 에서 사람 승인 검사).
+//   - DecisionAsk: 권한은 부여되어 있으나 위험 작업이어서 사람 승인이 필요한 경우 (PEP approval 단계에서 사람 승인 검사).
 //   - DecisionDeny: 일치하는 활성 권한이 없거나, 만료/회수되었거나, 스코프가 부족하거나, Epoch 가 불일치하는 경우.
 //
 // 4. DIP(의존성 역전 원칙) 배선:

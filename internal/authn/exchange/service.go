@@ -159,13 +159,13 @@ type exchangeCall struct {
 	traceID  string    // Exchange 입구 생성 추적 ID
 	actor    string    // Exchange 입구 행위자
 
-	clientInfo     *token.ClientInfo  // Stage 01(client_auth)에서 채워짐
-	parentClaims   domain.TokenClaims // Stage 03(parent_token)에서 채워짐
+	clientInfo     *token.ClientInfo  // client_auth 검증 통과 시 채워짐
+	parentClaims   domain.TokenClaims // parent_token 검증 통과 시 채워짐
 	parentJTI      string             // parent_token 이 통과해야 채워짐. 그 전의 거부 감사에는 빈 값이 남음
-	budgetInvolved bool               // Stage 03(parent_token)에서 부모/자식 예산 관여 여부 판별
-	childEpoch     domain.Epoch       // Stage 07(token_issue)에서 확정
-	childDepth     int                // Stage 07(token_issue)에서 계산
-	child          *token.IssueResult // Stage 07(token_issue)에서 발급 완료
+	budgetInvolved bool               // parent_token 에서 부모/자식 예산 관여 여부 판별
+	childEpoch     domain.Epoch       // token_issue 단계에서 확정
+	childDepth     int                // token_issue 단계에서 계산
+	child          *token.IssueResult // token_issue 단계에서 발급 완료
 }
 
 // denial 은 파이프라인 검문 실패 시 감사 사유(domain.Reason)와 호출자 반환용 에러(error)를 쌍으로 캡슐화한다.
@@ -275,7 +275,7 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 	}, nil
 }
 
-// Stage 01. client_auth: 대리인 클라이언트 자격증명 인증 (crypto/subtle.ConstantTimeCompare)
+// client_auth: 대리인 클라이언트 자격증명 인증 (crypto/subtle.ConstantTimeCompare)
 func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error {
 	info, err := s.clients.AuthenticateClient(c.req.ClientID, c.req.ClientSecret)
 	if err != nil {
@@ -286,7 +286,7 @@ func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error
 	return nil
 }
 
-// Stage 02. delegation_subject: 요청 클라이언트가 해당 자식 주체(ChildSubject) 명의로 토큰을 요청할 수 있는지 검사
+// delegation_subject: 요청 클라이언트가 해당 자식 주체(ChildSubject) 명의로 토큰을 요청할 수 있는지 검사
 func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall) error {
 	if strings.TrimSpace(c.req.ChildSubject) == "" {
 		msg := "child subject is required"
@@ -300,7 +300,7 @@ func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall
 	return nil
 }
 
-// Stage 03. parent_token: 부모 토큰 무결성·암호학적 서명 검증.
+// parent_token: 부모 토큰 무결성·암호학적 서명 검증.
 // 교환 시에는 부모 토큰이 살아있음을 검증하되 jti 를 리플레이 소비(RecordReplay: false)하지 않는다.
 func (s *ExchangeService) parentToken(ctx context.Context, c *exchangeCall) error {
 	verified, err := s.verifier.VerifyToken(c.req.ParentToken, token.VerifyOptions{RecordReplay: false}, c.auditCtx)
@@ -314,7 +314,7 @@ func (s *ExchangeService) parentToken(ctx context.Context, c *exchangeCall) erro
 	return nil
 }
 
-// Stage 04. lineage_epoch: 부모 및 조상(act 사슬) 전체의 Security Epoch 실시간 대조 (PIP 스냅샷 배선 시)
+// lineage_epoch: 부모 및 조상(act 사슬) 전체의 Security Epoch 실시간 대조 (PIP 스냅샷 배선 시)
 func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
 	snap, snapErr := s.snapshots.GetSubjectSnapshot(ctx, p.Subject)
@@ -338,7 +338,7 @@ func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) err
 	return nil
 }
 
-// Stage 05. downscope: 5대 축소 위임(Downscoping) 불변식 정적 검증
+// downscope: 5대 축소 위임(Downscoping) 불변식 정적 검증
 func (s *ExchangeService) downscope(ctx context.Context, c *exchangeCall) error {
 	if err := s.validator.ValidateDownscope(&c.parentClaims, c.req.ChildSubject, c.req.Scope, c.req.TTL, c.now); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
@@ -347,7 +347,7 @@ func (s *ExchangeService) downscope(ctx context.Context, c *exchangeCall) error 
 	return nil
 }
 
-// Stage 06. budget_downscope: 자식 예산 상한 정적 축소 검사 및 예산 원장(Ledger) 존재 필수 확인
+// budget_downscope: 자식 예산 상한 정적 축소 검사 및 예산 원장(Ledger) 존재 필수 확인
 func (s *ExchangeService) budgetDownscope(ctx context.Context, c *exchangeCall) error {
 	if err := ValidateBudgetDownscope(c.parentClaims.Budget, c.req.Budget); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
@@ -360,7 +360,7 @@ func (s *ExchangeService) budgetDownscope(ctx context.Context, c *exchangeCall) 
 	return nil
 }
 
-// Stage 07. token_issue: 선대 계보(act) 사슬 연결 및 Zone A 개인키 기반 신규 자식 토큰 발급
+// token_issue: 선대 계보(act) 사슬 연결 및 Zone A 개인키 기반 신규 자식 토큰 발급
 func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
 	childActor := &domain.ActorClaim{Subject: p.Subject, JWTID: p.JWTID, Epoch: p.Epoch, Actor: p.Actor}
@@ -394,7 +394,7 @@ func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error
 	return nil
 }
 
-// Stage 08. budget_reserve: 예산 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
+// budget_reserve: 예산 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
 // 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
 func (s *ExchangeService) budgetReserve(ctx context.Context, c *exchangeCall) error {
 	if err := s.budgets.Reserve(c.parentClaims.JWTID, c.child.Claims.JWTID, *c.req.Budget, c.child.Claims.ExpiresAt); err != nil {
