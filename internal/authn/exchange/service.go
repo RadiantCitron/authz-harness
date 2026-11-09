@@ -271,21 +271,16 @@ func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) err
 		details := fmt.Sprintf("failed to query parent subject snapshot: %v", snapErr)
 		return &denial{domain.ReasonInternalError, details, domain.NewError(domain.ReasonInternalError, details, snapErr)}
 	}
-	if reason := snap.ValidateLineageEpoch(p.Subject, p.Epoch, p.Actor); reason != "" {
+	if reason, badAncestor := snap.ValidateLineageEpoch(p.Subject, p.Epoch, p.Actor); reason != "" {
 		parentEpoch := domain.Epoch(p.Epoch)
 		if parentEpoch < 1 {
 			parentEpoch = 1
 		}
 		var details string
-		if parentEpoch != snap.CurrentEpoch {
+		if badAncestor != nil {
+			details = fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", badAncestor.Subject, badAncestor.Epoch)
+		} else if parentEpoch != snap.CurrentEpoch {
 			details = fmt.Sprintf("parent %q epoch (%d) does not match current epoch (%d)", p.Subject, parentEpoch, snap.CurrentEpoch)
-		} else {
-			for a := p.Actor; a != nil; a = a.Actor {
-				if a.Epoch < 1 || snap.SubjectEpochs == nil || snap.SubjectEpochs.Get(a.Subject) != a.Epoch {
-					details = fmt.Sprintf("ancestor %q epoch (%d) does not match current epoch", a.Subject, a.Epoch)
-					break
-				}
-			}
 		}
 		return &denial{reason, details, domain.NewError(reason, details, nil)}
 	}

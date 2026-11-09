@@ -71,20 +71,15 @@ func Evaluate(req Request, snapshot *domain.SubjectSnapshot) Decision {
 	}
 
 	// 2. Security Epoch 일치 검증 및 위임 계보(act 사슬) 연쇄 Epoch 검증 (도메인 SSOT)
-	if reason := snapshot.ValidateLineageEpoch(cleanSub, req.Epoch, req.Actor); reason != "" {
+	if reason, badAncestor := snapshot.ValidateLineageEpoch(cleanSub, req.Epoch, req.Actor); reason != "" {
 		details := "Security Epoch 가 현재 활성 Epoch 와 일치하지 않아 무효화되었습니다."
-		if req.Epoch != snapshot.CurrentEpoch {
-			details = fmt.Sprintf("제시된 Security Epoch(%d)가 현재 활성 Epoch(%d)와 일치하지 않아 토큰/권한이 무효화되었습니다.", req.Epoch, snapshot.CurrentEpoch)
+		if badAncestor != nil {
+			details = fmt.Sprintf("위임 조상 %q의 제시 Epoch(%d)가 현재 Epoch(%d)와 일치하지 않아 하위 위임 토큰이 무효화되었습니다.",
+				badAncestor.Subject, badAncestor.Epoch, snapshot.SubjectEpochs.Get(badAncestor.Subject))
 		} else if req.Actor != nil && snapshot.SubjectEpochs == nil {
 			details = "위임 계보 Epoch 정보가 공급되지 않아 조상 Epoch를 검증할 수 없습니다."
-		} else if req.Actor != nil {
-			for a := req.Actor; a != nil; a = a.Actor {
-				if a.Epoch < 1 || snapshot.SubjectEpochs.Get(a.Subject) != a.Epoch {
-					details = fmt.Sprintf("위임 조상 %q의 제시 Epoch(%d)가 현재 Epoch(%d)와 일치하지 않아 하위 위임 토큰이 무효화되었습니다.",
-						a.Subject, a.Epoch, snapshot.SubjectEpochs.Get(a.Subject))
-					break
-				}
-			}
+		} else if req.Epoch != snapshot.CurrentEpoch {
+			details = fmt.Sprintf("제시된 Security Epoch(%d)가 현재 활성 Epoch(%d)와 일치하지 않아 토큰/권한이 무효화되었습니다.", req.Epoch, snapshot.CurrentEpoch)
 		}
 		return Decision{
 			Decision: DecisionDeny,
