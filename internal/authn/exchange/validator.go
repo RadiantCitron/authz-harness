@@ -1,3 +1,17 @@
+// Package exchange 는 RFC 8693 OAuth 2.0 Token Exchange 기반의 권한 축소 위임(Downscoping) 불변식 검증기를 제공한다.
+//
+// [5대 축소 위임 불변식 (Delegation Invariants)]
+// 1. 스코프 부분집합 원칙 (Scope Subset):
+//    - 자식 토큰의 요청 스코프 집합은 반드시 부모 토큰 스코프 집합의 부분집합이어야 한다 ($S_{child} \subseteq S_{parent}$).
+//    - 부모에 없는 권한을 자식이 요청하면 ReasonDelegationScopeExceeded 로 즉시 차단된다.
+// 2. 수명 상한 불변식 (TTL Invariant):
+//    - 자식 토큰의 만료 시각(exp)은 부모 토큰의 만료 시각을 절대 초과할 수 없다 ($exp_{child} \le exp_{parent}$).
+// 3. 최대 위임 깊이 강제 (Depth Limit):
+//    - 위임 체인의 깊이는 MaxDelegationDepth(3)를 초과할 수 없다. 무한 위임 체인으로 인한 권한 남용을 방지한다.
+// 4. 순환 위임 원천 차단 (Self-Loop Prevention):
+//    - 자식 주체(childSub)가 부모 주체와 동일하거나, 조상 act 계보 사슬 내에 이미 존재하는 경우 순환 위임 공격으로 간주하여 차단한다.
+// 5. 예산 단조 축소 (Budget Downscope):
+//    - 자식 토큰의 예산은 부모 잔여 예산 이내여야 하며, 부모가 예산 토큰일 때 자식이 예산 없이(무제한) 요청하는 격상을 금지한다.
 package exchange
 
 import (
@@ -9,7 +23,7 @@ import (
 	"authz-harness/internal/domain"
 )
 
-// MaxDelegationDepth 는 허용되는 최대 위임 체인 깊이다.
+// MaxDelegationDepth 는 허용되는 최대 위임 체인 깊이다 (루트 0 ➔ 1차 자식 1 ➔ 2차 자식 2 ➔ 3차 자식 3).
 const MaxDelegationDepth = 3
 
 var (
@@ -29,7 +43,7 @@ var (
 	ErrSelfLoop = errors.New("self-loop delegation detected")
 )
 
-// DownscopeValidator 는 권한 축소 및 위임 불변식 검증 인터페이스다.
+// DownscopeValidator 는 권한 축소 및 위임 불변식을 검증하는 DIP 인터페이스다.
 type DownscopeValidator interface {
 	ValidateDownscope(parentClaims *domain.TokenClaims, childSub, requestedScope string, childTTL time.Duration, now time.Time) error
 }
@@ -39,14 +53,14 @@ type DefaultDownscopeValidator struct {
 	maxDepth int
 }
 
-// NewDownscopeValidator 는 DefaultDownscopeValidator 인스턴스를 반환한다.
+// NewDownscopeValidator 는 기본 최대 깊이(3)를 갖는 DefaultDownscopeValidator 인스턴스를 반환한다.
 func NewDownscopeValidator() *DefaultDownscopeValidator {
 	return &DefaultDownscopeValidator{
 		maxDepth: MaxDelegationDepth,
 	}
 }
 
-// ParseScopes 는 공백으로 구분된 스코프 문자열을 정규화된 스코프 슬라이스로 분리한다.
+// ParseScopes 는 공백으로 구분된 OAuth 2.1 스코프 문자열을 중복이 제거된 정규화 슬라이스로 분리한다.
 func ParseScopes(scopeStr string) []string {
 	fields := strings.Fields(scopeStr)
 	if len(fields) == 0 {
@@ -64,7 +78,7 @@ func ParseScopes(scopeStr string) []string {
 	return result
 }
 
-// ValidateDownscope 는 RFC 8693 및 최소 권한 위임 불변식을 검증한다.
+// ValidateDownscope 는 RFC 8693 및 최소 권한 위임 불변식(스코프, 수명, 깊이, 순환 루프)을 검증한다.
 func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.TokenClaims, childSub, requestedScope string, childTTL time.Duration, now time.Time) error {
 	if parentClaims == nil {
 		return errors.New("parent claims cannot be nil")
@@ -129,7 +143,7 @@ func (v *DefaultDownscopeValidator) ValidateDownscope(parentClaims *domain.Token
 }
 
 // ValidateBudgetDownscope 는 예산 단조 축소(자식 <= 부모 클레임 상한)를 정적으로 검증한다.
-// 부모 예산 없이 자식만 예산을 요청하면 예약할 부모 엔트리가 없으므로 거부한다(예산은 루트 발급에서만 시작).
+// 부모 예산 없이 자식만 예산을 요청하면 예약할 부모 엔트리가 없으므로 거부한다 (예산은 루트 발급에서만 시작).
 // 부모만 예산이 있고 자식이 없으면 무제한 격상이므로 거부한다.
 func ValidateBudgetDownscope(parent, child *domain.Budget) error {
 	deny := func(msg string) error {

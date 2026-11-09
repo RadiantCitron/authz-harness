@@ -1,3 +1,18 @@
+// Package keys 는 RFC 7517 기반 비대칭 키(Ed25519)의 생성, 회전(Rotation), 폐기(Revocation), 검증 키 조회 엔진을 제공한다.
+//
+// [DIP 및 수명주기 관리 원칙]
+// 1. 단일 활성 키 원칙 (Single Active Key):
+//   - 키 링 내에서 서명(Signing)에 사용되는 키는 오직 1개의 active 키만 존재한다.
+//
+// 2. 결정론적 회전(RotateKey):
+//   - 회전 시 신규 active 키를 생성하고 기존 active 키는 verify-only 상태로 전이하여,
+//     기존 토큰은 검증 가능하면서도 신규 서명은 새 키로만 이루어지도록 보장한다.
+//
+// 3. 즉각적 폐기(RevokeKey):
+//   - 키 탈취나 만료 시 retired 상태로 전이하여 해당 키로 서명된 모든 토큰의 검증을 즉각 거부(Fail-Closed)한다.
+//
+// 4. 감사 추적(Audit Trail):
+//   - 키 생성, 회전, 폐기, 거부(deny), 멱등 noop 등 모든 키 생애주기 사건을 audit.jsonl 해시 체인에 기록한다.
 package keys
 
 import (
@@ -10,7 +25,7 @@ import (
 	"authz-harness/internal/domain"
 )
 
-// KeyManager 는 Zone A/B 키 링의 수명주기를 제어하는 인터페이스다.
+// KeyManager 는 Zone A/B 키 링의 수명주기를 제어하는 DIP 인터페이스다.
 type KeyManager interface {
 	// ListKeys 는 현재 키 링의 모든 공개 메타데이터와 상태를 반환한다.
 	ListKeys() ([]domain.JWK, error)
@@ -28,17 +43,17 @@ type KeyManager interface {
 	RevokeKey(kid string, auditCtx domain.AuditContext) error
 }
 
-// Manager 는 KeyManager 인터페이스를 구현하는 엔진이다.
+// Manager 는 KeyManager 인터페이스를 구현하는 핵심 엔진이다.
 type Manager struct {
 	store       Store
 	auditWriter audit.Writer
 	clock       domain.Clock
 }
 
-// ManagerOption 은 Manager 옵션 구성자다.
+// ManagerOption 은 Manager 옵션 구성자 함수형 패턴이다.
 type ManagerOption func(*Manager)
 
-// WithClock 은 가상 시간을 주입하기 위한 옵션이다.
+// WithClock 은 가상 시간을 주입하기 위한 함수형 옵션이다 (결정론적 테스트용).
 func WithClock(c domain.Clock) ManagerOption {
 	return func(m *Manager) {
 		m.clock = c

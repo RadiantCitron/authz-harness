@@ -1,3 +1,23 @@
+// Package exchange 는 RFC 8693 OAuth 2.0 Token Exchange 표준 기반의 축소 위임(Downscoping) 파이프라인 서비스를 구현한다.
+//
+// [핵심 인가 아키텍처 및 8단계 컨베이어 벨트 파이프라인]
+// 1. 단일 진입점 및 SESE(Single Entry Single Exit) 보장:
+//   - Exchange(ctx, req, auditCtx) 는 TC-060-04-E 에 명시된 대로 오직 맨 끝 return 1개로만 종료한다.
+//   - 모든 성공/거부 감사 이벤트와 에러 포장은 finalize() 단일 마감 메서드로 통합 수렴한다.
+//
+// 2. 8단계 축소 위임 검문소 (domain.ExchangeStages):
+//   - 01_client_auth: 요청 클라이언트(대리인) 자격증명 인증 (crypto/subtle.ConstantTimeCompare)
+//   - 02_delegation_subject: 클라이언트의 자식 주체 위임 권한 검증 (clientInfo.IsSubjectAllowed)
+//   - 03_parent_token: 부모 Bearer 토큰 무결성·서명·만료 검증 (단, 부모 jti 리플레이 소비는 하지 않음)
+//   - 04_lineage_epoch: 부모 및 조상(act 사슬) 전체의 Security Epoch 실시간 대조 (PIP 스냅샷)
+//   - 05_downscope: 5대 축소 불변식 정적 검증 (동일 주체 금지, 스코프 부분집합, TTL 단축 등)
+//   - 06_budget_downscope: 예산 상한 축소 정적 검증 및 원장(Ledger) 배선 여부 확인
+//   - 07_token_issue: 조상 사슬(act)이 연결된 신규 자식 RFC 9068 Access Token 발급 및 Zone A 서명
+//   - 08_budget_reserve: 자식 발급 성공 후 부모 예산 원장에서 자식 한도 원자적 차감/예약 (정산 단계)
+//
+// 3. DIP(의존성 역전 원칙) 배선:
+//   - internal/app/builder.go 의 BuildStack 에서 TokenIssuer, TokenVerifier, ClientRegistry,
+//     DownscopeValidator, audit.Writer, domain.Clock, budget.Ledger, domain.SnapshotProvider 를 주입받아 조립된다.
 package exchange
 
 import (
@@ -16,31 +36,56 @@ import (
 
 // ExchangeRequest 는 RFC 8693 Token Exchange 요청 명세다.
 type ExchangeRequest struct {
-	ClientID     string
+	// ClientID 는 토큰 교환을 요청하는 위임 대리인 클라이언트 ID 다.
+	ClientID string
+
+	// ClientSecret 은 요청 클라이언트의 자격증명 비밀값이다.
 	ClientSecret string
-	ParentToken  string
+
+	// ParentToken 은 권한을 위임하고자 하는 원본 부모 토큰 (Base64URL JWT) 이다.
+	ParentToken string
+
+	// ChildSubject 는 위임받을 신규 자식 주체 식별자다 (예: "worker-01").
 	ChildSubject string
-	Scope        string
-	Audience     string
-	TTL          time.Duration
-	Budget       *domain.Budget // 자식 예산 상한. 부모 예산이 있으면 필수.
-	ChildEpoch   domain.Epoch   // 자식 주체의 Epoch (0이면 1). 틀리면 PEP 의 PDP 가 거부한다(Fail-Closed).
+
+	// Scope 는 자식에게 부여할 축소된 권한 스코프다. 부모 스코프의 진부분집합이어야 한다.
+	Scope string
+
+	// Audience 는 자식 토큰의 대상 리소스 서버 식별자다 (비어있으면 부모 Audience 상속).
+	Audience string
+
+	// TTL 은 자식 토큰의 유효 수명이다. 부모 잔여 수명보다 짧거나 같아야 한다.
+	TTL time.Duration
+
+	// Budget 은 자식에게 할당할 호출 횟수 및 I/O 바이트 예산 상한이다. 부모 예산이 있으면 필수다.
+	Budget *domain.Budget
+
+	// ChildEpoch 는 자식 주체의 보안 세대 번호다 (0이면 1). 틀리면 PEP 의 PDP 가 거부한다(Fail-Closed).
+	ChildEpoch domain.Epoch
 }
 
-// ExchangeResult 는 토큰 교환 결과다.
+// ExchangeResult 는 RFC 8693 토큰 교환 성공 시 반환되는 결과 묶음이다.
 type ExchangeResult struct {
-	TokenString     string             `json:"token"`
-	Claims          domain.TokenClaims `json:"claims"`
-	ParentJTI       string             `json:"parent_jti"`
-	DelegationDepth int                `json:"delegation_depth"`
+	// TokenString 은 서명된 신규 자식 JWT 문자열이다.
+	TokenString string `json:"token"`
+
+	// Claims 는 자식 토큰에 포함된 정규화된 클레임 구조체다.
+	Claims domain.TokenClaims `json:"claims"`
+
+	// ParentJTI 는 권한을 위임해 준 직전 부모 토큰의 고유 식별자다.
+	ParentJTI string `json:"parent_jti"`
+
+	// DelegationDepth 는 현재 자식 토큰의 위임 깊이다 (부모 depth + 1).
+	DelegationDepth int `json:"delegation_depth"`
 }
 
-// Service 는 RFC 8693 Token Exchange 오케스트레이션 서비스 인터페이스다.
+// Service 는 RFC 8693 Token Exchange 오케스트레이션 서비스의 DIP 추상 인터페이스다.
 type Service interface {
+	// Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
 	Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (*ExchangeResult, error)
 }
 
-// ExchangeService 는 Service 구현체다.
+// ExchangeService 는 Service 인터페이스의 8단계 파이프라인 구현체다.
 type ExchangeService struct {
 	issuer      token.TokenIssuer
 	verifier    token.TokenVerifier
@@ -53,21 +98,22 @@ type ExchangeService struct {
 	engine      *pipeline.Engine[exchangeCall]
 }
 
-// Option 은 ExchangeService 의 선택적 의존성 주입 옵션이다.
+// Option 은 ExchangeService 의 선택적 의존성 주입을 위한 함수형 옵션(Functional Option)이다.
 type Option func(*ExchangeService)
 
-// WithBudgetLedger 는 예산 예약에 쓸 원장을 주입한다. 없으면 예산 교환은 Fail-Closed 로 거부된다.
+// WithBudgetLedger 는 예산 예약에 쓸 원장(budget.Ledger)을 주입한다. 없으면 예산 교환은 Fail-Closed 로 거부된다.
 func WithBudgetLedger(l budget.Ledger) Option {
 	return func(s *ExchangeService) { s.budgets = l }
 }
 
 // WithSnapshotProvider 는 토큰 교환 시점에 부모 및 위임 조상(act 사슬)의 최신 Security Epoch 를
-// 실시간 대조하기 위한 스냅샷 공급자(PIP)를 주입한다.
+// 실시간 대조하기 위한 스냅샷 공급자(domain.SnapshotProvider / PIP)를 주입한다.
 func WithSnapshotProvider(sp domain.SnapshotProvider) Option {
 	return func(s *ExchangeService) { s.snapshots = sp }
 }
 
-// NewExchangeService 는 ExchangeService 인스턴스를 생성한다.
+// NewExchangeService 는 ExchangeService 인스턴스를 생성하고 8단계 컨베이어 벨트를 초기화한다.
+// DIP 원칙에 따라 issuer, verifier, clients, validator, auditWriter, clock 을 주입받는다.
 func NewExchangeService(
 	issuer token.TokenIssuer,
 	verifier token.TokenVerifier,
@@ -105,25 +151,24 @@ func NewExchangeService(
 	return s, nil
 }
 
-// exchangeCall 은 파이프라인이 단계마다 채워 가는 한 번의 교환 상태다. 필드마다 채우는 단계를 밝힌다.
+// exchangeCall 은 8단계 교환 파이프라인이 진행되면서 단계별로 상태를 누적해 나가는 컨텍스트 구조체다.
 type exchangeCall struct {
 	req      ExchangeRequest
 	auditCtx domain.AuditContext
-	now      time.Time // Exchange
-	traceID  string    // Exchange
-	actor    string    // Exchange
+	now      time.Time // Exchange 입구 시각
+	traceID  string    // Exchange 입구 생성 추적 ID
+	actor    string    // Exchange 입구 행위자
 
-	clientInfo     *token.ClientInfo // client_auth
-	parentClaims   domain.TokenClaims
-	parentJTI      string // parent_token 이 통과해야 채워진다. 그 전의 거부 감사에는 빈 값이 남는다
-	budgetInvolved bool   // parent_token
-	childEpoch     domain.Epoch
-	childDepth     int
-	child          *token.IssueResult // token_issue
+	clientInfo     *token.ClientInfo  // Stage 01(client_auth)에서 채워짐
+	parentClaims   domain.TokenClaims // Stage 03(parent_token)에서 채워짐
+	parentJTI      string             // parent_token 이 통과해야 채워짐. 그 전의 거부 감사에는 빈 값이 남음
+	budgetInvolved bool               // Stage 03(parent_token)에서 부모/자식 예산 관여 여부 판별
+	childEpoch     domain.Epoch       // Stage 07(token_issue)에서 확정
+	childDepth     int                // Stage 07(token_issue)에서 계산
+	child          *token.IssueResult // Stage 07(token_issue)에서 발급 완료
 }
 
-// denial 은 단계 실패의 감사 사유와 호출자에게 돌려줄 오류를 함께 나른다.
-// 둘이 단계마다 다르고 일부는 *domain.Error 가 아니어서, 마감이 그대로 돌려준다.
+// denial 은 파이프라인 검문 실패 시 감사 사유(domain.Reason)와 호출자 반환용 에러(error)를 쌍으로 캡슐화한다.
 type denial struct {
 	reason  domain.Reason
 	details string
@@ -133,6 +178,7 @@ type denial struct {
 func (d *denial) Error() string { return d.ret.Error() }
 func (d *denial) Unwrap() error { return d.ret }
 
+// step 은 pipeline.Step[exchangeCall] 생성 헬퍼 함수다.
 func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bool, run func(context.Context, *exchangeCall) error) pipeline.Step[exchangeCall] {
 	s := pipeline.Step[exchangeCall]{ID: string(id), Kind: pipeline.Kind(kind), Run: run}
 	if applies != nil {
@@ -141,8 +187,9 @@ func step(id domain.Stage, kind domain.StageKind, applies func(*exchangeCall) bo
 	return s
 }
 
-// assemble 은 교환의 조립 목록이다. 순서와 성격은 domain.ExchangeStages() 와 같아야 하며 시험이 강제한다.
-// 교환은 Compensate 를 쓰지 않는다: 마지막 단계(예약)의 실패를 되돌릴 앞선 소비가 없다.
+// assemble 은 8단계 토큰 교환 파이프라인의 검문소 조립 목록을 구성한다.
+// 순서와 성격은 domain.ExchangeStages() 와 정확히 일치해야 하며 아키텍처 가드레일 테스트가 이를 강제한다.
+// 교환 파이프라인은 Saga Compensate 를 쓰지 않는다: 마지막 단계(예산 예약) 실패 시 자식 토큰을 미발급 폐기하므로 롤백할 앞선 I/O 소비가 없다.
 func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
 	hasSnapshots := func(*exchangeCall) bool { return s.snapshots != nil }
 	hasBudget := func(c *exchangeCall) bool { return c.budgetInvolved }
@@ -158,8 +205,9 @@ func (s *ExchangeService) assemble() []pipeline.Step[exchangeCall] {
 	}
 }
 
-// Exchange 는 부모 토큰을 검증하고 권한 축소 불변식을 적용하여 자식 토큰을 발급한다.
-// 출구는 맨 끝 return 하나뿐이다.
+// Exchange 는 RFC 8693 Token Exchange 의 최상위 진입점이다.
+// [보안 가드레일: TC-060-04-E] 단일 진입점-단일 출구(Single-Entry Single-Exit, SESE) 원칙을 준수하여
+// 함수의 출구는 맨 끝 return s.finalize(...) 하나뿐이다.
 func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, auditCtx domain.AuditContext) (res *ExchangeResult, err error) {
 	now := s.clock.Now().UTC()
 	traceID := auditCtx.TraceID
@@ -174,7 +222,9 @@ func (s *ExchangeService) Exchange(ctx context.Context, req ExchangeRequest, aud
 	return s.finalize(c, s.engine.Run(ctx, c))
 }
 
-// finalize 는 단일 마감이다. 거부 감사, AUDIT_LOG_FAILED 승격, 성공 감사를 한 곳에서 처리한다.
+// finalize 는 교환 파이프라인의 단일 종착 마감(Single Exit) 메서드다.
+// 파이프라인 실행 결과(pipeline.Trace)를 분석하여 거부 감사 기록, AUDIT_LOG_FAILED 승격 처리,
+// 성공 감사 기록(Zero Leakage)을 한곳에서 원자적으로 수행한다.
 func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*ExchangeResult, error) {
 	if tr.Err != nil {
 		var d *denial
@@ -225,7 +275,7 @@ func (s *ExchangeService) finalize(c *exchangeCall, tr pipeline.Trace) (*Exchang
 	}, nil
 }
 
-// client_auth: 클라이언트 인증
+// Stage 01. client_auth: 대리인 클라이언트 자격증명 인증 (crypto/subtle.ConstantTimeCompare)
 func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error {
 	info, err := s.clients.AuthenticateClient(c.req.ClientID, c.req.ClientSecret)
 	if err != nil {
@@ -236,7 +286,7 @@ func (s *ExchangeService) clientAuth(ctx context.Context, c *exchangeCall) error
 	return nil
 }
 
-// delegation_subject: 자식 주체 허용 여부
+// Stage 02. delegation_subject: 요청 클라이언트가 해당 자식 주체(ChildSubject) 명의로 토큰을 요청할 수 있는지 검사
 func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall) error {
 	if strings.TrimSpace(c.req.ChildSubject) == "" {
 		msg := "child subject is required"
@@ -250,7 +300,8 @@ func (s *ExchangeService) delegationSubject(ctx context.Context, c *exchangeCall
 	return nil
 }
 
-// parent_token: 부모 토큰 무결성·암호학적 검증. 교환 시 부모 jti 를 소비(RecordReplay)하지 않고 유효성만 본다.
+// Stage 03. parent_token: 부모 토큰 무결성·암호학적 서명 검증.
+// 교환 시에는 부모 토큰이 살아있음을 검증하되 jti 를 리플레이 소비(RecordReplay: false)하지 않는다.
 func (s *ExchangeService) parentToken(ctx context.Context, c *exchangeCall) error {
 	verified, err := s.verifier.VerifyToken(c.req.ParentToken, token.VerifyOptions{RecordReplay: false}, c.auditCtx)
 	if err != nil {
@@ -263,7 +314,7 @@ func (s *ExchangeService) parentToken(ctx context.Context, c *exchangeCall) erro
 	return nil
 }
 
-// lineage_epoch: 부모 및 위임 조상(act 사슬) Security Epoch 실시간 대조 (SnapshotProvider 가 배선된 경우)
+// Stage 04. lineage_epoch: 부모 및 조상(act 사슬) 전체의 Security Epoch 실시간 대조 (PIP 스냅샷 배선 시)
 func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
 	snap, snapErr := s.snapshots.GetSubjectSnapshot(ctx, p.Subject)
@@ -287,7 +338,7 @@ func (s *ExchangeService) lineageEpoch(ctx context.Context, c *exchangeCall) err
 	return nil
 }
 
-// downscope: 축소 위임(Downscoping) 불변식
+// Stage 05. downscope: 5대 축소 위임(Downscoping) 불변식 정적 검증
 func (s *ExchangeService) downscope(ctx context.Context, c *exchangeCall) error {
 	if err := s.validator.ValidateDownscope(&c.parentClaims, c.req.ChildSubject, c.req.Scope, c.req.TTL, c.now); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonTokenInsufficientScope)
@@ -296,7 +347,7 @@ func (s *ExchangeService) downscope(ctx context.Context, c *exchangeCall) error 
 	return nil
 }
 
-// budget_downscope: 예산 정적 검사 및 원장 필수 확인 (예산이 관여할 때만)
+// Stage 06. budget_downscope: 자식 예산 상한 정적 축소 검사 및 예산 원장(Ledger) 존재 필수 확인
 func (s *ExchangeService) budgetDownscope(ctx context.Context, c *exchangeCall) error {
 	if err := ValidateBudgetDownscope(c.parentClaims.Budget, c.req.Budget); err != nil {
 		reason := domain.ReasonFromError(err, domain.ReasonDelegationBudgetExceeded)
@@ -309,7 +360,7 @@ func (s *ExchangeService) budgetDownscope(ctx context.Context, c *exchangeCall) 
 	return nil
 }
 
-// token_issue: act 체인 구성과 자식 토큰 발급
+// Stage 07. token_issue: 선대 계보(act) 사슬 연결 및 Zone A 개인키 기반 신규 자식 토큰 발급
 func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error {
 	p := &c.parentClaims
 	childActor := &domain.ActorClaim{Subject: p.Subject, JWTID: p.JWTID, Epoch: p.Epoch, Actor: p.Actor}
@@ -343,7 +394,7 @@ func (s *ExchangeService) tokenIssue(ctx context.Context, c *exchangeCall) error
 	return nil
 }
 
-// budget_reserve: 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
+// Stage 08. budget_reserve: 예산 원장 예약. 자식 jti 가 발급 뒤에야 생기므로 성격은 소비가 아니라 정산이다(ADR 0007 4장).
 // 부모 엔트리가 없으면 자동 초기화하지 않고 거부하며, 실패한 자식 토큰은 반환하지 않는다.
 func (s *ExchangeService) budgetReserve(ctx context.Context, c *exchangeCall) error {
 	if err := s.budgets.Reserve(c.parentClaims.JWTID, c.child.Claims.JWTID, *c.req.Budget, c.child.Claims.ExpiresAt); err != nil {

@@ -1,3 +1,8 @@
+// Package token 은 OAuth 2.1 클라이언트 인증 및 레지스트리 모델을 제공한다.
+//
+// [보안 가드레일: 타이밍 공격 방어]
+// 클라이언트 시크릿 검증 시 일반 문자열 비교(==) 대신 crypto/subtle.ConstantTimeCompare 를 사용하여
+// 문자열 비교 시간에 따른 비밀값 유추(Timing Attack)를 수학적으로 차단한다.
 package token
 
 import (
@@ -22,14 +27,23 @@ var (
 
 // ClientInfo 는 등록된 클라이언트의 신원 정보다.
 type ClientInfo struct {
-	ClientID    string   `json:"client_id"`
-	Description string   `json:"description"`
+	// ClientID 는 OAuth 2.1 클라이언트 고유 식별자다.
+	ClientID string `json:"client_id"`
+
+	// Description 은 클라이언트의 역할 설명이다.
+	Description string `json:"description"`
+
+	// AllowedSubs 는 이 클라이언트가 토큰 발급/위임 시 대리할 수 있는 주체(Subject) 허용 목록이다.
+	// "*" 는 모든 주체를 대리할 수 있는 마스터 권한을 의미한다.
 	AllowedSubs []string `json:"allowed_subs"`
-	Active      bool     `json:"active"`
+
+	// Active 는 클라이언트의 활성 상태 여부다 (false 면 비활성화/정지).
+	Active bool `json:"active"`
 }
 
 // ClientRegistry 는 클라이언트 인증 인터페이스다.
 type ClientRegistry interface {
+	// AuthenticateClient 는 client_id 와 client_secret 을 검증하고 ClientInfo 를 반환한다.
 	AuthenticateClient(clientID, clientSecret string) (*ClientInfo, error)
 }
 

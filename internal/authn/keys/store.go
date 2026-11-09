@@ -1,3 +1,4 @@
+// Package keys 는 Zone A 비밀키 저장소와 Zone B 공개 JWKS 의 원자적 파일 동기화를 제공한다.
 package keys
 
 import (
@@ -23,21 +24,21 @@ var (
 	ErrVerifyOnlyStore = errors.New("keys store: cannot update in verify-only mode (privStore is nil)")
 )
 
-// ZoneAPrivateKeyEntry 는 Zone A 파일에 저장되는 개별 키 모델이다.
+// ZoneAPrivateKeyEntry 는 Zone A 파일(signing_keys.priv.json)에 영속화되는 개별 비밀키 엔트리 모델이다.
 type ZoneAPrivateKeyEntry struct {
 	KID       string           `json:"kid"`
 	KType     string           `json:"kty"` // OKP
 	Curve     string           `json:"crv"` // Ed25519
 	Algorithm string           `json:"alg"` // EdDSA
 	Status    domain.KeyStatus `json:"status"`
-	PubKey    string           `json:"pub"`  // Base64URL
-	PrivSeed  string           `json:"priv"` // Base64URL (Zero Leakage: Zone A에만 보관)
+	PubKey    string           `json:"pub"`  // Base64URL 공개키
+	PrivSeed  string           `json:"priv"` // Base64URL 32바이트 비공개 시드 (Zero Leakage: Zone A 에만 보관)
 	CreatedAt time.Time        `json:"created_at"`
 	RotatedAt *time.Time       `json:"rotated_at,omitempty"`
 	RetiredAt *time.Time       `json:"retired_at,omitempty"`
 }
 
-// ZoneAPrivateState 는 Zone A 파일(signing_keys.priv.json)의 전체 구조체다.
+// ZoneAPrivateState 는 Zone A 파일의 전체 JSON 구조체다.
 type ZoneAPrivateState struct {
 	Version   int                    `json:"version"`
 	UpdatedAt time.Time              `json:"updated_at"`
@@ -45,7 +46,7 @@ type ZoneAPrivateState struct {
 	Keys      []ZoneAPrivateKeyEntry `json:"keys"`
 }
 
-// Store 는 Zone A와 Zone B의 키 저장소를 관리하는 인터페이스다.
+// Store 는 Zone A 와 Zone B 의 키 저장소를 관리하는 도메인 포트 인터페이스(DIP)다.
 type Store interface {
 	LoadPrivate() (*ZoneAPrivateState, error)
 	LoadPublic() (*domain.JWKS, error)
@@ -61,7 +62,7 @@ type FileStore struct {
 }
 
 // NewFileStore 는 지정된 Zone A 및 Zone B 경로를 관리하는 FileStore 인스턴스를 생성한다.
-// 검증 전용(Zone B only)인 경우 privPath는 빈 문자열("")일 수 있다.
+// 검증 전용(Zone B only / VerifyOnly)인 경우 privPath 는 빈 문자열("")로 주입되어 개인키 접근을 원천 차단한다.
 func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 	if pubPath == "" {
 		return nil, errors.New("keys store: pubPath must not be empty")
@@ -72,7 +73,7 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 		if err := os.MkdirAll(privDir, 0700); err != nil {
 			return nil, fmt.Errorf("keys store: failed to create private dir %s: %w", privDir, err)
 		}
-		// MkdirAll 은 이미 있는 폴더의 권한을 바꾸지 않으므로 Zone A 폴더를 직접 0700 으로 좁힌다.
+		// MkdirAll 은 이미 존재하는 폴더의 권한을 바꾸지 않으므로 Zone A 폴더를 직접 0700 으로 좁힌다.
 		// 경로에 폴더가 없으면(".") 사용자의 작업 폴더이므로 건드리지 않는다.
 		if privDir != "." {
 			if err := os.Chmod(privDir, 0700); err != nil {
@@ -120,14 +121,14 @@ func NewFileStore(privPath, pubPath string) (*FileStore, error) {
 	}, nil
 }
 
-// GenerateEd25519Entry 는 신규 Ed25519 키 쌍을 생성하여 Zone A 키 엔트리를 생성한다.
+// GenerateEd25519Entry 는 crypto/ed25519 표준 패키지를 호출하여 암호학적으로 안전한 신규 Ed25519 키 쌍을 생성한다.
 func GenerateEd25519Entry(kid string, now time.Time) (*ZoneAPrivateKeyEntry, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate ed25519 key: %w", err)
 	}
 
-	// Seed() 는 32바이트 비공개 시드 반환
+	// Seed() 는 32바이트 비공개 시드를 반환한다 (Ed25519 개인키 복원 원천)
 	seed := priv.Seed()
 
 	return &ZoneAPrivateKeyEntry{
@@ -142,7 +143,8 @@ func GenerateEd25519Entry(kid string, now time.Time) (*ZoneAPrivateKeyEntry, err
 	}, nil
 }
 
-// ToJWKS 는 Zone A 상태에서 Zone B 공개 JWKS 구조체를 투영(Project)한다 (Zero Leakage 보장).
+// ToJWKS 는 Zone A 상태로부터 Zone B 공개 JWKS 구조체를 투영(Projection)한다.
+// Zero Leakage 보안 원칙에 따라 비공개 시드(PrivSeed)는 일절 포함되지 않고 오직 공개키 메타데이터만 복사된다.
 func (s *ZoneAPrivateState) ToJWKS() *domain.JWKS {
 	jwkList := make([]domain.JWK, len(s.Keys))
 	for i, k := range s.Keys {
@@ -167,7 +169,7 @@ func (s *ZoneAPrivateState) ToJWKS() *domain.JWKS {
 	}
 }
 
-// LoadPrivate 은 Zone A 서명 키 파일을 로드한다. 파일이 없으면 nil을 반환한다.
+// LoadPrivate 은 Zone A 서명 키 파일을 로드한다. 파일이 없거나 VerifyOnly 모드면 nil 을 반환한다.
 func (fs *FileStore) LoadPrivate() (*ZoneAPrivateState, error) {
 	if fs.privStore == nil {
 		return nil, nil
@@ -195,7 +197,7 @@ func (fs *FileStore) LoadPublic() (*domain.JWKS, error) {
 	return jwks, nil
 }
 
-// Update 는 배타적 락(LOCK_EX) 하에서 Zone A 비밀키 상태를 읽고 fn으로 변이한 후,
+// Update 는 배타적 락(LOCK_EX) 하에서 Zone A 비밀키 상태를 읽고 fn 으로 변이한 후,
 // Zone A 파일(0600)과 Zone B 공개 JWKS 파일(0644)을 동일 배타 락 구간 내에서 원자적으로 동시 갱신한다.
 func (fs *FileStore) Update(fn func(priv *ZoneAPrivateState) error) error {
 	if fs.privStore == nil {

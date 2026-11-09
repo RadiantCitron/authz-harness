@@ -1,3 +1,19 @@
+// Package token 은 RFC 9068 및 RFC 8725(JWT Best Current Practices)를 준수하는 토큰 검증기(Verifier)를 제공한다.
+//
+// [토큰 검증 9단계 파이프라인]
+// 1단계: 3단 점 분리 형식 검증 (헤더.페이로드.서명)
+// 2단계: 헤더 디코딩 및 typ 검증 (RFC 9068: at+jwt 대소문자 무시)
+// 3단계: 알고리즘 화이트리스트 대조 (alg: EdDSA 단일 허용, alg:none 차단)
+// 4단계: 키 조회 및 상태 확인 (Zone B JWKS - active/rotated 허용, retired/폐기 차단)
+// 5단계: 암호학적 디지털 서명 검증 (Ed25519 공개키 검증)
+// 6단계: 클레임 디코딩 및 필수 클레임 유효성 검증 (RFC 9068 필수 필드)
+// 7단계: 발급자(iss) 및 수신자(aud), 주체(sub) 일치 여부 대조
+// 8단계: 시간 유효성 검증 (nbf 미도달 및 exp 만료 여부 판정, Clock Skew 고려)
+// 9단계: Replay 원장 소비/확인 (단회용 토큰 jti 리플레이 공격 방어, 예산 토큰은 예외)
+//
+// [보안 가드레일: Zero Leakage 및 Fail-Closed]
+// - 감사 로그 기록 실패 시(auditWriter.Log 에러) 검증 성공 상태라도 즉시 에러(AUDIT_LOG_FAILED, 70)로 승격하여 거부한다.
+// - 감사 이벤트(audit.Event)에는 원시 JWT 문자열을 절대 기록하지 않고 jti 와 정규화된 메타데이터만 남긴다.
 package token
 
 import (
@@ -42,20 +58,34 @@ var (
 
 // VerifyOptions 는 토큰 검증 시 검사할 옵션들이다.
 type VerifyOptions struct {
+	// ExpectedAudience 는 검증할 대상 수신자(aud) 식별자다. 비어있지 않으면 일치 여부를 검사한다.
 	ExpectedAudience string
-	ExpectedSubject  string
-	RecordReplay     bool // true 인 경우 jti 를 Replay 원장에 검사 및 소비 등록
-	CheckReplay      bool // true 인 경우 jti 가 이미 소비되었는지 읽기만 확인한다(소비는 ConsumeReplay)
-	ClockOffset      time.Duration
+
+	// ExpectedSubject 는 검증할 기대 주체(sub) 식별자다. 비어있지 않으면 일치 여부를 검사한다.
+	ExpectedSubject string
+
+	// RecordReplay 가 true 면 jti 를 Replay 원장에 검사 및 소비 등록한다.
+	RecordReplay bool
+
+	// CheckReplay 가 true 면 jti 가 이미 소비되었는지만 읽기 확인한다 (소비는 PEP 후속 단계에서 수행).
+	CheckReplay bool
+
+	// ClockOffset 은 시간 검증 시 적용할 시간 왜곡(Clock Drift) 보정값이다.
+	ClockOffset time.Duration
+
 	// AllowNegativeClockOffset 이 false(기본) 이면 음수 ClockOffset 을 거부한다. 음수 오프셋은 만료된 토큰을 되살리는
 	// 손잡이이므로 nbf 이전 시각을 일부러 시뮬레이션하는 시험만 명시적으로 켠다. CLI 는 이 필드를 노출하지 않는다.
 	AllowNegativeClockOffset bool
 }
 
-// TokenVerifier 인터페이스다.
+// TokenVerifier 인터페이스는 RFC 9068 Bearer Access Token 을 검증하는 DIP 추상 명세다.
 type TokenVerifier interface {
+	// VerifyToken 은 토큰 문자열과 옵션을 받아 9단계 검증을 수행하고 통과된 클레임을 반환한다.
 	VerifyToken(tokenStr string, opts VerifyOptions, auditCtx domain.AuditContext) (*domain.VerifiedClaims, error)
+
+	// InspectToken 은 서명 검증 없이 Header 와 Claims 를 파싱하여 디버깅/조회용으로 반환한다.
 	InspectToken(tokenStr string) (*JWTHeader, *domain.TokenClaims, error)
+
 	// ConsumeReplay 는 PDP allow 뒤에 jti 를 원자적으로 소비한다. 예산 토큰이거나 원장이 없으면 아무것도 하지 않는다.
 	ConsumeReplay(claims domain.TokenClaims, auditCtx domain.AuditContext) error
 }
