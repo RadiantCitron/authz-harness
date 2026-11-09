@@ -1,3 +1,18 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(pep.go)은 인가 집행 관문(PEP: Policy Enforcement Point)을 단독 실행하고 검증하는 `pep` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. 단일 집행 관문 (Unified PEP Gateway):
+//    - read: 토큰 기반 파일 읽기 인가 및 격리 워크스페이스 내 도구 실행.
+//    - write: 토큰 기반 파일 쓰기 인가 (텍스트 인자 또는 --data-file 파일 읽기 주입 지원).
+// 2. Zone B 격리 원칙 (Zone B Confinement):
+//    - app.BuildStack 호출 시 VerifyOnly: true 를 지정하여 서명용 개인키가 존재하는 Zone A에 일체 접근하지 않고,
+//      Zone B의 공개 검증 키(JWKS), 상태 파일, Replay 원장, 감사 로그만을 사용하여 검증한다.
+// 3. 파이프라인 단계별 시각화 (11-Stage Pipeline Box Visualization):
+//    - domain.PEPStages() 의 각 단계(인증, 재생, 에포크, 스코프, PDP 인가, 승인, 도구 바인딩, 경계 검증, 예산, 사전 감사, 집행)를
+//      [PASS], [FAIL], [SKIPPED], [N/A] 상태로 ASCII 박스에 명확히 매핑하여 출력한다.
+// 4. 보안 가드레일:
+//    - parseNonNegativeClockOffset: 클록 오프셋에 음수를 허용하지 않아 이미 만료된 토큰이 과거 시간으로 부활하는 보안 취약점을 차단한다.
 package cli
 
 import (
@@ -16,14 +31,15 @@ import (
 )
 
 // PEPRunner 는 `pep` 하위 명령어(read, write) 실행을 주관하는 CLI 러너다.
+// 인가 집행 관문(pep.Gateway)을 초기화하여 요청을 파이프라인에 통과시키고, 그 결과를 렌더링한다.
 type PEPRunner struct {
-	out          io.Writer
-	errOut       io.Writer
-	workspaceDir string
-	auditPath    string
-	statePath    string
-	pubJWKSPath  string
-	replayPath   string
+	out          io.Writer // 표준 출력 스트림
+	errOut       io.Writer // 표준 에러 스트림
+	workspaceDir string    // 격리된 워크스페이스 루트 경로
+	auditPath    string    // 감사 로그 파일 경로
+	statePath    string    // 상태 저장 파일 경로
+	pubJWKSPath  string    // Zone B 공개 검증 키(JWKS) 경로
+	replayPath   string    // Replay 방지 원장 파일 경로
 }
 
 // NewPEPRunner 는 파일 경로들을 받아 의존성을 조립하고 PEPRunner를 생성한다.
@@ -43,6 +59,7 @@ func NewPEPRunner(
 }
 
 // Run 은 주어진 인자에 따라 `read` 또는 `write` 서브커맨드를 라우팅 실행한다.
+// 실행 시 VerifyOnly: true 스택을 구성하여 Zone A(개인키) 미접근 원칙을 준수한다.
 func (r *PEPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	stack, err := app.BuildStack(app.AppConfig{
 		WorkspaceDir: r.workspaceDir,
@@ -75,16 +92,18 @@ func (r *PEPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	}
 }
 
+// pepCommonFlags 는 read/write 서브커맨드가 공유하는 공통 플래그 모음이다.
 type pepCommonFlags struct {
-	tokenStr           string
-	expectedAud        string
-	expectedSub        string
-	clockOffsetStr     string
-	injectAuditFailure bool
-	outputFormat       string
-	traceID            string
+	tokenStr           string // 제시된 Bearer Access Token 문자열
+	expectedAud        string // 기대하는 대상 오디언스 (Audience)
+	expectedSub        string // 기대하는 주체 (Subject, 선택)
+	clockOffsetStr     string // 가상 시계 시간 오프셋 (테스트용)
+	injectAuditFailure bool   // 감사 실패 시 Fail-Closed 거부 동작 주입 여부
+	outputFormat       string // 출력 형식 ("text" 또는 "json")
+	traceID            string // 트랜잭션 추적 식별자
 }
 
+// parseCommonPEPFlags 는 FlagSet 에 PEP 공통 플래그들을 바인딩한다.
 func (r *PEPRunner) parseCommonPEPFlags(fs *flag.FlagSet, c *pepCommonFlags) {
 	fs.StringVar(&c.tokenStr, "token", "", "RFC 9068 Bearer Access Token (required)")
 	fs.StringVar(&c.expectedAud, "expected-aud", "authz-harness", "Expected token audience")
@@ -95,6 +114,7 @@ func (r *PEPRunner) parseCommonPEPFlags(fs *flag.FlagSet, c *pepCommonFlags) {
 	fs.StringVar(&c.traceID, "trace-id", "", "Explicit transaction trace ID")
 }
 
+// executePEPAction 은 공통 인자를 검증하고 pep.Gateway.Execute 를 호출하여 파이프라인을 구동한다.
 func (r *PEPRunner) executePEPAction(ctx context.Context, gateway pep.Gateway, action domain.Action, actionName string, c pepCommonFlags, resource string, data []byte) domain.ExitCode {
 	if strings.TrimSpace(resource) == "" {
 		fmt.Fprintf(r.errOut, "Error: missing resource path for %s\n", actionName)
@@ -139,6 +159,7 @@ func (r *PEPRunner) executePEPAction(ctx context.Context, gateway pep.Gateway, a
 	return res.ExitCode
 }
 
+// runRead 는 파일 읽기(file:read) 요청을 인가 집행 관문에 전달한다.
 func (r *PEPRunner) runRead(ctx context.Context, gateway pep.Gateway, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("pep read", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -157,6 +178,7 @@ func (r *PEPRunner) runRead(ctx context.Context, gateway pep.Gateway, args []str
 	return r.executePEPAction(ctx, gateway, domain.ActionFileRead, "read", c, resource, nil)
 }
 
+// runWrite 는 파일 쓰기(file:write) 요청을 인가 집행 관문에 전달한다.
 func (r *PEPRunner) runWrite(ctx context.Context, gateway pep.Gateway, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("pep write", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -193,6 +215,7 @@ func (r *PEPRunner) runWrite(ctx context.Context, gateway pep.Gateway, args []st
 	return r.executePEPAction(ctx, gateway, domain.ActionFileWrite, "write", c, resource, writeBytes)
 }
 
+// renderResult 는 실행 결과를 JSON 또는 ASCII 파이프라인 박스 형태로 포맷팅하여 출력한다.
 func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string) {
 	if strings.ToLower(strings.TrimSpace(format)) == "json" {
 		type jsonOutput struct {
@@ -265,7 +288,7 @@ func (r *PEPRunner) renderResult(req pep.Request, res *pep.Result, format string
 	}
 }
 
-// 화면 칸 상태. 단계 순서·통과 여부는 CLI 가 추론하지 않고 pep 가 남긴 사실(pep.Stages, Result.Passed)을 읽는다.
+// 화면 칸 상태 상수. 단계 순서·통과 여부는 CLI 가 임의 추론하지 않고 pep 가 남긴 사실(pep.Stages, Result.Passed)을 읽는다.
 const (
 	boxPass    = "[PASS]"
 	boxFail    = "[FAIL]"
@@ -273,11 +296,11 @@ const (
 	boxNA      = "[N/A]"     // 이 요청에는 해당 없는 조건부 단계(승인·예산 등)
 )
 
-// stageBox 는 화면의 한 칸이다.
+// stageBox 는 화면에 렌더링될 단일 파이프라인 단계 칸이다.
 type stageBox struct {
-	Label  string
-	Status string
-	Info   string
+	Label  string // 단계 레이블 명칭
+	Status string // 박스 상태 ([PASS], [FAIL], [SKIPPED], [N/A])
+	Info   string // 부가 정보 문자열
 }
 
 // stageBoxes 는 pep.Stages() 의 모든 단계에 대해 칸을 만든다. 상태 규칙:
@@ -324,7 +347,7 @@ func stageBoxes(res *pep.Result) []stageBox {
 	return boxes
 }
 
-// stagePassInfo 는 통과한 칸에 붙는 부가 정보다.
+// stagePassInfo 는 통과한 단계 칸에 붙는 부가 상세 정보를 생성한다.
 func stagePassInfo(s domain.Stage, res *pep.Result) string {
 	switch s {
 	case domain.StageAuthn:
@@ -350,7 +373,7 @@ func stagePassInfo(s domain.Stage, res *pep.Result) string {
 	return ""
 }
 
-// renderStageBoxes 는 단계 칸을 한 줄씩 출력한다.
+// renderStageBoxes 는 단계 칸들을 순서대로 stdout 에 출력한다.
 func renderStageBoxes(w io.Writer, res *pep.Result) {
 	for _, b := range stageBoxes(res) {
 		line := fmt.Sprintf("%-36s: %s", b.Label, b.Status)
@@ -362,7 +385,7 @@ func renderStageBoxes(w io.Writer, res *pep.Result) {
 }
 
 // splitPEPResourceAndFlags 는 flag.FlagSet 이 non-flag 인자를 만나면 파싱을 중단하는 제약 때문에,
-// args 에서 위치 인자(resource)와 플래그(값 포함)를 분리한다.
+// args 에서 위치 인자(resource)와 플래그(값 포함)를 안전하게 분리한다.
 func splitPEPResourceAndFlags(args []string) (resource string, flagArgs []string) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

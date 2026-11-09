@@ -1,3 +1,15 @@
+// Package cli 는 authz-harness 의 토큰 수명주기 및 축소 위임을 제어하는 token 서브커맨드 러너를 제공한다.
+//
+// [토큰 CLI 아키텍처 및 보안 불변식]
+// 1. 단일 합성 루트(app.BuildStack) 연계:
+//   - 개별 서브커맨드(issue, inspect, verify, exchange) 실행 시 필요한 서비스 스택을 독립 조립하고 종료 시 defer stack.Close() 로 안전하게 해제한다.
+//   - 검증 전용(verify) 실행 시에는 VerifyOnly=true 옵션으로 개인키(Zone A) 없는 안전 스택을 조립한다.
+//
+// 2. 결함 주입(Fault Injection) 지원 (issue):
+//   - 보안 부정 테스트를 위해 --tamper-signature, --tamper-alg-none, --tamper-typ 플래그를 지원한다.
+//
+// 3. 축소 위임(Downscoping) 시각화 (exchange):
+//   - 부모 JTI, 자식 Subject, 축소된 Scope, Delegation Depth 계보를 표준 박스 형태로 포맷팅하여 출력한다.
 package cli
 
 import (

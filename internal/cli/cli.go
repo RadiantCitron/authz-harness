@@ -1,3 +1,9 @@
+// Package cli 는 authz-harness 의 서브커맨드 러너 및 인간 대상 표준 출력 포매터를 제공한다.
+//
+// [출력 삼분 원칙 (Tri-Separation)]
+// - CLI 출력 (os.Stdout): 사용자 및 하네스 러너 대상 포맷팅된 결과 출력.
+// - 운영 로그 (os.Stderr): log/slog 기반의 디버깅 및 진단 로그 (원시 토큰 자동 마스킹).
+// - 감사 증거 (audit.jsonl): audit.Writer 를 통한 불변의 보안 인가 판정 전용 해시 체인 이벤트.
 package cli
 
 import (

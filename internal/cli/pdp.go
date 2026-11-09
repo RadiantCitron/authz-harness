@@ -1,3 +1,17 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(pdp.go)은 인가 결정점(PDP: Policy Decision Point)을 단독 실행하고 인가 근거를 설명하는 `pdp` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. 순수 인가 판정 두뇌 (Isolated Decision Engine):
+//    - decide: 주체(Subject), 액션(Action), 리소스(Resource), 에포크(Epoch), 스코프(Scope)를 인자로 받아
+//      PAP/PIP 상태 저장소와 대조하여 순수 허용(ALLOW) 또는 거부(DENY) 결정을 내린다.
+//    - explain: 인가 판정 결과뿐만 아니라, PIP(Policy Information Point)로부터 주체의 최신 스냅샷(현재 에포크, 활성/회수된 Grant 목록 등)을
+//      함께 조회하여 "왜 이 요청이 허용/거부되었는가"에 대한 상세 검증 보고서를 출력한다.
+// 2. 부정 테스트 역설 해소 (Negative Test Resolution):
+//    - 미인가 요청에 대한 인가 거부(DENY)는 시스템 장애가 아닌 성공적인 방어 동작이다.
+//      explain 서브커맨드는 이를 명확히 분별할 수 있는 안내 문구를 함께 제공한다.
+// 3. Zone B 및 감사 기록:
+//    - VerifyOnly: true 모드로 스택을 초기화하며, PDP 판정 결과는 자동으로 감사 로그(audit.jsonl)에 기록된다.
 package cli
 
 import (
@@ -14,11 +28,12 @@ import (
 )
 
 // PDPRunner 는 `pdp` 하위 명령어(decide, explain) 실행을 주관하는 러너다.
+// 인가 결정점(pdp.Service) 및 정보점(pip.Service)과 연동하여 인가 정책 판정을 수행한다.
 type PDPRunner struct {
-	out       io.Writer
-	errOut    io.Writer
-	auditPath string
-	statePath string
+	out       io.Writer // 표준 출력 스트림
+	errOut    io.Writer // 표준 에러 스트림
+	auditPath string    // 감사 로그 파일 경로
+	statePath string    // Zone B 상태(State) 파일 경로
 }
 
 // NewPDPRunner 는 지정된 입출력 스트림과 파일 경로로 PDPRunner를 생성한다.
@@ -32,6 +47,7 @@ func NewPDPRunner(out, errOut io.Writer, statePath, auditPath string) (*PDPRunne
 }
 
 // Run 은 전달받은 인자(args)를 바탕으로 `pdp` 서브커맨드를 라우팅하고 적절한 종료 코드를 반환한다.
+// VerifyOnly: true 모드로 스택을 조립하여 Zone A 개인키 없이 안전하게 인가를 판정한다.
 func (r *PDPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	stack, err := app.BuildStack(app.AppConfig{StatePath: r.statePath, AuditPath: r.auditPath, VerifyOnly: true})
 	if err != nil {
@@ -59,6 +75,7 @@ func (r *PDPRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	}
 }
 
+// parsePDPRequest 는 decide 및 explain 명령에서 공통으로 요구되는 인자(--sub, --action, --resource 등)를 파싱한다.
 func (r *PDPRunner) parsePDPRequest(cmdName string, args []string) (*pdp.Request, domain.ExitCode) {
 	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -96,6 +113,7 @@ func (r *PDPRunner) parsePDPRequest(cmdName string, args []string) (*pdp.Request
 	}, domain.ExitSuccess
 }
 
+// runDecide 는 인가 요청을 PDP 에 전달하여 순수 판정(ALLOW/DENY) 결과를 출력하고 해당 종료 코드를 반환한다.
 func (r *PDPRunner) runDecide(ctx context.Context, pdpSvc pdp.Service, args []string) domain.ExitCode {
 	req, code := r.parsePDPRequest("pdp decide", args)
 	if code != domain.ExitSuccess {
@@ -114,12 +132,13 @@ func (r *PDPRunner) runDecide(ctx context.Context, pdpSvc pdp.Service, args []st
 		return domain.ExitSuccess
 	}
 
-	// 거부(DENY) 시 표준 포맷 출력 및 12 종료 코드 반환
+	// 거부(DENY) 시 표준 포맷 출력 및 사유별 종료 코드 반환 (예: 12 ExitPermissionDenied)
 	fmt.Fprintf(r.out, "[DECISION: DENY] Subject: %s | Action: %s | Resource: %s | Reason: %s\n",
 		req.Subject, req.Action, req.Resource, decision.Reason)
 	return domain.ExitCodeForReason(decision.Reason)
 }
 
+// runExplain 은 PDP 판정과 PIP 스냅샷 조회를 결합하여 상세 인가 리포트를 렌더링한다 (설명 목적이므로 0 반환).
 func (r *PDPRunner) runExplain(ctx context.Context, pdpSvc pdp.Service, pipSvc pip.Service, args []string) domain.ExitCode {
 	req, code := r.parsePDPRequest("pdp explain", args)
 	if code != domain.ExitSuccess {

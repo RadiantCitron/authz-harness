@@ -1,3 +1,17 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(audit.go)은 감사 추적(Audit Trail) 및 해시 체인 무결성을 검증하고 시각화하는 `audit` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. 단방향 SHA-256 해시 체인 무결성 검증 (Append-Only Hash Chain):
+//    - verify: 전체 audit.jsonl 의 해시 사슬을 역방향/정방향 검증하여 위변조, 줄 삭제, 순서 변경 여부를 탐지.
+//    - --checkpoint 플래그 지정 시 ECDSA 비대칭 서명된 체크포인트 파일과 대조하여 꼬리 절단(Tail Truncation) 공격까지 완벽 방어.
+// 2. 분산 추적 및 위임 계보 시각화 (Timeline & Delegation Tree):
+//    - timeline: 단일 TraceID 에 속한 부모-자식 다중 프로세스 감사 이벤트를 시각적 ASCII 타임라인으로 렌더링.
+//    - tree: JTI 기반 축소 위임 체인을 계층적 트리 구조로 렌더링.
+// 3. 충돌 내구성 및 복구 (Crash Resilience & Recovery):
+//    - checkpoint: 현재 체인의 마지막 레코드 번호와 해시를 Zone A 서명 키로 서명하여 체크포인트 스냅샷 생성.
+//    - recover: 전원 차단 등으로 마지막 줄이 불완전하게 잘린 경우(AUDIT_TAIL_INCOMPLETE),
+//      잘린 데이터를 격리 파일로 보존하고 정상 줄까지만 복구하여 사슬 무결성을 회복.
 package cli
 
 import (
@@ -17,14 +31,15 @@ import (
 	"authz-harness/internal/ui"
 )
 
-// AuditRunner 는 `audit` 하위 명령어(timeline, verify)를 주관하는 러너다.
+// AuditRunner 는 `audit` 하위 명령어(timeline, verify, tree, checkpoint, recover)를 주관하는 러너다.
+// 감사 로그 원장(audit.jsonl)과 체크포인트 서명 키를 관리하며 데이터 위변조를 판정한다.
 type AuditRunner struct {
-	out       io.Writer
-	errOut    io.Writer
-	auditPath string
-	privPath  string // Zone A 감사 체크포인트 서명 키
-	pubPath   string // Zone B 감사 체크포인트 검증 키
-	ckptPath  string // Zone B 기본 체크포인트 위치
+	out       io.Writer // 표준 출력 스트림
+	errOut    io.Writer // 표준 에러 스트림
+	auditPath string    // 감사 로그 파일 경로
+	privPath  string    // Zone A 감사 체크포인트 서명 키
+	pubPath   string    // Zone B 감사 체크포인트 검증 키
+	ckptPath  string    // Zone B 기본 체크포인트 위치
 }
 
 // NewAuditRunner 는 AuditRunner 인스턴스를 생성한다.
@@ -66,6 +81,7 @@ func (r *AuditRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	}
 }
 
+// runTimeline 은 지정된 TraceID(또는 가장 최근 TraceID)의 감사 이벤트를 추출하여 타임라인 형태로 시각화한다.
 func (r *AuditRunner) runTimeline(ctx context.Context, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("audit timeline", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -168,6 +184,7 @@ func (r *AuditRunner) loadTraceEvents() ([]audit.Event, domain.ExitCode) {
 	return events, domain.ExitSuccess
 }
 
+// runVerify 는 감사 로그의 SHA-256 해시 체인을 검증하고, 체크포인트 플래그 지정 시 ECDSA 서명 체크포인트와 대조한다.
 func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -213,6 +230,7 @@ func (r *AuditRunner) runTree(args []string) domain.ExitCode {
 	return domain.ExitSuccess
 }
 
+// runCheckpoint 는 감사 로그 체인의 상태를 읽어 서명 체크포인트 파일을 생성한다.
 func (r *AuditRunner) runCheckpoint(args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("audit checkpoint", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -249,6 +267,7 @@ func (r *AuditRunner) runRecover() domain.ExitCode {
 	return domain.ExitSuccess
 }
 
+// printUsage 는 audit 서브커맨드의 사용법 가이드를 출력한다.
 func (r *AuditRunner) printUsage() {
 	fmt.Fprintln(r.errOut, "Usage: authz-harness audit <command> [options]")
 	fmt.Fprintln(r.errOut, "\nCommands:")

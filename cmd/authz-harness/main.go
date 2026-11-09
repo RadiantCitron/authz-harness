@@ -1,3 +1,25 @@
+// Package main 은 authz-harness 의 최상위 CLI 진입점이다.
+//
+// [CLI 아키텍처 및 출력 삼분(Tri-Separation) 원칙]
+// 1. 삼중 출력 분리:
+//   - CLI 출력 (stdout): 하네스 러너 및 사용자를 위한 결과 출력 (Formatter).
+//   - 운영 로그 (stderr): log/slog 기반의 디버깅 및 진단 로그 (ReplaceAttr 로 원시 토큰 자동 마스킹).
+//   - 감사 증거 (audit.jsonl): audit.Writer 를 통한 불변의 보안 인가 판정 전용 해시 체인 이벤트.
+//
+// 2. 단일 책임 서브커맨드 라우팅:
+//   - grant, approval, pdp, keys, token, pep, orchestrate, subagent, audit, run, mcp, confine-exec 등
+//     개별 책임 단위의 서브커맨드 러너로 인자를 위임하고 표준 종료 코드를 반환한다.
+//
+// 3. 결정론적 종료 코드 (Fail-Closed Exit Codes):
+//   - 0: 성공 (ExitSuccess)
+//   - 10: 입력 인자 결함 (ExitBadInput)
+//   - 11: 토큰 무효 (ExitInvalidToken)
+//   - 12: 인가 거부 (ExitAuthzDenied)
+//   - 13: 경계 탈출 (ExitBoundaryEscaped)
+//   - 14: 도구 실행 실패 (ExitToolExecution)
+//   - 15: 감사 실패 (ExitAuditFailure)
+//   - 16: 내부 시스템 오류 (ExitInternalError)
+//   - 18: 사람 승인 필요 (ExitApprovalRequired)
 package main
 
 import (
@@ -14,15 +36,16 @@ import (
 	"authz-harness/internal/observe/slogadapter"
 )
 
+// Version 은 하네스의 현재 시맨틱 버전 번호다.
 const Version = "0.1.0"
 
 func main() {
 	var (
-		showVersion bool
-		auditPath   string
-		statePath   string
-		privKeyPath string
-		pubJWKSPath string
+		showVersion  bool
+		auditPath    string
+		statePath    string
+		privKeyPath  string
+		pubJWKSPath  string
 		replayPath   string
 		workspaceDir string
 		verbose      bool

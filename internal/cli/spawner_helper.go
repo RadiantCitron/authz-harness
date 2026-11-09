@@ -1,3 +1,16 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(spawner_helper.go)은 orchestrate 및 mcp 서브커맨드에서 격리된 자식 워커(Subprocess)를
+// 안전하게 기동하기 위해 공통으로 사용하는 헬퍼 함수 및 설정을 제공한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. 경로 정규화 및 상대 경로 오염 방지 (Absolute Path Canonicalization):
+//    - 부모와 자식 프로세스의 작업 디렉터리가 서로 다를 수 있으므로, 상태 파일, 공개키, Replay 원장, 감사 로그,
+//      워크스페이스 경로를 반드시 filepath.Abs 로 정규화하여 전달한다.
+// 2. 단일 합성 루트 연동 및 자원 누수 방지 (Stack Integration):
+//    - app.BuildStack 을 VerifyOnly 모드로 기동하여 스포너에 필요한 AuditWriter 를 확보하고,
+//      실패 시 즉시 stack.Close() 를 호출하여 파일 락 및 디스크립터 누수를 방지한다.
+// 3. 자식 프로세스 표준 인자 조립 (Standard Worker CLI Args):
+//    - orchestrator.WorkerArgs 를 통해 일관된 CLI 플래그(-workspace, -state-file, -pub-jwks-file, -replay-file, -audit-file, -net-allow 등)를 생성한다.
 package cli
 
 import (
@@ -13,15 +26,15 @@ import (
 
 // workerSpawnerConfig 는 CLI(orchestrate, mcp)에서 격리 서브프로세스 스포너를 조립하기 위한 명세다.
 type workerSpawnerConfig struct {
-	WorkerBin     string
-	AuditPath     string
-	WorkspacePath string
-	StatePath     string
-	PubJWKSPath   string
-	ReplayPath    string
-	NetAllow      string
-	Verbose       bool
-	Timeout       time.Duration
+	WorkerBin     string        // 워커 바이너리 경로 (생략 시 os.Executable() 자동 탐색)
+	AuditPath     string        // 감사 로그 파일 경로
+	WorkspacePath string        // 격리 워크스페이스 디렉터리 경로
+	StatePath     string        // Zone B 상태 파일 경로
+	PubJWKSPath   string        // Zone B 공개 키(JWKS) 경로
+	ReplayPath    string        // Replay 방지 원장 경로
+	NetAllow      string        // net:fetch 허용 호스트 목록 (쉼표 구분)
+	Verbose       bool          // 디버그 로깅 활성화 여부
+	Timeout       time.Duration // 서브프로세스 실행 제한 시간
 }
 
 // buildWorkerSpawner 는 감사 로그 스택 초기화, 바이너리 위치 확인, 파일 경로의 절대 경로 정규화,

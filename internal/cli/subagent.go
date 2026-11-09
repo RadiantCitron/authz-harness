@@ -1,3 +1,17 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(subagent.go)은 격리된 자식 서브에이전트 워커 프로세스의 진입점인 `subagent worker` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. OS 프로세스 격리 및 Zone B 한정 (Process Confinement & Zone B Boundary):
+//    - 서브에이전트는 부모 프로세스로부터 포크/스폰되어 독립된 프로세스로 실행된다.
+//    - app.BuildStack 호출 시 VerifyOnly: true 모드를 사용하여 Zone A 비공개키에 일체 접근하지 않으며,
+//      Zone B의 공개 검증 키(JWKS), 상태 파일, Replay 원장만을 바탕으로 인가를 집행한다.
+// 2. 단방향 JSON IPC 스트리밍 (Stream-based Subagent Worker):
+//    - stdin 을 통해 단일 요청 JSON 프레임(SubagentRequest)을 수신하고,
+//      PEP 게이트웨이 파이프라인을 거쳐 도구를 실행한 뒤 stdout 으로 JSON 응답(SubagentResponse)을 반환한다.
+// 3. 네트워크 및 관측 격리 (NetGuard & Local Observation):
+//    - -net-allow 플래그로 지정된 호스트:포트 목록만 netguard.NewGuard 로 필터링하여 SSRF 공격을 차단한다.
+//    - -verbose 플래그 지정 시 전역 slog 를 오염시키지 않고 해당 워커 전용 slogadapter(Debug 레벨, 토큰 마스킹 적용)를 주입한다.
 package cli
 
 import (
@@ -18,15 +32,16 @@ import (
 )
 
 // SubagentRunner 는 자식 서브에이전트 프로세스 진입점을 담당하는 CLI 러너다.
+// stdin 스트림으로부터 JSON 명령을 읽고 PEP 게이트웨이를 통해 실행 후 stdout 에 결과를 쓴다.
 type SubagentRunner struct {
-	stdout       io.Writer
-	stderr       io.Writer
-	stdin        io.Reader
-	workspaceDir string
-	statePath    string
-	pubJWKSPath  string
-	replayPath   string
-	auditPath    string
+	stdout       io.Writer // 표준 출력 스트림 (JSON 응답 반환)
+	stderr       io.Writer // 표준 에러 스트림 (디버그/에러 로그)
+	stdin        io.Reader // 표준 입력 스트림 (JSON 요청 수신, 테스트 주입 가능)
+	workspaceDir string    // 워커 전용 격리 워크스페이스
+	statePath    string    // Zone B 상태 파일 경로
+	pubJWKSPath  string    // Zone B 공개 키(JWKS) 경로
+	replayPath   string    // Replay 방지 원장 경로
+	auditPath    string    // 감사 로그 파일 경로
 }
 
 // NewSubagentRunner 는 자식 서브에이전트 실행을 위한 SubagentRunner 인스턴스를 생성한다.

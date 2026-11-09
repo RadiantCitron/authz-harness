@@ -1,3 +1,15 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(orchestrate.go)은 부모 오케스트레이터로서 자식 서브에이전트 프로세스를 생성·통제하는 `orchestrate` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. 축소 위임 기반 서브프로세스 스폰 (Downscoped Subprocess Spawning):
+//    - spawn: 부모가 발급받거나 축소 위임(Downscoped)한 토큰(-token)을 자식 프로세스에 주입하여 실행.
+//    - buildWorkerSpawner 를 통해 자식이 실행될 바이너리, 절대 경로 정규화, 타임아웃, 프로세스 그룹 제한을 일원화 설정.
+// 2. 프로세스 격리 및 자원 한계 (Process Confinement & Limits):
+//    - 자식 프로세스는 독립된 프로세스 그룹(Process Group)으로 기동되며 타임아웃 초과 시 자식 트리를 강제 회수한다.
+// 3. Zero Leakage 및 원시 토큰 마스킹 (Redact Raw Tokens):
+//    - renderSpawnResult: 자식 프로세스가 출력한 stderr 나 에러 메시지에 Bearer 토큰이 노출되지 않도록
+//      domain.RedactRawTokens 로 마스킹 처리한 후 콘솔에 출력한다.
 package cli
 
 import (
@@ -14,15 +26,16 @@ import (
 )
 
 // OrchestrateRunner 는 오케스트레이터 서브프로세스 생성 및 제어를 담당하는 CLI 러너다.
+// 자식 워커에게 안전하게 인자를 전달하고 실행 결과를 수거하여 출력한다.
 type OrchestrateRunner struct {
-	stdout       io.Writer
-	stderr       io.Writer
-	workspaceDir string
-	statePath    string
-	pubJWKSPath  string
-	replayPath   string
-	auditPath    string
-	workerBin    string // 테스트 시 모의/커스텀 바이너리 주입 지원 (기본: os.Executable())
+	stdout       io.Writer // 표준 출력 스트림
+	stderr       io.Writer // 표준 에러 스트림
+	workspaceDir string    // 워크스페이스 디렉터리 경로
+	statePath    string    // Zone B 상태 파일 경로
+	pubJWKSPath  string    // Zone B 공개 키(JWKS) 경로
+	replayPath   string    // Replay 방지 원장 경로
+	auditPath    string    // 감사 로그 파일 경로
+	workerBin    string    // 테스트 시 모의/커스텀 바이너리 주입 지원 (기본: os.Executable())
 }
 
 // NewOrchestrateRunner 는 OrchestrateRunner 인스턴스를 생성한다.
@@ -141,14 +154,14 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 		Data:     dataFlag,
 	}
 
-	// 5. 프로세스 스폰 및 종료 코드 수거
+	// 3. 프로세스 스폰 및 종료 코드 수거
 	result, err := spawner.Spawn(ctx, subReq)
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: failed to spawn worker: %v\n", err)
 		return domain.ExitInternalError
 	}
 
-	// 6. 결과 출력
+	// 4. 결과 출력
 	return renderSpawnResult(r.stdout, r.stderr, result)
 }
 

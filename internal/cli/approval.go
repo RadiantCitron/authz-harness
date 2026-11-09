@@ -1,3 +1,15 @@
+// Package cli 는 authz-harness 의 명령줄 인터페이스(CLI) 하위 명령어 러너들을 제공한다.
+// 본 파일(approval.go)은 사람 승인자(Human Approver)를 대역하여 권한 승인을 부여하고 조회하는 `approval` 서브커맨드 러너를 구현한다.
+//
+// [보안 아키텍처 및 역할]
+// 1. HITL (Human-In-The-Loop) 사람 승인 대역:
+//    - 높은 권한 작업이나 특정 Grant 에서 `RequiresApproval: true` 로 지정된 요청에 대해 외부 관리자가 사전 승인을 부여한다.
+//    - grant: 주체(Subject), 액션(Action), 리소스(Resource), 토큰 식별자(TokenJTI), 인자 해시(ArgHash), 유효 기간(TTL)을 명시하여 승인 레코드를 생성.
+//    - list: 특정 주체에 등록되어 있는 유효한 승인 목록 조회.
+// 2. 바인딩 및 부인 방지 (Cryptographic & Token Binding):
+//    - 승인은 특정 토큰(JTI) 및 인자 지문(ArgHash: sha256)에 강하게 결합(Binding)될 수 있어 토큰 탈취 및 매개변수 변조 공격을 방어한다.
+// 3. TTL 시간 제한 (Strict TTL Enforcement):
+//    - 승인은 기본 5분, 최대 1시간의 엄격한 만료 시간을 가지며, 만료된 승인은 PEP 단계에서 즉시 거부된다.
 package cli
 
 import (
@@ -12,12 +24,13 @@ import (
 	"authz-harness/internal/domain"
 )
 
-// ApprovalRunner 는 사람 승인자를 대역하는 `approval` 하위 명령어 러너다.
+// ApprovalRunner 는 사람 승인자를 대역하는 `approval` 하위 명령어(grant, list) 러너다.
+// PAP(Policy Administration Point) 서비스를 통해 승인 상태 레코드를 생성하고 조회한다.
 type ApprovalRunner struct {
-	out       io.Writer
-	errOut    io.Writer
-	statePath string
-	auditPath string
+	out       io.Writer // 표준 출력 스트림
+	errOut    io.Writer // 표준 에러 스트림
+	statePath string    // Zone B 상태(State) 파일 경로
+	auditPath string    // 감사 로그 파일 경로
 }
 
 // NewApprovalRunner 는 상태 파일·감사 파일 경로로 ApprovalRunner 를 생성한다.
@@ -25,7 +38,7 @@ func NewApprovalRunner(out, errOut io.Writer, statePath, auditPath string) (*App
 	return &ApprovalRunner{out: out, errOut: errOut, statePath: statePath, auditPath: auditPath}, nil
 }
 
-// Run 은 `approval grant|list` 를 라우팅한다.
+// Run 은 `approval grant|list` 서브커맨드를 라우팅하고 종료 코드를 반환한다.
 func (r *ApprovalRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	stack, err := app.BuildStack(app.AppConfig{StatePath: r.statePath, AuditPath: r.auditPath, WithoutGateway: true})
 	if err != nil {
@@ -49,6 +62,7 @@ func (r *ApprovalRunner) Run(ctx context.Context, args []string) domain.ExitCode
 	}
 }
 
+// runGrant 는 사람 승인 레코드를 신규 생성한다 (JTI 및 ArgHash 바인딩 지원).
 func (r *ApprovalRunner) runGrant(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("approval grant", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
@@ -80,6 +94,7 @@ func (r *ApprovalRunner) runGrant(ctx context.Context, papSvc pap.Service, args 
 	return domain.ExitSuccess
 }
 
+// runList 는 주체별로 등록된 활성 승인 목록을 조회하여 출력한다.
 func (r *ApprovalRunner) runList(ctx context.Context, papSvc pap.Service, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("approval list", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
