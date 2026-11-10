@@ -3,8 +3,8 @@
 //
 // [보안 아키텍처 및 역할]
 // 1. 키 생애주기 관리 (Key Lifecycle):
-//    - list: 현재 등록된 모든 키의 ID(KID), 알고리즘(ECDSA P-256), 상태(Active, Rotated, Retired), 생성/회전/퇴역 시각을 표로 출력.
-//    - rotate: 새로운 활성 서명 키를 생성하고 기존 키를 Rotated 상태로 전이 (RFC 7517/RFC 9068).
+//    - list: 현재 등록된 모든 키의 ID(KID), 알고리즘/곡선(EdDSA/Ed25519), 상태(active, verify-only, retired), 생성/회전/퇴역 시각을 표로 출력.
+//    - rotate: 새로운 활성 서명 키를 생성하고 기존 키를 verify-only 상태로 전이 (RFC 7517/RFC 9068).
 //    - revoke: 특정 KID를 즉시 강제 폐기(Retired) 상태로 전환.
 // 2. Zone A 특권 격리 (Zone A Privilege):
 //    - 키 회전 및 생성은 서명용 비공개키(Private Key)를 다루므로 Zone A 권한이 요구된다.
