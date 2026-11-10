@@ -81,7 +81,7 @@ var (
 // Grant 는 특정 주체(Subject)에게 특정 리소스(Resource)에 대한 액션(Action) 수행을 허가하는 불변 정책 엔티티다.
 // JSON 파일(state.json)에 영속화되며 PDP 가 메모리 스냅샷으로 읽어 인가를 판정한다.
 type Grant struct {
-	// ID 는 권한 부여의 고유 식별자다 (UUIDv4).
+	// ID 는 권한 부여의 식별자다. "grant-<발행 시각 UnixNano>" 형식이며 UUID 가 아니다 (pap.createGrant 가 조립).
 	ID string `json:"id"`
 
 	// Subject 는 권한을 부여받은 주체 식별자다 (예: "worker-01").

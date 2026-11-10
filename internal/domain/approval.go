@@ -32,7 +32,7 @@ const (
 
 // Approval 은 사람이 사전에 내준 1회용 수동 승인 티켓 모델이다.
 type Approval struct {
-	// ID 는 승인 티켓의 전역 고유 식별자다 (UUIDv4).
+	// ID 는 승인 티켓의 식별자다. "approval-<발행 시각 UnixNano>" 형식이며 UUID 가 아니다 (pap.createApproval 이 조립).
 	ID string `json:"id"`
 
 	// Subject 는 이 승인을 사용할 수 있는 인가 주체 식별자다 (예: "worker-01").
