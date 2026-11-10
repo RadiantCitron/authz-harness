@@ -8,9 +8,10 @@
 // 2. Zone B 격리 원칙 (Zone B Confinement):
 //    - app.BuildStack 호출 시 VerifyOnly: true 를 지정하여 서명용 개인키가 존재하는 Zone A에 일체 접근하지 않고,
 //      Zone B의 공개 검증 키(JWKS), 상태 파일, Replay 원장, 감사 로그만을 사용하여 검증한다.
-// 3. 파이프라인 단계별 시각화 (11-Stage Pipeline Box Visualization):
-//    - domain.PEPStages() 의 각 단계(인증, 재생, 에포크, 스코프, PDP 인가, 승인, 도구 바인딩, 경계 검증, 예산, 사전 감사, 집행)를
-//      [PASS], [FAIL], [SKIPPED], [N/A] 상태로 ASCII 박스에 명확히 매핑하여 출력한다.
+// 3. 파이프라인 단계별 시각화 (10-Stage Pipeline Box Visualization):
+//    - domain.PEPStages() 의 10단계(입력 검사, 신원 확인, 권한 판정, 경계 검사, 재사용 방지, 승인 소비, 예산 차감,
+//      실행 전 감사 기록, 실행, 사후 정산)를 [PASS], [FAIL], [SKIPPED], [N/A] 상태로 ASCII 박스에 매핑하여 출력한다.
+//    - 거부된 단계가 정식 목록에 없으면 목록 아래에 FAIL 칸을 하나 더 붙인다 (stageBoxes).
 // 4. 보안 가드레일:
 //    - parseNonNegativeClockOffset: 클록 오프셋에 음수를 허용하지 않아 이미 만료된 토큰이 과거 시간으로 부활하는 보안 취약점을 차단한다.
 package cli

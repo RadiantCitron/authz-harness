@@ -10,15 +10,15 @@
 //   - grant, approval, pdp, keys, token, pep, orchestrate, subagent, audit, run, mcp, confine-exec 등
 //     개별 책임 단위의 서브커맨드 러너로 인자를 위임하고 표준 종료 코드를 반환한다.
 //
-// 3. 결정론적 종료 코드 (Fail-Closed Exit Codes):
+// 3. 결정론적 종료 코드 (Fail-Closed Exit Codes, 정본: internal/domain/constants.go · ExitCodeForReason):
 //   - 0: 성공 (ExitSuccess)
-//   - 10: 입력 인자 결함 (ExitBadInput)
-//   - 11: 토큰 무효 (ExitInvalidToken)
-//   - 12: 인가 거부 (ExitAuthzDenied)
-//   - 13: 경계 탈출 (ExitBoundaryEscaped)
-//   - 14: 도구 실행 실패 (ExitToolExecution)
+//   - 11: 토큰 무효 (ExitTokenInvalid)
+//   - 12: 인가 거부 (ExitAuthzDenied) — 허가·스코프·Epoch·예산·네트워크/실행 경계 거부 포함
+//   - 13: 경로 위반 (ExitPathViolation) — 워크스페이스 탈출, 심볼릭 링크 탈출
+//   - 14: 입력 인자 결함 (ExitBadInput)
 //   - 15: 감사 실패 (ExitAuditFailure)
-//   - 16: 내부 시스템 오류 (ExitInternalError)
+//   - 16: 내부 시스템 오류 (ExitInternalError) — 도구 실행 실패, 격리 적용 불가 포함
+//   - 17: 자원 한계 초과 (ExitResourceLimit) — 자식 시간·출력 상한
 //   - 18: 사람 승인 필요 (ExitApprovalRequired)
 package main
 

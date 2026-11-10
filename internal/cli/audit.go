@@ -4,12 +4,13 @@
 // [보안 아키텍처 및 역할]
 // 1. 단방향 SHA-256 해시 체인 무결성 검증 (Append-Only Hash Chain):
 //    - verify: 전체 audit.jsonl 의 해시 사슬을 역방향/정방향 검증하여 위변조, 줄 삭제, 순서 변경 여부를 탐지.
-//    - --checkpoint 플래그 지정 시 ECDSA 비대칭 서명된 체크포인트 파일과 대조하여 꼬리 절단(Tail Truncation) 공격까지 완벽 방어.
+//    - --checkpoint 플래그 지정 시 Ed25519 서명된 체크포인트 파일과 대조하여 꼬리 절단(Tail Truncation)·재작성·삭제까지 검사.
 // 2. 분산 추적 및 위임 계보 시각화 (Timeline & Delegation Tree):
 //    - timeline: 단일 TraceID 에 속한 부모-자식 다중 프로세스 감사 이벤트를 시각적 ASCII 타임라인으로 렌더링.
 //    - tree: JTI 기반 축소 위임 체인을 계층적 트리 구조로 렌더링.
 // 3. 충돌 내구성 및 복구 (Crash Resilience & Recovery):
-//    - checkpoint: 현재 체인의 마지막 레코드 번호와 해시를 Zone A 서명 키로 서명하여 체크포인트 스냅샷 생성.
+//    - checkpoint: 현재 체인의 마지막 레코드 번호와 해시를 감사 전용 Ed25519 서명 키(Zone A 폴더의 audit_signing_key.priv.json,
+//      토큰 서명 키와 별개)로 서명하여 체크포인트 스냅샷 생성.
 //    - recover: 전원 차단 등으로 마지막 줄이 불완전하게 잘린 경우(AUDIT_TAIL_INCOMPLETE),
 //      잘린 데이터를 격리 파일로 보존하고 정상 줄까지만 복구하여 사슬 무결성을 회복.
 package cli
@@ -184,7 +185,7 @@ func (r *AuditRunner) loadTraceEvents() ([]audit.Event, domain.ExitCode) {
 	return events, domain.ExitSuccess
 }
 
-// runVerify 는 감사 로그의 SHA-256 해시 체인을 검증하고, 체크포인트 플래그 지정 시 ECDSA 서명 체크포인트와 대조한다.
+// runVerify 는 감사 로그의 SHA-256 해시 체인을 검증하고, 체크포인트 플래그 지정 시 Ed25519 서명 체크포인트와 대조한다.
 func (r *AuditRunner) runVerify(ctx context.Context, args []string) domain.ExitCode {
 	fs := flag.NewFlagSet("audit verify", flag.ContinueOnError)
 	fs.SetOutput(r.errOut)
