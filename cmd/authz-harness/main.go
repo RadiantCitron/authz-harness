@@ -134,6 +134,7 @@ func main() {
 			os.Exit(int(exitCode))
 		case "orchestrate":
 			orchRunner := cli.NewOrchestrateRunner(os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath)
+			orchRunner.SetPrivKeyPath(privKeyPath)
 			exitCode := orchRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		case "subagent":
@@ -152,6 +153,7 @@ func main() {
 			os.Exit(int(exitCode))
 		case "mcp":
 			mcpRunner := cli.NewMCPRunner(os.Stdin, os.Stdout, os.Stderr, workspaceDir, statePath, pubJWKSPath, replayPath, auditPath, nil)
+			mcpRunner.SetPrivKeyPath(privKeyPath)
 			exitCode := mcpRunner.Run(context.Background(), args[1:])
 			os.Exit(int(exitCode))
 		default:

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"authz-harness/internal/app"
+	"authz-harness/internal/confinement"
 	"authz-harness/internal/orchestrator"
 )
 
@@ -35,6 +36,11 @@ type workerSpawnerConfig struct {
 	NetAllow      string        // net:fetch 허용 호스트 목록 (쉼표 구분)
 	Verbose       bool          // 디버그 로깅 활성화 여부
 	Timeout       time.Duration // 서브프로세스 실행 제한 시간
+
+	// Confine 이 true 면 워커를 OS 커널 격리(Seatbelt/Landlock) 아래에서 기동한다.
+	// 격리를 적용할 수 없는 환경에서는 워커를 띄우지 않고 거부한다 (종료 코드 16).
+	Confine     bool
+	PrivKeyPath string // Zone A 개인키 경로. 격리 정책의 보호 루트를 계산하는 데만 쓰며 워커에는 넘기지 않는다.
 }
 
 // buildWorkerSpawner 는 감사 로그 스택 초기화, 바이너리 위치 확인, 파일 경로의 절대 경로 정규화,
@@ -94,12 +100,29 @@ func buildWorkerSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestrato
 	childArgs := orchestrator.WorkerArgs(absWorkspace, absState, absPubJWKS, absReplay, absAudit, cfg.NetAllow, cfg.Verbose)
 
 	// 4. Spawner 구성
-	spawner, err := orchestrator.NewSubprocessSpawner(orchestrator.SpawnConfig{
+	spawnCfg := orchestrator.SpawnConfig{
 		BinaryPath: binPath,
 		Args:       childArgs,
 		Limits:     orchestrator.Limits{Timeout: cfg.Timeout},
 		Audit:      stack.AuditWriter,
-	})
+	}
+	if cfg.Confine {
+		absPriv, err := filepath.Abs(cfg.PrivKeyPath)
+		if err != nil {
+			stack.Close()
+			fmt.Fprintf(errOut, "Error: failed to resolve priv key path: %v\n", err)
+			return nil, nil, err
+		}
+		pol, err := buildConfinementPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
+		if err != nil {
+			stack.Close()
+			fmt.Fprintf(errOut, "Error: cannot build confinement policy: %v\n", err)
+			return nil, nil, err
+		}
+		spawnCfg.Confiner = confinement.WithLauncher(confinement.Platform(), binPath)
+		spawnCfg.Confinement = pol
+	}
+	spawner, err := orchestrator.NewSubprocessSpawner(spawnCfg)
 	if err != nil {
 		stack.Close()
 		fmt.Fprintf(errOut, "Error: failed to create spawner: %v\n", err)

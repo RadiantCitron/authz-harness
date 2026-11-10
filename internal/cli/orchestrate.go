@@ -36,6 +36,7 @@ type OrchestrateRunner struct {
 	replayPath   string    // Replay 방지 원장 경로
 	auditPath    string    // 감사 로그 파일 경로
 	workerBin    string    // 테스트 시 모의/커스텀 바이너리 주입 지원 (기본: os.Executable())
+	privKeyPath  string    // Zone A 개인키 경로 (-confine 의 보호 루트 계산용. 워커에는 넘기지 않음)
 }
 
 // NewOrchestrateRunner 는 OrchestrateRunner 인스턴스를 생성한다.
@@ -52,6 +53,11 @@ func NewOrchestrateRunner(
 		replayPath:   replayPath,
 		auditPath:    auditPath,
 	}
+}
+
+// SetPrivKeyPath 는 -confine 의 보호 루트 계산에 쓸 Zone A 개인키 경로를 지정한다.
+func (r *OrchestrateRunner) SetPrivKeyPath(path string) {
+	r.privKeyPath = path
 }
 
 // SetWorkerBinaryPath 는 자식 프로세스로 실행할 바이너리 경로를 재정의한다 (테스트 지원).
@@ -88,6 +94,7 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 		pubJWKSFlag   string
 		replayFlag    string
 		auditFlag     string
+		confineFlag   bool
 	)
 
 	fs.StringVar(&tokenFlag, "token", "", "서브에이전트에 주입할 축소 위임 Access Token (필수)")
@@ -102,6 +109,7 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 	fs.StringVar(&pubJWKSFlag, "pub-jwks-file", r.pubJWKSPath, "Zone B 공개 검증 키(JWKS) 경로")
 	fs.StringVar(&replayFlag, "replay-file", r.replayPath, "Zone B Replay 방지 원장 경로")
 	fs.StringVar(&auditFlag, "audit-file", r.auditPath, "감사 로그 저장 파일 경로")
+	fs.BoolVar(&confineFlag, "confine", false, "워커를 OS 커널 격리(Seatbelt/Landlock) 아래에서 기동한다. 적용할 수 없으면 거부(16)")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		return domain.ExitBadInput
@@ -138,6 +146,8 @@ func (r *OrchestrateRunner) Run(ctx context.Context, args []string) domain.ExitC
 		PubJWKSPath:   pubJWKSFlag,
 		ReplayPath:    replayFlag,
 		Timeout:       timeoutFlag,
+		Confine:       confineFlag,
+		PrivKeyPath:   r.privKeyPath,
 	}, r.stderr)
 	if err != nil {
 		return domain.ExitInternalError

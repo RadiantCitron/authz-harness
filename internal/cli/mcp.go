@@ -40,6 +40,7 @@ type MCPRunner struct {
 	auditPath    string       // 감사 로그 파일 경로
 	executor     mcp.Executor // 테스트 주입 지원 (nil일 경우 플래그 기반 SubprocessExecutor 생성)
 	workerBin    string       // 테스트 지원 커스텀 바이너리 경로
+	privKeyPath  string       // Zone A 개인키 경로 (-confine 의 보호 루트 계산용. 워커에는 넘기지 않음)
 }
 
 // NewMCPRunner 는 MCPRunner 인스턴스를 생성한다.
@@ -68,6 +69,11 @@ func NewMCPRunner(
 		auditPath:    auditPath,
 		executor:     executor,
 	}
+}
+
+// SetPrivKeyPath 는 -confine 의 보호 루트 계산에 쓸 Zone A 개인키 경로를 지정한다.
+func (r *MCPRunner) SetPrivKeyPath(path string) {
+	r.privKeyPath = path
 }
 
 // SetWorkerBinaryPath 는 자식 프로세스로 실행할 바이너리 경로를 재정의한다 (테스트 지원).
@@ -106,6 +112,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 		auditFlag     string
 		timeoutFlag   time.Duration
 		netAllowFlag  string
+		confineFlag   bool
 	)
 
 	fs.StringVar(&workspaceFlag, "workspace", r.workspaceDir, "격리된 Workspace 디렉터리 경로")
@@ -116,6 +123,7 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 	fs.DurationVar(&timeoutFlag, "timeout", 10*time.Second, "자식 프로세스 실행 타임아웃")
 
 	fs.StringVar(&netAllowFlag, "net-allow", "", "워커에 그대로 넘길 net:fetch 허용 host:port 목록 (쉼표 구분)")
+	fs.BoolVar(&confineFlag, "confine", false, "워커를 OS 커널 격리(Seatbelt/Landlock) 아래에서 기동한다. 적용할 수 없으면 거부(16). 격리 중에는 -net-allow 의 포트만 연결을 허용한다")
 
 	if err := fs.Parse(args); err != nil {
 		return domain.ExitBadInput
@@ -140,6 +148,8 @@ func (r *MCPRunner) runServe(ctx context.Context, args []string) domain.ExitCode
 			NetAllow:      netAllowFlag,
 			Verbose:       logLevel == slog.LevelDebug,
 			Timeout:       timeoutFlag,
+			Confine:       confineFlag,
+			PrivKeyPath:   r.privKeyPath,
 		}, r.errOut)
 		if err != nil {
 			return domain.ExitInternalError
