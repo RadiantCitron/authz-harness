@@ -89,6 +89,7 @@ var expectedStages = map[string]domain.Stage{
 	"E2E-77": domain.StageBoundary,
 	"E2E-78": harness.NoStageRecord,
 	"E2E-79": harness.NoStageRecord,
+	"E2E-80": harness.NoStageRecord,
 }
 
 // stagedScenario 는 시나리오의 기대 감사 단계를 표에서 채운다. 표에 없는 시나리오는 단계가 비어 등록이 실패한다.

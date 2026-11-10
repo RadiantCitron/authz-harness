@@ -18,12 +18,12 @@ import (
 	"authz-harness/internal/subagent"
 )
 
-// G10: OS 수준 격리 및 악의 워커 차단 (E2E-45 ~ E2E-49)
+// G10: OS 수준 격리 및 악의 워커 차단 (E2E-45 ~ E2E-49, E2E-80)
 //
 // 모든 판정은 부모가 관찰한 사실(canary·파일·리스너)로만 내린다. 자식의 종료 코드나 자기보고는 근거가 아니다.
 // 대조군(격리 꺼짐: 공격 성공 관찰) → 실험군(격리 켜짐: 차단 관찰) 쌍이 모두 성립할 때만 PASS 다.
 func g10Scenarios() []harness.Scenario {
-	return withStages([]harness.Scenario{
+	return withStages(append([]harness.Scenario{
 		&g10Scenario{id: "E2E-45", name: "PEP 우회 Zone A 개인키 영역 직접 읽기 차단", attack: g10Read,
 			desc: "악의 워커가 PEP 를 건너뛰고 zone_a 의 canary 를 직접 읽으려 한다. 대조군에서는 유출, 실험군에서는 커널이 차단한다."},
 		&g10Scenario{id: "E2E-46", name: "PEP 우회 샌드박스 밖 직접 쓰기 차단", attack: g10Write,
@@ -34,7 +34,7 @@ func g10Scenarios() []harness.Scenario {
 			desc: "악의 워커가 자기 자식을 통해 zone_a 를 읽는다. 격리는 자손에게 상속되어 canary 가 유출되지 않는다."},
 		&g10Scenario{id: "E2E-49", name: "격리 필수 모드 Fail-Closed", attack: g10FailClosed,
 			desc: "격리를 적용할 수 없는 필수 모드(NoopConfiner)에서는 자식을 기동하지 않고 16 으로 거부한다."},
-	})
+	}, g10MultiHopScenarios()...))
 }
 
 type g10Attack int

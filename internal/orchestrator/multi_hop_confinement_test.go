@@ -92,3 +92,26 @@ func TestMultiHop_RequireConfinementWithoutConfinerFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+// M4: 2차 교환이 스코프 초과로 거부되면 격리 설정과 무관하게 마지막 워커를 띄우지 않고, 격리 이벤트도 남기지 않는다.
+func TestMultiHop_ScopeExceededDeniedBeforeConfinement(t *testing.T) {
+	env := newHopEnv(t)
+	cfg := env.cfg
+	cfg.BinaryPath = lightWorkerBinary(t)
+	cfg.Gateway = nil
+	cfg.Confiner = confinement.NoopConfiner{}
+	cfg.Confinement = confinement.Policy{Require: true}
+
+	// 중간 관리자는 읽기만 가졌는데 최종 워커에게 쓰기를 위임하려 한다.
+	exit, err := env.run(t, cfg, env.stack.ExchangeService, "file:read", "file:write")
+
+	if err == nil || exit == domain.ExitSuccess {
+		t.Fatalf("스코프 초과 위임이 거부되지 않았다: exit=%v err=%v", exit, err)
+	}
+	if n := len(confinedEvents(t, env.auditPath)); n != 0 {
+		t.Fatalf("교환 단계에서 거부되었는데 agent.confined 가 %d건 있다", n)
+	}
+	if n := spawnEvents(t, env.auditPath); n != 0 {
+		t.Fatalf("교환 단계에서 거부되었는데 워커 스폰 이벤트가 %d건 있다", n)
+	}
+}

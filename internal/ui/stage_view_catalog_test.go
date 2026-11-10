@@ -14,7 +14,7 @@ import (
 	"authz-harness/internal/ui"
 )
 
-// TC-070-02·03: 실제 79건을 돌려 화면과 감사 기록을 대조한다.
+// TC-070-02·03: 실제 80건을 돌려 화면과 감사 기록을 대조한다.
 // 종료 코드가 0이 아닌 시나리오는 차단·실패·판단 불가가 하나 이상 보여야 하고, 막힌 칸은 기록된 단계와 같아야 한다.
 func TestStageView_AllScenarios(t *testing.T) {
 	runner := harness.NewDefaultRunner(harness.WithBaseDir(t.TempDir()))

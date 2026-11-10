@@ -27,7 +27,7 @@ func TestStages_MutatedBoundaryExpectationFails(t *testing.T) {
 	}
 }
 
-// 표는 79건 전부를 덮어야 한다.
+// 표는 80건 전부를 덮어야 한다.
 func TestStages_TableCoversAllScenarios(t *testing.T) {
 	if n := len(AllScenarios()); n != len(expectedStages) {
 		t.Fatalf("scenarios=%d stages=%d", n, len(expectedStages))

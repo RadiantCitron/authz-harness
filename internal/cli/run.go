@@ -60,7 +60,7 @@ func (r *RunRunner) Run(ctx context.Context, args []string) domain.ExitCode {
 	fs.SetOutput(r.errOut)
 
 	var cfg RunConfig
-	fs.StringVar(&cfg.ScenarioID, "scenario", "all", "실행할 시나리오 ID (all 또는 E2E-01~E2E-79)")
+	fs.StringVar(&cfg.ScenarioID, "scenario", "all", "실행할 시나리오 ID (all 또는 E2E-01~E2E-80)")
 	fs.StringVar(&cfg.GroupID, "group", "", "실행할 시나리오 그룹 (G1~G15)")
 	fs.StringVar(&cfg.ExecutionMode, "execution-mode", "subprocess", "실행 격리 모드 (subprocess | inproc)")
 	fs.StringVar(&cfg.OutputFormat, "output-format", "summary", "출력 형식 (summary, explain, json)")
