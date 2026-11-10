@@ -59,6 +59,12 @@ func newOrderStore(t *testing.T) *state.FileStore {
 	return mustStore(t, filepath.Join(t.TempDir(), "s.json"))
 }
 
+// seedApprovalGrant 는 approvalReq 가 ADR 0011 D-4 허가 검사를 통과하도록 승인 필요 Grant 를 감사 없이 미리 넣는다.
+func seedApprovalGrant(t *testing.T, st *state.FileStore) {
+	t.Helper()
+	seedGrant(t, st, approvalReq.Subject, approvalReq.Action, approvalReq.Resource, true, domain.GrantStatusActive)
+}
+
 var (
 	grantReq    = pap.CreateGrantRequest{Subject: "w", Action: domain.ActionFileRead, Resource: "x"}
 	approvalReq = pap.CreateApprovalRequest{Subject: "w", Action: domain.ActionFileWrite, Resource: "x", TokenJTI: "j"}
@@ -84,6 +90,7 @@ func TestOrder_O1_GrantAuditedBeforeStore(t *testing.T) {
 // O2: approval.granted 를 기록하는 시점에 그 승인은 아직 저장소에 없다.
 func TestOrder_O2_ApprovalAuditedBeforeStore(t *testing.T) {
 	st := newOrderStore(t)
+	seedApprovalGrant(t, st)
 	w := &peekWriter{store: st}
 	if _, err := pap.NewService(st, w).CreateApproval(context.Background(), approvalReq); err != nil {
 		t.Fatal(err)
@@ -136,6 +143,9 @@ func TestOrder_O4_StoreFailureLeavesCreatedThenDenySameID(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			st := newOrderStore(t)
+			if c.name == "approval" {
+				seedApprovalGrant(t, st)
+			}
 			w := &peekWriter{store: st}
 			err := c.call(pap.NewService(&countUpdateStore{Store: st, failAll: true}, w))
 			if domain.ReasonFromError(err, "") != domain.ReasonInternalError {
@@ -166,6 +176,7 @@ func TestOrder_O5_DenyAuditAlsoFails(t *testing.T) {
 // O6: 정상 생성 → 감사 1건, 항목 1건, 기록 내용 유지.
 func TestOrder_O6_NormalCreateOneAuditOneEntry(t *testing.T) {
 	st := newOrderStore(t)
+	seedApprovalGrant(t, st)
 	w := &peekWriter{store: st}
 	svc := pap.NewService(st, w)
 	g, err := svc.CreateGrant(context.Background(), grantReq)

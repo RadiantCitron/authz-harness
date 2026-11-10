@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"authz-harness/internal/authz/state"
 	"authz-harness/internal/cli"
 	"authz-harness/internal/domain"
 )
@@ -51,12 +52,17 @@ func TestCLI_ActionParsingIsUnified(t *testing.T) {
 	})
 	t.Run("approval grant 는 별칭을 정식 액션으로 저장한다", func(t *testing.T) {
 		r, _, errOut, sp, _ := setupApprovalRunner(t)
+		seedApprovalGrantFile(t, sp, "w", domain.ActionFileWrite, "s.txt")
 		if code := r.Run(ctx, []string{"grant", "--subject", "w", "--action", " Write ", "--resource", "s.txt", "--jti", "j"}); code != domain.ExitSuccess {
 			t.Fatalf("exit %d: %s", code, errOut.String())
 		}
-		b, err := os.ReadFile(sp)
-		if err != nil || !strings.Contains(string(b), `"file:write"`) {
-			t.Fatalf("ledger must store canonical file:write: %v %s", err, b)
+		st, err := state.NewFileStore(sp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := st.Load()
+		if err != nil || len(loaded.Approvals) != 1 || loaded.Approvals[0].Action != domain.ActionFileWrite {
+			t.Fatalf("ledger must store canonical file:write approval: %v %+v", err, loaded)
 		}
 	})
 }

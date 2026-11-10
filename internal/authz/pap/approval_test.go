@@ -21,8 +21,9 @@ func (failingWriter) Log(audit.Event) error { return errors.New("injected") }
 func (failingWriter) Close() error          { return nil }
 
 func TestApprovalCreateAndList(t *testing.T) {
-	svc, _, auditPath := setupTestPAP(t)
+	svc, statePath, auditPath := setupTestPAP(t)
 	ctx := context.Background()
+	seedGrant(t, mustStore(t, statePath), "w", domain.ActionFileWrite, "s.txt", true, domain.GrantStatusActive)
 	a, err := svc.CreateApproval(ctx, pap.CreateApprovalRequest{Subject: "w", Action: domain.ActionFileWrite, Resource: "s.txt", TokenJTI: "j1"})
 	if err != nil {
 		t.Fatal(err)

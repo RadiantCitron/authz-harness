@@ -300,6 +300,30 @@ func (s *papService) ListGrants(ctx context.Context, filter GrantFilter) ([]doma
 	return result, nil
 }
 
+// requireApprovalGrant 는 같은 주체·행위·대상에 사람 승인이 필요한 활성 Grant 가 있는지 확인한다 (ADR 0011 D-4).
+// 활성 Grant 가 없으면 NO_ACTIVE_GRANT, 있으나 모두 승인이 필요 없으면 INVALID_ARGUMENTS 다.
+// 이 검사와 저장은 같은 잠금 구간이 아니다. 그 사이 회수된 Grant 의 승인은 PDP 가 활성 Grant 를 먼저 요구하므로 쓰이지 않는다.
+func (s *papService) requireApprovalGrant(sub string, act domain.Action, res string) error {
+	st, err := s.store.Load()
+	if err != nil {
+		return domain.NewError(domain.ReasonInternalError, "pap: failed to load state for approval grant check", err)
+	}
+	matched := false
+	for _, g := range st.Grants {
+		if g.Subject != sub || g.Action != act || g.Resource != res || !g.IsActive() {
+			continue
+		}
+		if g.RequiresApproval {
+			return nil
+		}
+		matched = true
+	}
+	if matched {
+		return domain.NewError(domain.ReasonInvalidArguments, "pap: matching active grant does not require approval", nil)
+	}
+	return domain.NewError(domain.ReasonNoActiveGrant, "pap: no active grant for approval subject, action, resource", nil)
+}
+
 // createApproval 은 TTL·ArgHash 를 검증하고 승인을 원장에 저장한 뒤 approval.granted 감사를 남긴다.
 func (s *papService) createApproval(ctx context.Context, req CreateApprovalRequest) (*domain.Approval, error) {
 	ttl, err := domain.ValidateApprovalTTL(req.TTL)
@@ -315,6 +339,9 @@ func (s *papService) createApproval(ctx context.Context, req CreateApprovalReque
 	}
 	if !domain.IsValidAction(req.Action) {
 		return nil, domain.NewError(domain.ReasonInvalidArguments, "pap: approval action must be file:read, file:write, net:fetch or exec:run", nil)
+	}
+	if err := s.requireApprovalGrant(sub, req.Action, res); err != nil {
+		return nil, err
 	}
 
 	now := s.clock.Now().UTC()
