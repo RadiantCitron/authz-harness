@@ -77,14 +77,34 @@ func NewMultiHopSpawner(cfg MultiHopConfig) (*MultiHopSpawner, error) {
 	return &MultiHopSpawner{cfg: cfg}, nil
 }
 
-// ExecuteMultiHop 은 루트 -> 중간 관리자 -> 최종 워커로 이어지는 2-Hop 위임 및 실행을 수행한다.
-func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDelegationRequest) (domain.ExitCode, error) {
+// MultiHopResult 는 루트 -> 중간 관리자 -> 최종 워커로 이어지는 2-Hop 위임 및 실행의 상세 결과다.
+type MultiHopResult struct {
+	ExitCode       domain.ExitCode
+	TraceID        string
+	Hop1Result     *exchange.ExchangeResult
+	Hop2Result     *exchange.ExchangeResult
+	SpawnResult    *SpawnResult
+	InprocResponse *subagent.SubagentResponse
+	Error          error
+}
+
+// ExecuteMultiHopDetailed 는 루트 -> 중간 관리자 -> 최종 워커로 이어지는 2-Hop 위임 및 실행을 수행하고
+// 각 단계의 상세 교환 결과와 최종 워커 실행 결과를 MultiHopResult 에 담아 반환한다.
+func (s *MultiHopSpawner) ExecuteMultiHopDetailed(ctx context.Context, req MultiHopDelegationRequest) (*MultiHopResult, error) {
+	result := &MultiHopResult{
+		TraceID: req.TraceID,
+	}
+
 	if req.TraceID == "" {
-		return domain.ExitBadInput, fmt.Errorf("trace_id is required")
+		result.ExitCode = domain.ExitBadInput
+		result.Error = fmt.Errorf("trace_id is required")
+		return result, result.Error
 	}
 
 	if req.Exchange == nil {
-		return domain.ExitInternalError, fmt.Errorf("multi-hop: exchange service is required")
+		result.ExitCode = domain.ExitInternalError
+		result.Error = fmt.Errorf("multi-hop: exchange service is required")
+		return result, result.Error
 	}
 	exchSvc := req.Exchange
 
@@ -104,8 +124,11 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 	})
 	if err != nil {
 		// 1차 교환 거부 (사유를 따른 종료 코드: 감사 실패 15, 일반 거부 12)
-		return domain.ExitCodeFromError(err, domain.ExitAuthzDenied), err
+		result.ExitCode = domain.ExitCodeFromError(err, domain.ExitAuthzDenied)
+		result.Error = err
+		return result, err
 	}
+	result.Hop1Result = leadExchangeRes
 
 	// 2. Lead -> Worker 2차 토큰 교환 (Depth 2)
 	// (중간 관리자가 하위 워커에게 위임하는 단계)
@@ -124,8 +147,11 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 	})
 	if err != nil {
 		// 2차 교환 거부 (E2E-32: 중간 관리자의 스코프 초과 위임 차단)
-		return domain.ExitCodeFromError(err, domain.ExitAuthzDenied), err
+		result.ExitCode = domain.ExitCodeFromError(err, domain.ExitAuthzDenied)
+		result.Error = err
+		return result, err
 	}
+	result.Hop2Result = workerExchangeRes
 
 	// 3. Leaf Worker 서브프로세스 스폰 (Depth 2 토큰 주입)
 	if s.cfg.BinaryPath != "" {
@@ -139,7 +165,9 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 			Confinement: s.cfg.Confinement,
 		})
 		if err != nil {
-			return domain.ExitInternalError, fmt.Errorf("failed to create worker spawner: %w", err)
+			result.ExitCode = domain.ExitInternalError
+			result.Error = fmt.Errorf("failed to create worker spawner: %w", err)
+			return result, result.Error
 		}
 
 		res, err := spawner.Spawn(ctx, subagent.SubagentRequest{
@@ -149,27 +177,46 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 			FilePath: req.TargetFile,
 			Data:     string(req.Data),
 		})
+		result.SpawnResult = res
 		if err != nil {
-			return domain.ExitInternalError, err
+			result.ExitCode = domain.ExitInternalError
+			result.Error = err
+			return result, err
 		}
-		return domain.ExitCode(res.ExitCode), nil
+		result.ExitCode = domain.ExitCode(res.ExitCode)
+		return result, nil
 	}
 
 	// 4. inproc 모드: 서브프로세스 대신 프로세스 내 PEP 게이트웨이로 워커 단계를 집행한다.
 	// 게이트웨이도 없으면 인가 판정 없이 성공을 반환하지 않고 Fail-Closed 로 거부한다.
 	if s.cfg.Gateway == nil {
-		return domain.ExitInternalError, fmt.Errorf("multi-hop: neither binary path nor pep gateway configured")
+		result.ExitCode = domain.ExitInternalError
+		result.Error = fmt.Errorf("multi-hop: neither binary path nor pep gateway configured")
+		return result, result.Error
 	}
 	worker, err := subagent.NewWorker(s.cfg.Gateway)
 	if err != nil {
-		return domain.ExitInternalError, fmt.Errorf("failed to create inproc worker: %w", err)
+		result.ExitCode = domain.ExitInternalError
+		result.Error = fmt.Errorf("failed to create inproc worker: %w", err)
+		return result, result.Error
 	}
-	_, exitCode := worker.Execute(ctx, subagent.SubagentRequest{
+	resp, exitCode := worker.Execute(ctx, subagent.SubagentRequest{
 		TraceID:  req.TraceID,
 		Token:    workerExchangeRes.TokenString,
 		Action:   string(req.Action),
 		FilePath: req.TargetFile,
 		Data:     string(req.Data),
 	})
-	return domain.ExitCode(exitCode), nil
+	result.InprocResponse = &resp
+	result.ExitCode = domain.ExitCode(exitCode)
+	return result, nil
+}
+
+// ExecuteMultiHop 은 루트 -> 중간 관리자 -> 최종 워커로 이어지는 2-Hop 위임 및 실행을 수행한다.
+func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDelegationRequest) (domain.ExitCode, error) {
+	res, err := s.ExecuteMultiHopDetailed(ctx, req)
+	if res != nil {
+		return res.ExitCode, err
+	}
+	return domain.ExitInternalError, err
 }
