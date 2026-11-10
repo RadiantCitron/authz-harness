@@ -18,102 +18,23 @@
 package cli
 
 import (
-	"net"
-	"path/filepath"
-	"strconv"
-	"strings"
-
 	"authz-harness/internal/confinement"
-	"authz-harness/internal/domain"
 )
 
-// commonAncestor 는 두 절대 경로의 공통 조상 폴더를 반환한다. 공통 조상이 없으면 파일 시스템 루트("/")다.
+// commonAncestor 는 두 절대 경로의 공통 조상 폴더를 반환한다.
+// 실제 계산은 confinement.CommonAncestor 에 위임한다 (계획 050 공용화).
 func commonAncestor(a, b string) string {
-	sep := string(filepath.Separator)
-	ap := strings.Split(filepath.Clean(a), sep)
-	bp := strings.Split(filepath.Clean(b), sep)
-	var common []string
-	for i := 0; i < len(ap) && i < len(bp); i++ {
-		if ap[i] != bp[i] {
-			break
-		}
-		common = append(common, ap[i])
-	}
-	root := strings.Join(common, sep)
-	if root == "" {
-		return sep
-	}
-	return root
+	return confinement.CommonAncestor(a, b)
 }
 
 // parseConnectPorts 는 쉼표로 구분된 host:port 목록에서 포트 번호만 중복 없이 뽑는다.
-// 비어 있는 입력은 포트 없음(nil)이다. 포트가 없거나 범위를 벗어난 항목은 오류다.
+// 실제 파싱은 confinement.ParseConnectPorts 에 위임한다 (계획 050 공용화).
 func parseConnectPorts(netAllow string) ([]int, error) {
-	var ports []int
-	seen := make(map[int]struct{})
-	for _, entry := range strings.Split(netAllow, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		_, portStr, err := net.SplitHostPort(entry)
-		if err != nil {
-			return nil, domain.NewError(domain.ReasonInvalidArguments, "confine: net-allow entry must be host:port: "+entry, err)
-		}
-		port, err := strconv.Atoi(portStr)
-		if err != nil || port < 1 || port > 65535 {
-			return nil, domain.NewError(domain.ReasonInvalidArguments, "confine: net-allow port out of range: "+entry, err)
-		}
-		if _, dup := seen[port]; dup {
-			continue
-		}
-		seen[port] = struct{}{}
-		ports = append(ports, port)
-	}
-	return ports, nil
+	return confinement.ParseConnectPorts(netAllow)
 }
 
 // buildConfinementPolicy 는 절대 경로들로부터 워커용 격리 정책을 계산한다.
-// 모든 경로 인자는 호출자가 절대 경로로 정규화해서 넘겨야 한다.
+// 실제 정책 계산은 confinement.BuildWorkerPolicy 에 위임한다 (계획 050 공용화).
 func buildConfinementPolicy(privKeyPath, statePath, pubJWKSPath, replayPath, workspaceDir, auditPath, netAllow string) (confinement.Policy, error) {
-	if !filepath.IsAbs(privKeyPath) || !filepath.IsAbs(statePath) {
-		return confinement.Policy{}, domain.NewError(domain.ReasonInvalidArguments, "confine: priv-key-file and state-file must resolve to absolute paths", nil)
-	}
-	zoneADir := filepath.Dir(privKeyPath)
-	zoneBDir := filepath.Dir(statePath)
-
-	root := commonAncestor(zoneADir, zoneBDir)
-	if root == string(filepath.Separator) {
-		return confinement.Policy{}, domain.NewError(domain.ReasonInvalidArguments,
-			"confine: zone A ("+zoneADir+") and zone B ("+zoneBDir+") share no folder except the filesystem root; refusing to protect the whole filesystem", nil)
-	}
-
-	pol := confinement.WorkerPolicy(root, workspaceDir, zoneBDir, auditPath)
-	for _, extra := range []string{filepath.Dir(pubJWKSPath), filepath.Dir(replayPath)} {
-		if extra == "" || extra == "." {
-			continue
-		}
-		pol.WritePaths = appendUnique(pol.WritePaths, extra)
-	}
-
-	ports, err := parseConnectPorts(netAllow)
-	if err != nil {
-		return confinement.Policy{}, err
-	}
-	pol.AllowConnectPorts = ports
-
-	if err := pol.Validate(); err != nil {
-		return confinement.Policy{}, err
-	}
-	return pol, nil
-}
-
-// appendUnique 는 값이 목록에 없을 때만 덧붙인다.
-func appendUnique(list []string, v string) []string {
-	for _, e := range list {
-		if e == v {
-			return list
-		}
-	}
-	return append(list, v)
+	return confinement.BuildWorkerPolicy(privKeyPath, statePath, pubJWKSPath, replayPath, workspaceDir, auditPath, netAllow)
 }

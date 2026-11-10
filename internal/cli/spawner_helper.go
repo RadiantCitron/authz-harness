@@ -113,7 +113,7 @@ func buildWorkerSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestrato
 			fmt.Fprintf(errOut, "Error: failed to resolve priv key path: %v\n", err)
 			return nil, nil, err
 		}
-		pol, err := buildConfinementPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
+		pol, err := confinement.BuildWorkerPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
 		if err != nil {
 			stack.Close()
 			fmt.Fprintf(errOut, "Error: cannot build confinement policy: %v\n", err)
@@ -212,7 +212,7 @@ func buildMultiHopSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestra
 			fmt.Fprintf(errOut, "Error: failed to resolve priv key path: %v\n", err)
 			return nil, nil, err
 		}
-		pol, err := buildConfinementPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
+		pol, err := confinement.BuildWorkerPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
 		if err != nil {
 			stack.Close()
 			fmt.Fprintf(errOut, "Error: cannot build confinement policy: %v\n", err)
