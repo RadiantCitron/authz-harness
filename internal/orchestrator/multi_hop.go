@@ -22,6 +22,7 @@ import (
 	"authz-harness/internal/audit"
 	"authz-harness/internal/authn/exchange"
 	"authz-harness/internal/authz/pep"
+	"authz-harness/internal/confinement"
 	"authz-harness/internal/domain"
 	"authz-harness/internal/subagent"
 )
@@ -37,6 +38,12 @@ type MultiHopConfig struct {
 	Audit        audit.Writer // 부모 감사 로거
 	Limits       Limits       // 서브프로세스 자원·수명 한계
 	Gateway      pep.Gateway  // inproc 모드(BinaryPath 비어 있음)에서 워커 단계를 집행할 PEP 게이트웨이
+
+	// Confiner·Confinement 는 마지막 워커(유일한 서브프로세스)를 OS 격리 아래에서 기동하기 위한 설정이며,
+	// SpawnConfig 의 같은 이름 필드로 그대로 전달된다. 영값(nil, Require=false)은 격리 꺼짐이다 (로드맵 11 L-6).
+	// 정책 계산은 호출자의 몫이다 (계획 048 D-03). 중간 관리자는 프로세스가 아니라 토큰 교환이므로 격리 대상이 아니다.
+	Confiner    confinement.Confiner
+	Confinement confinement.Policy
 }
 
 // MultiHopDelegationRequest 는 루트 오케스트레이터에서 시작되는 다단계 위임 요청 파라미터다.
@@ -127,6 +134,9 @@ func (s *MultiHopSpawner) ExecuteMultiHop(ctx context.Context, req MultiHopDeleg
 			Args:       WorkerArgs(s.cfg.WorkspaceDir, s.cfg.StatePath, s.cfg.PubJWKSPath, s.cfg.ReplayPath, s.cfg.AuditPath, "", false),
 			Audit:      s.cfg.Audit,
 			Limits:     s.cfg.Limits,
+
+			Confiner:    s.cfg.Confiner,
+			Confinement: s.cfg.Confinement,
 		})
 		if err != nil {
 			return domain.ExitInternalError, fmt.Errorf("failed to create worker spawner: %w", err)
