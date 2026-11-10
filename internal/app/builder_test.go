@@ -1,12 +1,15 @@
 package app_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"authz-harness/internal/app"
+	"authz-harness/internal/authn/token"
 	"authz-harness/internal/domain"
 )
 
@@ -209,47 +212,126 @@ func TestBuildStack_PartialPaths_NoStrayFiles(t *testing.T) {
 	}
 }
 
-// TC-030-04: 활성 키가 폐기된 뒤에도 토큰 발급 스택은 자동 회전하고, keys 부분 경로 스택은 회전하지 않는다.
-func TestBuildStack_RotationOnlyForIssuingStack(t *testing.T) {
+// TC-030-04 (계획 052 M1~M3, ADR 0011 D-3): 활성 키를 폐기한 뒤에는 발급 스택도 새 키를 자동으로 만들지 않는다.
+// 발급은 거부되고, 관리자가 명시적으로 회전해야 재개된다.
+func TestBuildStack_NoAutoRotationAfterActiveKeyRevoked(t *testing.T) {
 	tmpDir := t.TempDir()
-	base := app.AppConfig{
-		PrivKeyPath: filepath.Join(tmpDir, "priv.json"),
-		PubJWKSPath: filepath.Join(tmpDir, "pub.json"),
-		AuditPath:   filepath.Join(tmpDir, "audit.jsonl"),
+	cfg := app.AppConfig{
+		PrivKeyPath:    filepath.Join(tmpDir, "priv.json"),
+		PubJWKSPath:    filepath.Join(tmpDir, "pub.json"),
+		ReplayPath:     filepath.Join(tmpDir, "replay.json"),
+		AuditPath:      filepath.Join(tmpDir, "audit.jsonl"),
+		WithoutGateway: true,
 	}
 
-	keysStack, err := app.BuildStack(base) // keys CLI 형태 (ReplayPath 없음)
+	first, err := app.BuildStack(cfg)
 	if err != nil {
-		t.Fatalf("keys stack: %v", err)
+		t.Fatalf("first stack: %v", err)
 	}
-	active, err := keysStack.KeyManager.GetActiveSigningKey()
+	active, err := first.KeyManager.GetActiveSigningKey()
 	if err != nil || active == nil {
 		t.Fatalf("bootstrap active key missing: %v", err)
 	}
-	if err := keysStack.KeyManager.RevokeKey(active.KID, domain.AuditContext{TraceID: "t", Actor: "test", Reason: "test"}); err != nil {
+	revokedKID := active.KID
+	if err := first.KeyManager.RevokeKey(revokedKID, domain.AuditContext{TraceID: "t", Actor: "test", Reason: "test"}); err != nil {
 		t.Fatalf("RevokeKey: %v", err)
 	}
-	keysStack.Close()
+	first.Close()
 
-	again, err := app.BuildStack(base)
+	// M1: 다시 조립해도 활성 키가 생기지 않고, key.rotated 기록도 없다.
+	stack, err := app.BuildStack(cfg)
 	if err != nil {
-		t.Fatalf("keys stack again: %v", err)
-	}
-	if k, _ := again.KeyManager.GetActiveSigningKey(); k != nil {
-		t.Error("keys-only stack must not auto-rotate a new active key")
-	}
-	again.Close()
-
-	issuing := base
-	issuing.ReplayPath = filepath.Join(tmpDir, "replay.json")
-	stack, err := app.BuildStack(issuing)
-	if err != nil {
-		t.Fatalf("issuing stack: %v", err)
+		t.Fatalf("M1: issuing stack must still assemble: %v", err)
 	}
 	defer stack.Close()
-	if k, err := stack.KeyManager.GetActiveSigningKey(); err != nil || k == nil {
-		t.Errorf("issuing stack must rotate to a new active key: %v", err)
+	if k, _ := stack.KeyManager.GetActiveSigningKey(); k != nil {
+		t.Fatalf("M1: issuing stack must not auto-create an active key, got %s", k.KID)
 	}
+	if n := countAuditAction(t, cfg.AuditPath, "key.rotated"); n != 0 {
+		t.Fatalf("M1: key.rotated count = %d, want 0", n)
+	}
+
+	// M2: 발급은 거부되고(16) 토큰은 나오지 않으며 token.issue.deny 가 남는다.
+	req := token.IssueRequest{
+		ClientID: "client-orchestrator", ClientSecret: "orchestrator-secret-key-01",
+		Subject: "worker-01", Scope: "file:read:a.txt", TTL: time.Minute, Epoch: 1,
+	}
+	res, err := stack.TokenIssuer.IssueToken(req, token.IssueOptions{}, domain.AuditContext{TraceID: "m2", Actor: "test"})
+	if err == nil {
+		t.Fatal("M2: issue must fail without an active key")
+	}
+	if res != nil && res.TokenString != "" {
+		t.Fatal("M2: no token string may be returned")
+	}
+	if code := domain.ExitCodeFromError(err, domain.ExitTokenInvalid); code != domain.ExitInternalError {
+		t.Errorf("M2: exit code = %d, want %d", code, domain.ExitInternalError)
+	}
+	if n := countAuditAction(t, cfg.AuditPath, "token.issue.deny"); n != 1 {
+		t.Errorf("M2: token.issue.deny count = %d, want 1", n)
+	}
+
+	// M3: 명시적 회전 후에는 새 키로 발급된다.
+	if _, err := stack.KeyManager.RotateKey(domain.AuditContext{TraceID: "m3", Actor: "test", Reason: "resume"}); err != nil {
+		t.Fatalf("M3: RotateKey: %v", err)
+	}
+	res, err = stack.TokenIssuer.IssueToken(req, token.IssueOptions{}, domain.AuditContext{TraceID: "m3", Actor: "test"})
+	if err != nil {
+		t.Fatalf("M3: issue after rotate: %v", err)
+	}
+	if res.KeyID == "" || res.KeyID == revokedKID {
+		t.Errorf("M3: kid = %q, want a new kid different from %q", res.KeyID, revokedKID)
+	}
+}
+
+// 계획 052 M4: 키가 하나도 없는 첫 설치에서는 최초 키 생성이 그대로 되고 발급이 성공한다 (회귀 방지).
+func TestBuildStack_BootstrapKeyStillCreatedOnFirstRun(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := app.AppConfig{
+		PrivKeyPath:    filepath.Join(tmpDir, "priv.json"),
+		PubJWKSPath:    filepath.Join(tmpDir, "pub.json"),
+		ReplayPath:     filepath.Join(tmpDir, "replay.json"),
+		AuditPath:      filepath.Join(tmpDir, "audit.jsonl"),
+		WithoutGateway: true,
+	}
+	stack, err := app.BuildStack(cfg)
+	if err != nil {
+		t.Fatalf("stack: %v", err)
+	}
+	defer stack.Close()
+	if n := countAuditAction(t, cfg.AuditPath, "key.created"); n != 1 {
+		t.Errorf("key.created count = %d, want 1", n)
+	}
+	if _, err := stack.TokenIssuer.IssueToken(token.IssueRequest{
+		ClientID: "client-orchestrator", ClientSecret: "orchestrator-secret-key-01",
+		Subject: "worker-01", Scope: "file:read:a.txt", TTL: time.Minute, Epoch: 1,
+	}, token.IssueOptions{}, domain.AuditContext{TraceID: "m4", Actor: "test"}); err != nil {
+		t.Fatalf("issue on first run: %v", err)
+	}
+}
+
+// countAuditAction 은 감사 파일에서 action 이 일치하는 줄 수를 센다.
+func countAuditAction(t *testing.T, path, action string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit: %v", err)
+	}
+	n := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var ev struct {
+			Action string `json:"action"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse audit line: %v", err)
+		}
+		if ev.Action == action {
+			n++
+		}
+	}
+	return n
 }
 
 // TC-030-05: PDP·검증기가 있는데 워크스페이스가 없으면 조용히 건너뛰지 않고 거부한다(Fail-Closed).

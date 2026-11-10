@@ -234,21 +234,9 @@ func BuildStack(cfg AppConfig) (*AppStack, error) {
 		keyMgr = km
 	}
 
-	// 서명 키 초기 확인 및 자동 회전:
-	// 토큰 발급 스택(Zone A)에서 유효한 활성 서명키가 없으면 초기 Ed25519 서명키를 자동으로 생성/회전한다.
-	if !cfg.VerifyOnly && keyMgr != nil && cfg.ReplayPath != "" {
-		activeKey, err := keyMgr.GetActiveSigningKey()
-		if err != nil || activeKey == nil {
-			if _, err := keyMgr.RotateKey(domain.AuditContext{
-				TraceID: "builder-init-rotation",
-				Actor:   "system",
-				Reason:  "initial active key setup via app builder",
-			}); err != nil {
-				_ = auditWriter.Close()
-				return nil, fmt.Errorf("app builder: initial key rotation: %w", err)
-			}
-		}
-	}
+	// 활성 키가 없을 때 자동으로 새 키를 만들지 않는다 (ADR 0011 D-3).
+	// 키가 하나도 없는 첫 설치의 최초 생성은 keys.NewManager 가 맡는다.
+	// 사용 중인 키를 폐기한 뒤에는 발급이 거부되고, 재개는 관리자의 명시적 `keys rotate` 로만 한다.
 
 	// 4. 인가 상태 저장소 및 PAP / PIP / PDP 조립:
 	// ExchangeService 의 PIP 스냅샷 공급자 배선을 위해 토큰 교환기보다 먼저 조립된다.
