@@ -131,3 +131,103 @@ func buildWorkerSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestrato
 
 	return spawner, stack, nil
 }
+
+// buildMultiHopSpawner 는 Zone A 개인키를 포함한 합성 루트 스택 초기화, 바이너리 위치 확인,
+// 파일 경로 절대경로 정규화, 격리 정책 조립 및 MultiHopSpawner 생성을 일원화하여 수행한다.
+func buildMultiHopSpawner(cfg workerSpawnerConfig, errOut io.Writer) (*orchestrator.MultiHopSpawner, *app.AppStack, error) {
+	// 1. Zone A 개인키를 포함한 전체 스택 초기화 (토큰 교환기 ExchangeService 및 부모 PEP 확보)
+	stack, err := app.BuildStack(app.AppConfig{
+		StatePath:    cfg.StatePath,
+		PrivKeyPath:  cfg.PrivKeyPath,
+		PubJWKSPath:  cfg.PubJWKSPath,
+		ReplayPath:   cfg.ReplayPath,
+		AuditPath:    cfg.AuditPath,
+		WorkspaceDir: cfg.WorkspacePath,
+	})
+	if err != nil {
+		fmt.Fprintf(errOut, "Error: failed to init app stack for multi-hop: %v\n", err)
+		return nil, nil, err
+	}
+
+	// 2. 바이너리 결정
+	binPath := cfg.WorkerBin
+	if binPath == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			stack.Close()
+			fmt.Fprintf(errOut, "Error: failed to get executable path: %v\n", err)
+			return nil, nil, err
+		}
+		binPath = exe
+	}
+
+	// 3. 상대 경로 정규화
+	absState, err := filepath.Abs(cfg.StatePath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve state path: %v\n", err)
+		return nil, nil, err
+	}
+	absPubJWKS, err := filepath.Abs(cfg.PubJWKSPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve pub jwks path: %v\n", err)
+		return nil, nil, err
+	}
+	absReplay, err := filepath.Abs(cfg.ReplayPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve replay path: %v\n", err)
+		return nil, nil, err
+	}
+	absAudit, err := filepath.Abs(cfg.AuditPath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve audit path: %v\n", err)
+		return nil, nil, err
+	}
+	absWorkspace, err := filepath.Abs(cfg.WorkspacePath)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to resolve workspace path: %v\n", err)
+		return nil, nil, err
+	}
+
+	hopCfg := orchestrator.MultiHopConfig{
+		BinaryPath:   binPath,
+		WorkspaceDir: absWorkspace,
+		StatePath:    absState,
+		PubJWKSPath:  absPubJWKS,
+		ReplayPath:   absReplay,
+		AuditPath:    absAudit,
+		Audit:        stack.AuditWriter,
+		Gateway:      stack.PEP,
+		Limits:       orchestrator.Limits{Timeout: cfg.Timeout},
+	}
+
+	if cfg.Confine {
+		absPriv, err := filepath.Abs(cfg.PrivKeyPath)
+		if err != nil {
+			stack.Close()
+			fmt.Fprintf(errOut, "Error: failed to resolve priv key path: %v\n", err)
+			return nil, nil, err
+		}
+		pol, err := buildConfinementPolicy(absPriv, absState, absPubJWKS, absReplay, absWorkspace, absAudit, cfg.NetAllow)
+		if err != nil {
+			stack.Close()
+			fmt.Fprintf(errOut, "Error: cannot build confinement policy: %v\n", err)
+			return nil, nil, err
+		}
+		hopCfg.Confiner = confinement.WithLauncher(confinement.Platform(), binPath)
+		hopCfg.Confinement = pol
+	}
+
+	spawner, err := orchestrator.NewMultiHopSpawner(hopCfg)
+	if err != nil {
+		stack.Close()
+		fmt.Fprintf(errOut, "Error: failed to create multi-hop spawner: %v\n", err)
+		return nil, nil, err
+	}
+
+	return spawner, stack, nil
+}
