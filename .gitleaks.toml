@@ -21,3 +21,9 @@ keywords = ["Bearer"]
 description = "테스트 코드 내 목업 토큰/키 허용"
 targetRules = ["generic-api-key", "bearer-raw-token"]
 paths = ['''.*_test\.go$''', '''^tests/.*''']
+
+# 문서·대화록에 인용된 가짜 예시값 허용 목록 (확인된 오탐만 값 단위로 추가한다. 경로 전체 허용 금지)
+[[allowlists]]
+description = "문서·대화록의 가짜 예시 jti 값 (실제 비밀값 아님)"
+targetRules = ["generic-api-key"]
+regexes = ['''^a3f8c1d29b7e4f10$''']
