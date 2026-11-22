@@ -1,10 +1,10 @@
 # authz-harness: Enterprise Authorization & Downscoping Test Harness
 
 [![Go Version](https://img.shields.io/badge/Go-1.27%2B-00ADD8?style=flat&logo=go)](go.mod)
-[![Architecture](https://img.shields.io/badge/Architecture-3--Zone%20Isolation-blueviolet)]()
-[![OAuth 2.1](https://img.shields.io/badge/OAuth-2.1%20%2F%20RFC%208693-blue)]()
-[![Quad-Assertion](https://img.shields.io/badge/E2E%20Coverage-80%2F80%20PASS%20(100%25)-brightgreen)]()
-[![Zero Leakage](https://img.shields.io/badge/Security-Zero%20Leakage-success)]()
+[![Architecture](https://img.shields.io/badge/Architecture-3--Zone%20Isolation-blueviolet)](docs/로드맵/MASTER_ROADMAP.md)
+[![OAuth 2.1](https://img.shields.io/badge/OAuth-2.1%20%2F%20RFC%208693-blue)](https://datatracker.ietf.org/doc/html/rfc8693)
+![Quad-Assertion](https://img.shields.io/badge/E2E%20Coverage-80%2F80%20PASS%20(100%25)-brightgreen)
+![Zero Leakage](https://img.shields.io/badge/Security-Zero%20Leakage-success)
 
 > **"비인가된 요청이 정확히 의도된 사유와 종료 코드로 실패함을 증명하는 Go 기반 권한 검증 및 테스트 하네스"**  
 > OAuth 2.1 기반 워크로드 인증(AuthN) · RFC 8693 최소 권한 축소 위임(Downscoping) · NIST SP 800-162 4대 인가 분리(PAP/PIP/PDP/PEP) · 3-Zone 상태 격리 · OS 서브프로세스 IPC · OS 커널 격리 · MCP/Tool-Call 보안 게이트웨이 어댑터 · 관측성 삼분(Audit/Ops/UI) 및 80개 공격·인가 방어 시나리오 하네스를 외부 의존성 없는 로컬 완결형으로 구현하고 증명합니다.
@@ -37,6 +37,10 @@ go run ./cmd/authz-harness audit tree --trace-id <trace-id>
 # 6. 전 패키지 동시성(-race) 및 단위 무결성 테스트
 go test -race ./...
 ```
+
+> **실행 환경 안내**
+> - **필요 환경**: Go 1.27 이상(`go.mod` 기준 1.27.2)이 필요합니다. 외부 서비스는 필요 없습니다.
+> - **제한된 환경**: 샌드박스·컨테이너처럼 로컬 소켓 연결(루프백)이나 중첩 `sandbox-exec`가 막힌 환경에서는 일부 시나리오(G10 OS 격리, G15 네트워크 가드)가 실패하거나 건너뛰어질 수 있습니다. 이는 환경 제약 때문이며, 제약이 없는 일반 환경(macOS 개발 호스트)에서 80개 전체 통과를 확인했습니다.
 
 ---
 
